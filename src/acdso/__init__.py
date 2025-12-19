@@ -101,6 +101,25 @@ from acdso.pareto import (
     knee_point_selection,
 )
 
+# Safe Feature Importance
+from acdso.feature_importance import (
+    SafeFeatureImportance,
+    FeatureImportanceResult,
+    SafeImportanceReport,
+    compute_safe_importance,
+)
+
+# AutoEDA-Informed Preprocessing
+from acdso.auto_preprocessing import (
+    AutoPreprocessor,
+    PreprocessingPlan,
+    PreprocessingAction,
+    TargetEncoder,
+    SkewnessTransformer,
+    OutlierClipper,
+    create_eda_preprocessor,
+)
+
 # LLM advisors
 from acdso.advisors import (
     # Main advisor class
@@ -170,6 +189,19 @@ __all__ = [
     "CandidateResult",
     "pareto_front",
     "knee_point_selection",
+    # Safe Feature Importance
+    "SafeFeatureImportance",
+    "FeatureImportanceResult",
+    "SafeImportanceReport",
+    "compute_safe_importance",
+    # AutoEDA-Informed Preprocessing
+    "AutoPreprocessor",
+    "PreprocessingPlan",
+    "PreprocessingAction",
+    "TargetEncoder",
+    "SkewnessTransformer",
+    "OutlierClipper",
+    "create_eda_preprocessor",
     # Advisors
     "LLMAdvisor",
     "LLMConfig",

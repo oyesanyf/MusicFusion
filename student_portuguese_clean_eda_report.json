@@ -2,7 +2,7 @@
   "dataset_name": "student_portuguese_clean.csv",
   "n_rows": 649,
   "n_cols": 52,
-  "analysis_timestamp": "2025-12-19T07:07:17.384493",
+  "analysis_timestamp": "2025-12-19T09:54:17.712428",
   "column_profiles": [
     {
       "name": "student_id",
@@ -1767,20 +1767,20 @@
     "Consider removing or combining highly correlated features (3 pairs with |r| >= 0.7)",
     "Investigate 24 detected anomalies before modeling"
   ],
-  "total_analysis_time_s": 0.177,
+  "total_analysis_time_s": 0.211,
   "pareto_front": [
     {
       "name": "column_profiling",
       "analysis_type": "profiling",
       "quality_score": 0.95,
-      "compute_time_s": 0.1241459846496582,
+      "compute_time_s": 0.14806509017944336,
       "coverage": 1.0,
       "insight_count": 52,
       "objectives": [
         0.95,
         1.0,
         52,
-        -0.1241459846496582
+        -0.14806509017944336
       ],
       "results": {
         "n_profiles": 52
@@ -1791,14 +1791,14 @@
       "name": "anomaly_detection",
       "analysis_type": "anomaly",
       "quality_score": 0.8,
-      "compute_time_s": 0.011869192123413086,
+      "compute_time_s": 0.010580301284790039,
       "coverage": 1.0,
       "insight_count": 24,
       "objectives": [
         0.8,
         1.0,
         24,
-        -0.011869192123413086
+        -0.010580301284790039
       ],
       "results": {
         "n_anomalies": 24
@@ -1809,14 +1809,14 @@
       "name": "statistical_summary",
       "analysis_type": "statistics",
       "quality_score": 0.9,
-      "compute_time_s": 9.512901306152344e-05,
+      "compute_time_s": 7.796287536621094e-05,
       "coverage": 1.0,
       "insight_count": 13,
       "objectives": [
         0.9,
         1.0,
         10,
-        -9.512901306152344e-05
+        -7.796287536621094e-05
       ],
       "results": {
         "numeric_features": {
