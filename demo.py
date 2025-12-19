@@ -3034,7 +3034,8 @@ def load_user_file(filepath: str) -> pd.DataFrame:
         return pd.read_csv(filepath)
 
 
-def demo_user_file(filepath: str, target: str = None, task: str = "auto"):
+def demo_user_file(filepath: str, target: str = None, task: str = "auto", 
+                   auto_exclude: bool = True, manual_exclude: list = None):
     """
     Run ACDSO demo on a user-provided file.
     
@@ -3046,6 +3047,10 @@ def demo_user_file(filepath: str, target: str = None, task: str = "auto"):
         Name of target column. If None, will prompt or use last column.
     task : str
         'classification', 'regression', or 'auto' (infer from target).
+    auto_exclude : bool
+        If True, use LLM/rules to auto-exclude problematic columns.
+    manual_exclude : list, optional
+        List of column names to manually exclude.
     """
     print_header(f"ACDSO Demo: User File", 80)
     
@@ -3075,10 +3080,64 @@ def demo_user_file(filepath: str, target: str = None, task: str = "auto"):
         print(f"  Available columns: {list(df.columns)}")
         return None
     
+    # Auto-exclude problematic columns using LLM/rules
+    columns_to_exclude = []
+    
+    # Handle manual exclusions first
+    if manual_exclude:
+        print_subheader("Manual Column Exclusion")
+        valid_manual = [c.strip() for c in manual_exclude if c.strip() in df.columns]
+        invalid_manual = [c.strip() for c in manual_exclude if c.strip() not in df.columns]
+        
+        if valid_manual:
+            columns_to_exclude.extend(valid_manual)
+            print(f"  ✓ Manually excluding: {valid_manual}")
+        if invalid_manual:
+            print(f"  ⚠ Columns not found (skipped): {invalid_manual}")
+    
+    # Then run auto-exclusion
+    if auto_exclude:
+        print_subheader("Smart Column Analysis (LLM/Rule-Based)")
+        try:
+            from acdso.advisors import auto_exclude_columns
+            
+            # Try to get LLM provider from environment
+            llm_provider = None
+            try:
+                if os.environ.get("OPENAI_API_KEY"):
+                    from acdso import OpenAIProvider
+                    llm_provider = OpenAIProvider()
+                    print("  🤖 Using LLM for intelligent column analysis...")
+            except Exception:
+                pass
+            
+            if llm_provider is None:
+                print("  📋 Using rule-based column analysis")
+                print("      (Set OPENAI_API_KEY environment variable for smarter LLM-powered analysis)")
+            
+            result = auto_exclude_columns(df, target_column=target, provider=llm_provider, verbose=True)
+            
+            # Add auto-detected columns (avoid duplicates)
+            new_excludes = [c for c in result.columns_to_exclude if c not in columns_to_exclude]
+            columns_to_exclude.extend(new_excludes)
+            
+            if new_excludes:
+                print(f"\n  ✓ Auto-detected {len(new_excludes)} additional problematic columns")
+            else:
+                print(f"\n  ✓ No additional problematic columns detected")
+        except Exception as e:
+            print(f"  ⚠ Auto-exclusion failed: {e} (continuing without auto-exclusion)")
+    
     # Prepare data
     print_subheader("Data Preparation")
-    X = df.drop(columns=[target])
+    
+    # Drop auto-excluded columns and target
+    cols_to_drop = [target] + [c for c in columns_to_exclude if c in df.columns and c != target]
+    X = df.drop(columns=cols_to_drop)
     y = df[target]
+    
+    if columns_to_exclude:
+        print(f"  • Excluded columns: {columns_to_exclude}")
     
     # Infer task type
     if task == "auto":
@@ -3098,11 +3157,18 @@ def demo_user_file(filepath: str, target: str = None, task: str = "auto"):
         X = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
     
     # Handle target encoding for classification
-    if task == "classification" and y.dtype == 'object':
-        from sklearn.preprocessing import LabelEncoder
-        le = LabelEncoder()
-        y = pd.Series(le.fit_transform(y), name=target)
-        print(f"  • Encoded target classes: {dict(zip(le.classes_, range(len(le.classes_))))}")
+    if task == "classification":
+        unique_vals = y.unique()
+        if y.dtype == 'object' or y.dtype.name == 'category':
+            # String labels - encode them
+            from sklearn.preprocessing import LabelEncoder
+            le = LabelEncoder()
+            y = pd.Series(le.fit_transform(y), name=target)
+            print(f"  • Encoded target classes: {dict(zip(le.classes_, range(len(le.classes_))))}")
+        elif len(unique_vals) > 2 or (len(unique_vals) == 2 and set(unique_vals) != {0, 1}):
+            # Numeric labels but non-standard (not 0/1 for binary, or multiclass)
+            print(f"  • Target labels: {sorted(unique_vals)} ({len(unique_vals)} classes)")
+            print(f"    ℹ ACDSO will auto-adjust scoring metric for non-standard labels")
     
     print(f"  • Final features: {X.shape[1]}")
     print(f"  • Target: {target}")
@@ -3253,16 +3319,26 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="ACDSO Demo Suite - Risk-Aware AutoML",
+        description="ACDSO Demo Suite - Risk-Aware AutoML with LLM-Powered Analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python demo.py                           # Run all demos with tips dataset
-  python demo.py --file data.csv           # Run demo on your CSV file
-  python demo.py --file data.csv --target price --task regression
-  python demo.py --file customers.xlsx --target churn
-  python demo.py --benchmark               # Run benchmark against FLAML/TPOT
-  python demo.py --benchmark --time-budget 120 --datasets iris,wine
+  python demo.py                                        # Run all demos
+  python demo.py --file data.csv                        # Run on your CSV file
+  python demo.py --file data.csv --target price         # Specify target column
+  python demo.py --file brain.csv --target Sec          # Auto-excludes time columns
+  python demo.py --file data.csv --exclude Hour,Day     # Manual exclusion
+  python demo.py --file data.csv --no-auto-exclude      # Skip auto-exclusion
+  python demo.py --benchmark                            # Benchmark vs FLAML/TPOT
+  
+Auto-Exclusion (enabled by default):
+  ACDSO automatically detects and excludes problematic columns:
+  - Data leakage (columns derived from target)
+  - ID columns (unique identifiers with no predictive value)
+  - Constant columns (same value for all rows)
+  
+  Set OPENAI_API_KEY for smarter LLM-powered analysis.
+  Use --no-auto-exclude to disable.
   
 Supported file formats:
   CSV (.csv), Excel (.xlsx, .xls), Parquet (.parquet), 
@@ -3282,6 +3358,19 @@ Supported file formats:
         type=str,
         default=None,
         help="Name of target column (default: last column)"
+    )
+    
+    parser.add_argument(
+        "--exclude", "-e",
+        type=str,
+        default=None,
+        help="Comma-separated columns to manually exclude (e.g., 'Hour,Minute,Day')"
+    )
+    
+    parser.add_argument(
+        "--no-auto-exclude",
+        action="store_true",
+        help="Disable LLM/rule-based automatic column exclusion"
     )
     
     parser.add_argument(
@@ -3336,7 +3425,13 @@ Supported file formats:
         )
     elif args.file:
         # Run demo on user file
-        demo_user_file(args.file, target=args.target, task=args.task)
+        demo_user_file(
+            args.file, 
+            target=args.target, 
+            task=args.task,
+            auto_exclude=not args.no_auto_exclude,
+            manual_exclude=args.exclude.split(",") if args.exclude else None
+        )
     else:
         # Run all built-in demos
         run_all_demos()

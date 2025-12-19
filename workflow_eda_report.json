@@ -2,7 +2,7 @@
   "dataset_name": "tips_data",
   "n_rows": 244,
   "n_cols": 6,
-  "analysis_timestamp": "2025-12-19T06:47:37.298308",
+  "analysis_timestamp": "2025-12-19T15:48:12.777485",
   "column_profiles": [
     {
       "name": "total_bill",
@@ -229,20 +229,20 @@
   },
   "insights": [],
   "recommendations": [],
-  "total_analysis_time_s": 0.01,
+  "total_analysis_time_s": 0.016,
   "pareto_front": [
     {
       "name": "column_profiling",
       "analysis_type": "profiling",
       "quality_score": 0.95,
-      "compute_time_s": 0.0075991153717041016,
+      "compute_time_s": 0.015738248825073242,
       "coverage": 1.0,
       "insight_count": 2,
       "objectives": [
         0.95,
         1.0,
         2,
-        -0.0075991153717041016
+        -0.015738248825073242
       ],
       "results": {
         "n_profiles": 6
@@ -253,14 +253,14 @@
       "name": "statistical_summary",
       "analysis_type": "statistics",
       "quality_score": 0.9,
-      "compute_time_s": 3.1948089599609375e-05,
+      "compute_time_s": 0.0,
       "coverage": 1.0,
       "insight_count": 13,
       "objectives": [
         0.9,
         1.0,
         10,
-        -3.1948089599609375e-05
+        -0.0
       ],
       "results": {
         "numeric_features": {

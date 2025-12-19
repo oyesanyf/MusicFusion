@@ -2,7 +2,7 @@
   "dataset_name": "iris_dataset",
   "n_rows": 244,
   "n_cols": 7,
-  "analysis_timestamp": "2025-12-19T06:46:45.369241",
+  "analysis_timestamp": "2025-12-19T15:47:18.906206",
   "column_profiles": [
     {
       "name": "total_bill",
@@ -285,20 +285,20 @@
   "recommendations": [
     "Investigate 2 detected anomalies before modeling"
   ],
-  "total_analysis_time_s": 0.02,
+  "total_analysis_time_s": 0.015,
   "pareto_front": [
     {
       "name": "column_profiling",
       "analysis_type": "profiling",
       "quality_score": 0.95,
-      "compute_time_s": 0.010885953903198242,
+      "compute_time_s": 0.01481175422668457,
       "coverage": 1.0,
       "insight_count": 3,
       "objectives": [
         0.95,
         1.0,
         3,
-        -0.010885953903198242
+        -0.01481175422668457
       ],
       "results": {
         "n_profiles": 7
@@ -309,14 +309,14 @@
       "name": "statistical_summary",
       "analysis_type": "statistics",
       "quality_score": 0.9,
-      "compute_time_s": 0.00011086463928222656,
+      "compute_time_s": 0.0,
       "coverage": 1.0,
       "insight_count": 13,
       "objectives": [
         0.9,
         1.0,
         10,
-        -0.00011086463928222656
+        -0.0
       ],
       "results": {
         "numeric_features": {

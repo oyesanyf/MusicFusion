@@ -138,6 +138,14 @@ from acdso.advisors import (
     llm_advisor_stub,
     BaseLLMAdvisor,
     StubLLMAdvisor,
+    # LLM-powered label analysis
+    LLMLabelAnalyzer,
+    LabelAnalysisResult,
+    analyze_labels_with_llm,
+    # LLM-powered column analysis & auto-exclusion
+    LLMColumnAnalyzer,
+    ColumnAnalysisResult,
+    auto_exclude_columns,
 )
 
 # Integrations (lazy import to avoid requiring all dependencies)

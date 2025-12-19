@@ -12,6 +12,7 @@ Advanced risk diagnostics for production-relevant analysis including:
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, asdict, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -176,8 +177,11 @@ def _temporal_leakage_gap(
     pipe = Pipeline([("pre", pre), ("model", model)])
 
     try:
-        s_shuf = float(np.mean(cross_val_score(pipe, df_sorted, y_sorted, scoring=scorer, cv=splitter_shuf)))
-        s_chr = float(np.mean(cross_val_score(pipe, df_sorted, y_sorted, scoring=scorer, cv=splitter_chr)))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            s_shuf = float(np.mean(cross_val_score(pipe, df_sorted, y_sorted, scoring=scorer, cv=splitter_shuf)))
+            s_chr = float(np.mean(cross_val_score(pipe, df_sorted, y_sorted, scoring=scorer, cv=splitter_chr)))
         return float(s_shuf - s_chr)
     except Exception:
         return None
@@ -258,7 +262,10 @@ def _univariate_predictive_power(
         pipe = Pipeline([("pre", pre), ("model", clone(base_model))])
 
         try:
-            s = float(np.mean(cross_val_score(pipe, x, y_s, scoring=scorer, cv=splitter)))
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                s = float(np.mean(cross_val_score(pipe, x, y_s, scoring=scorer, cv=splitter)))
             scores.append(s)
             feature_names.append(str(c))
         except Exception:
@@ -326,6 +333,44 @@ def _vif_numeric(
     return vif_max, high
 
 
+def _auto_adjust_scorer_for_risk(scorer: str, y: Any, task: str) -> str:
+    """
+    Auto-adjust scorer for risk analysis to handle multiclass/non-standard labels.
+    
+    Parameters
+    ----------
+    scorer : str
+        Original scorer name.
+    y : array-like
+        Target values.
+    task : str
+        Task type.
+        
+    Returns
+    -------
+    str
+        Adjusted scorer name.
+    """
+    if task != "classification":
+        return scorer
+    
+    y_arr = np.asarray(y)
+    unique_labels = np.unique(y_arr)
+    n_classes = len(unique_labels)
+    
+    # Scorers that require pos_label=1 (binary-only)
+    binary_only_scorers = ["f1", "precision", "recall", "roc_auc"]
+    
+    if scorer in binary_only_scorers:
+        # Multiclass or non-standard binary labels
+        if n_classes > 2 or (n_classes == 2 and set(unique_labels) != {0, 1}):
+            if scorer == "roc_auc":
+                return "roc_auc_ovr_weighted"
+            return f"{scorer}_weighted"
+    
+    return scorer
+
+
 def analyze_risk(
     X: Any,
     y: Any,
@@ -362,6 +407,9 @@ def analyze_risk(
     RiskReport
         Comprehensive risk report.
     """
+    # Auto-adjust scorer for multiclass or non-standard binary labels
+    scorer = _auto_adjust_scorer_for_risk(scorer, y, task)
+    
     df = pd.DataFrame(X)
     n_rows, n_cols = int(df.shape[0]), int(df.shape[1])
     num_cols, cat_cols = split_columns(df)

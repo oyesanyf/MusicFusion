@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 import time
 import tracemalloc
+import warnings
 from dataclasses import asdict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -51,6 +52,86 @@ try:
     _HAS_LGBM = True
 except ImportError:
     _HAS_LGBM = False
+
+
+def _auto_adjust_scorer(
+    scorer: str,
+    y: Any,
+    task: str,
+    llm_provider: Any = None,
+    column_name: str = "target",
+) -> str:
+    """
+    Automatically adjust the scorer based on target labels.
+    
+    Uses LLM-powered analysis if a provider is available, otherwise
+    falls back to rule-based logic.
+    
+    Handles:
+    - Multiclass classification: convert f1 → f1_weighted
+    - Binary with non-standard labels (not 0/1): convert f1 → f1_weighted
+    - Regression: no changes needed
+    
+    Parameters
+    ----------
+    scorer : str
+        Original scorer name.
+    y : array-like
+        Target values.
+    task : str
+        Task type ("classification" or "regression").
+    llm_provider : Any, optional
+        LLM provider for intelligent label analysis.
+    column_name : str, default="target"
+        Name of the target column (for LLM context).
+        
+    Returns
+    -------
+    str
+        Adjusted scorer name.
+    """
+    if task != "classification":
+        return scorer
+    
+    # Try LLM-powered analysis if provider is available
+    if llm_provider is not None:
+        try:
+            from acdso.advisors import LLMLabelAnalyzer
+            analyzer = LLMLabelAnalyzer(provider=llm_provider)
+            result = analyzer.analyze(y, column_name=column_name)
+            
+            # If LLM recommends a different scorer, use it
+            if result.recommended_scorer and result.recommended_scorer != scorer:
+                return result.recommended_scorer
+        except Exception:
+            # Fall back to rule-based on any error
+            pass
+    
+    # Rule-based fallback
+    y_arr = np.asarray(y)
+    unique_labels = np.unique(y_arr)
+    n_classes = len(unique_labels)
+    
+    # Scorers that require pos_label=1 (binary-only)
+    binary_only_scorers = ["f1", "precision", "recall", "roc_auc"]
+    
+    # Check if scorer needs adjustment
+    if scorer in binary_only_scorers:
+        # Multiclass: always use weighted version
+        if n_classes > 2:
+            if scorer == "roc_auc":
+                return "roc_auc_ovr_weighted"
+            return f"{scorer}_weighted"
+        
+        # Binary but labels are not {0, 1}: use weighted version
+        if n_classes == 2:
+            labels_set = set(unique_labels)
+            if labels_set != {0, 1}:
+                if scorer == "roc_auc":
+                    return "roc_auc_ovr_weighted"
+                return f"{scorer}_weighted"
+    
+    return scorer
 
 
 class _ACDSOEngineV2:
@@ -84,7 +165,8 @@ class _ACDSOEngineV2:
         verbose: int,
     ):
         self.task = task
-        self.scorer = scorer
+        self.scorer = scorer  # Will be adjusted in fit() based on y
+        self._original_scorer = scorer  # Keep original for reference
         self.cv = cv
         self.random_state = 42 if random_state is None else int(random_state)
         self.time_budget_s = time_budget_s
@@ -253,7 +335,12 @@ class _ACDSOEngineV2:
             )
 
         scorer = get_scorer(self.scorer)
-        scores = cross_val_score(pipe, X, y, cv=splitter, scoring=scorer, n_jobs=None)
+        
+        # Suppress sklearn warnings during cross-validation (constant features, etc.)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            scores = cross_val_score(pipe, X, y, cv=splitter, scoring=scorer, n_jobs=None)
 
         current, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
@@ -271,9 +358,12 @@ class _ACDSOEngineV2:
             preference=self.preference,
         )
 
-        # Fit the pipeline for latency measurement
+        # Fit the pipeline for latency measurement (suppress warnings)
         fitted = clone(pipe)
-        fitted.fit(X, y)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            fitted.fit(X, y)
         latency = measure_latency_ms_per_row(fitted, X)
 
         # Build objective vector (log-scaled for time/memory/latency)
@@ -319,6 +409,12 @@ class _ACDSOEngineV2:
         6. Select knee-point solution
         7. Build audit trail
         """
+        # Step 0: Auto-adjust scorer for multiclass or non-standard binary labels
+        adjusted_scorer = _auto_adjust_scorer(self.scorer, y, self.task)
+        if adjusted_scorer != self.scorer:
+            self._log(f"Auto-adjusted scorer: {self.scorer} → {adjusted_scorer}")
+            self.scorer = adjusted_scorer
+        
         # Step 1: Risk analysis
         self.risk_report_ = analyze_risk(
             X, y,

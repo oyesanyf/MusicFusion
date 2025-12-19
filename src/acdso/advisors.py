@@ -1041,6 +1041,726 @@ def create_advisor(
 
 
 # =============================================================================
+# LLM-Powered Label Analysis
+# =============================================================================
+
+@dataclass
+class LabelAnalysisResult:
+    """
+    Result of LLM-based label analysis.
+    
+    Attributes
+    ----------
+    recommended_scorer : str
+        Recommended scorer for the task (e.g., 'f1_weighted', 'accuracy').
+    label_type : str
+        Type of labels ('binary', 'multiclass', 'ordinal', 'continuous').
+    should_encode : bool
+        Whether labels should be encoded to 0, 1, 2, ...
+    encoding_map : Optional[Dict]
+        Suggested encoding mapping if should_encode is True.
+    interpretation : str
+        Human-readable interpretation of the labels.
+    warnings : List[str]
+        Any warnings about the labels.
+    """
+    recommended_scorer: str
+    label_type: str
+    should_encode: bool
+    encoding_map: Optional[Dict[Any, int]] = None
+    interpretation: str = ""
+    warnings: List[str] = field(default_factory=list)
+
+
+class LLMLabelAnalyzer:
+    """
+    LLM-powered label analyzer for intelligent scorer selection.
+    
+    Uses an LLM to understand the meaning of labels and recommend
+    the appropriate scorer and preprocessing.
+    
+    Parameters
+    ----------
+    provider : Optional[BaseLLMProvider]
+        LLM provider to use. If None, falls back to rule-based analysis.
+    
+    Examples
+    --------
+    >>> from acdso.advisors import LLMLabelAnalyzer, OpenAIProvider
+    >>> analyzer = LLMLabelAnalyzer(provider=OpenAIProvider())
+    >>> result = analyzer.analyze(y, column_name="disease_status")
+    >>> print(result.recommended_scorer)  # e.g., 'f1_weighted'
+    """
+    
+    LABEL_ANALYSIS_PROMPT = """Analyze these target labels from a machine learning dataset.
+
+Column name: {column_name}
+Unique labels: {unique_labels}
+Label counts: {label_counts}
+Total samples: {total_samples}
+
+Respond in JSON format:
+{{
+    "label_type": "binary|multiclass|ordinal|continuous",
+    "interpretation": "Brief interpretation of what these labels represent",
+    "recommended_scorer": "One of: accuracy, f1_weighted, f1_macro, roc_auc_ovr_weighted, r2, neg_mean_squared_error",
+    "should_encode": true/false (whether to remap labels to 0,1,2...),
+    "encoding_suggestion": {{"original_label": new_int_label, ...}} or null,
+    "warnings": ["any concerns about these labels"]
+}}
+
+Consider:
+- If labels are like 0/1 or Yes/No → binary classification
+- If labels are integers but represent categories (e.g., 0, 59) → multiclass, needs encoding
+- If labels have many unique values and are numeric → regression
+- If labels seem ordinal (e.g., low/medium/high) → ordinal classification
+"""
+    
+    def __init__(self, provider: Optional["BaseLLMProvider"] = None):
+        self.provider = provider
+        self._cache: Dict[str, LabelAnalysisResult] = {}
+    
+    def analyze(
+        self,
+        y: Any,
+        column_name: str = "target",
+        use_cache: bool = True,
+    ) -> LabelAnalysisResult:
+        """
+        Analyze target labels and recommend scorer.
+        
+        Parameters
+        ----------
+        y : array-like
+            Target values.
+        column_name : str
+            Name of the target column (for context).
+        use_cache : bool
+            Whether to cache results.
+            
+        Returns
+        -------
+        LabelAnalysisResult
+            Analysis result with recommendations.
+        """
+        import numpy as np
+        import pandas as pd
+        
+        y_arr = np.asarray(y)
+        unique_labels = np.unique(y_arr)
+        n_unique = len(unique_labels)
+        
+        # Create cache key
+        cache_key = f"{column_name}:{n_unique}:{hash(tuple(unique_labels[:20]))}"
+        if use_cache and cache_key in self._cache:
+            return self._cache[cache_key]
+        
+        # Calculate label counts
+        if hasattr(y, 'value_counts'):
+            label_counts = y.value_counts().to_dict()
+        else:
+            unique, counts = np.unique(y_arr, return_counts=True)
+            label_counts = dict(zip([str(u) for u in unique], [int(c) for c in counts]))
+        
+        # Try LLM analysis if provider is available
+        if self.provider is not None:
+            try:
+                result = self._llm_analyze(
+                    unique_labels, label_counts, len(y_arr), column_name
+                )
+                if use_cache:
+                    self._cache[cache_key] = result
+                return result
+            except Exception as e:
+                # Fall back to rule-based
+                pass
+        
+        # Rule-based fallback
+        result = self._rule_based_analyze(
+            unique_labels, label_counts, len(y_arr), column_name, y_arr
+        )
+        if use_cache:
+            self._cache[cache_key] = result
+        return result
+    
+    def _llm_analyze(
+        self,
+        unique_labels: Any,
+        label_counts: Dict,
+        total_samples: int,
+        column_name: str,
+    ) -> LabelAnalysisResult:
+        """Use LLM to analyze labels."""
+        prompt = self.LABEL_ANALYSIS_PROMPT.format(
+            column_name=column_name,
+            unique_labels=list(unique_labels)[:50],  # Limit for prompt
+            label_counts=dict(list(label_counts.items())[:50]),
+            total_samples=total_samples,
+        )
+        
+        response = self.provider.generate(
+            system_prompt="You are a machine learning expert analyzing dataset labels.",
+            user_prompt=prompt,
+        )
+        
+        # Parse JSON response
+        import json
+        try:
+            # Extract JSON from response
+            text = response.get("content", response.get("text", str(response)))
+            # Find JSON in response
+            start = text.find('{')
+            end = text.rfind('}') + 1
+            if start >= 0 and end > start:
+                data = json.loads(text[start:end])
+            else:
+                raise ValueError("No JSON found in response")
+            
+            encoding_map = None
+            if data.get("should_encode") and data.get("encoding_suggestion"):
+                encoding_map = data["encoding_suggestion"]
+            
+            return LabelAnalysisResult(
+                recommended_scorer=data.get("recommended_scorer", "accuracy"),
+                label_type=data.get("label_type", "multiclass"),
+                should_encode=data.get("should_encode", False),
+                encoding_map=encoding_map,
+                interpretation=data.get("interpretation", ""),
+                warnings=data.get("warnings", []),
+            )
+        except json.JSONDecodeError:
+            # If JSON parsing fails, fall back to rule-based
+            raise ValueError("Failed to parse LLM response as JSON")
+    
+    def _rule_based_analyze(
+        self,
+        unique_labels: Any,
+        label_counts: Dict,
+        total_samples: int,
+        column_name: str,
+        y_arr: Any,
+    ) -> LabelAnalysisResult:
+        """Rule-based fallback for label analysis."""
+        import numpy as np
+        
+        n_unique = len(unique_labels)
+        labels_set = set(unique_labels)
+        
+        # Check if regression
+        if np.issubdtype(y_arr.dtype, np.floating) and n_unique > 20:
+            return LabelAnalysisResult(
+                recommended_scorer="r2",
+                label_type="continuous",
+                should_encode=False,
+                interpretation=f"Continuous target with {n_unique} unique values",
+                warnings=[],
+            )
+        
+        # Check if standard binary (0/1)
+        if n_unique == 2 and labels_set == {0, 1}:
+            return LabelAnalysisResult(
+                recommended_scorer="f1",
+                label_type="binary",
+                should_encode=False,
+                interpretation="Standard binary classification (0/1)",
+                warnings=[],
+            )
+        
+        # Binary but non-standard labels (e.g., 0/59, Yes/No)
+        if n_unique == 2:
+            # Create encoding map
+            sorted_labels = sorted(unique_labels)
+            encoding_map = {sorted_labels[0]: 0, sorted_labels[1]: 1}
+            
+            return LabelAnalysisResult(
+                recommended_scorer="f1_weighted",
+                label_type="binary",
+                should_encode=True,
+                encoding_map=encoding_map,
+                interpretation=f"Binary classification with non-standard labels: {list(unique_labels)}",
+                warnings=[
+                    f"Labels {list(unique_labels)} are not standard 0/1. Using f1_weighted scorer.",
+                    "Consider encoding labels to 0/1 for better compatibility."
+                ],
+            )
+        
+        # Multiclass
+        if n_unique <= 20:
+            # Create encoding map for multiclass
+            sorted_labels = sorted(unique_labels)
+            encoding_map = {label: i for i, label in enumerate(sorted_labels)}
+            
+            return LabelAnalysisResult(
+                recommended_scorer="f1_weighted",
+                label_type="multiclass",
+                should_encode=labels_set != set(range(n_unique)),
+                encoding_map=encoding_map if labels_set != set(range(n_unique)) else None,
+                interpretation=f"Multiclass classification with {n_unique} classes",
+                warnings=[
+                    f"Using f1_weighted for {n_unique}-class classification."
+                ] if n_unique > 10 else [],
+            )
+        
+        # Many classes - likely regression or high-cardinality classification
+        return LabelAnalysisResult(
+            recommended_scorer="accuracy",
+            label_type="multiclass",
+            should_encode=False,
+            interpretation=f"High-cardinality classification ({n_unique} classes)",
+            warnings=[
+                f"Very high number of classes ({n_unique}). Consider if this should be regression."
+            ],
+        )
+    
+    def get_recommended_scorer(self, y: Any, column_name: str = "target") -> str:
+        """
+        Quick method to just get the recommended scorer.
+        
+        Parameters
+        ----------
+        y : array-like
+            Target values.
+        column_name : str
+            Name of the target column.
+            
+        Returns
+        -------
+        str
+            Recommended scorer name.
+        """
+        result = self.analyze(y, column_name)
+        return result.recommended_scorer
+
+
+def analyze_labels_with_llm(
+    y: Any,
+    column_name: str = "target",
+    provider: Optional["BaseLLMProvider"] = None,
+) -> LabelAnalysisResult:
+    """
+    Convenience function to analyze labels with optional LLM support.
+    
+    Parameters
+    ----------
+    y : array-like
+        Target values.
+    column_name : str
+        Name of the target column.
+    provider : Optional[BaseLLMProvider]
+        LLM provider. If None, uses rule-based analysis.
+        
+    Returns
+    -------
+    LabelAnalysisResult
+        Analysis result with recommendations.
+        
+    Examples
+    --------
+    >>> from acdso.advisors import analyze_labels_with_llm
+    >>> result = analyze_labels_with_llm(y, column_name="Sec")
+    >>> print(f"Use scorer: {result.recommended_scorer}")
+    >>> print(f"Encode labels: {result.should_encode}")
+    """
+    analyzer = LLMLabelAnalyzer(provider=provider)
+    return analyzer.analyze(y, column_name)
+
+
+# =============================================================================
+# LLM-Powered Column Analysis & Auto-Exclusion
+# =============================================================================
+
+@dataclass
+class ColumnAnalysisResult:
+    """
+    Result of LLM-based column analysis for automatic exclusion.
+    
+    Attributes
+    ----------
+    columns_to_exclude : List[str]
+        Columns that should be excluded from features.
+    exclusion_reasons : Dict[str, str]
+        Reason for each excluded column.
+    leakage_columns : List[str]
+        Columns detected as potential data leakage.
+    correlated_columns : List[str]
+        Columns highly correlated with target.
+    id_columns : List[str]
+        ID-like columns (unique identifiers).
+    constant_columns : List[str]
+        Columns with constant or near-constant values.
+    recommendations : List[str]
+        Additional recommendations.
+    confidence : float
+        Confidence score (0.0 to 1.0).
+    """
+    columns_to_exclude: List[str] = field(default_factory=list)
+    exclusion_reasons: Dict[str, str] = field(default_factory=dict)
+    leakage_columns: List[str] = field(default_factory=list)
+    correlated_columns: List[str] = field(default_factory=list)
+    id_columns: List[str] = field(default_factory=list)
+    constant_columns: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
+    confidence: float = 0.0
+
+
+class LLMColumnAnalyzer:
+    """
+    LLM-powered column analyzer for automatic feature exclusion.
+    
+    Uses an LLM to understand column semantics and identify problematic
+    columns that should be excluded (leakage, IDs, constants, etc.).
+    
+    Parameters
+    ----------
+    provider : Optional[BaseLLMProvider]
+        LLM provider to use. If None, falls back to rule-based analysis.
+    
+    Examples
+    --------
+    >>> from acdso.advisors import LLMColumnAnalyzer, OpenAIProvider
+    >>> import pandas as pd
+    >>> 
+    >>> df = pd.read_csv("data.csv")
+    >>> analyzer = LLMColumnAnalyzer(provider=OpenAIProvider())
+    >>> result = analyzer.analyze(df, target_column="Sec")
+    >>> print(f"Exclude: {result.columns_to_exclude}")
+    >>> 
+    >>> # Auto-clean the dataframe
+    >>> X_clean = df.drop(columns=result.columns_to_exclude + ["Sec"])
+    """
+    
+    COLUMN_ANALYSIS_PROMPT = """Analyze this dataset to identify columns that should be EXCLUDED from machine learning features.
+
+TARGET COLUMN: {target_column}
+
+COLUMN INFORMATION:
+{column_info}
+
+SAMPLE DATA (first 5 rows):
+{sample_data}
+
+DESCRIBE STATISTICS:
+{describe_stats}
+
+Identify columns to EXCLUDE based on:
+1. **Data Leakage**: Columns derived from or highly correlated with the target
+   - Example: If target is "Sec" (seconds), then "Hour", "Minute", "Day" are leakage
+   - Example: If target is "price", then "final_price", "total_cost" might be leakage
+   
+2. **ID Columns**: Unique identifiers that have no predictive value
+   - Example: "user_id", "transaction_id", "row_number"
+   
+3. **Constant/Near-Constant**: Columns with same value for all/most rows
+   
+4. **Target Derivatives**: Columns obviously computed from the target
+
+Respond in JSON format:
+{{
+    "columns_to_exclude": ["col1", "col2", ...],
+    "exclusion_reasons": {{
+        "col1": "reason for exclusion",
+        "col2": "reason for exclusion"
+    }},
+    "leakage_columns": ["cols that leak target info"],
+    "correlated_columns": ["cols highly correlated with target"],
+    "id_columns": ["unique identifier columns"],
+    "constant_columns": ["constant or near-constant columns"],
+    "recommendations": ["additional recommendations"],
+    "confidence": 0.0-1.0
+}}
+
+Be thorough but not overly aggressive. Only exclude columns with clear problems.
+"""
+    
+    def __init__(self, provider: Optional["BaseLLMProvider"] = None):
+        self.provider = provider
+        self._cache: Dict[str, ColumnAnalysisResult] = {}
+    
+    def analyze(
+        self,
+        df: Any,
+        target_column: str,
+        use_cache: bool = True,
+    ) -> ColumnAnalysisResult:
+        """
+        Analyze dataset columns and identify those to exclude.
+        
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe.
+        target_column : str
+            Name of the target column.
+        use_cache : bool
+            Whether to cache results.
+            
+        Returns
+        -------
+        ColumnAnalysisResult
+            Analysis result with columns to exclude.
+        """
+        import pandas as pd
+        import numpy as np
+        
+        if not isinstance(df, pd.DataFrame):
+            df = pd.DataFrame(df)
+        
+        # Create cache key
+        cache_key = f"{target_column}:{len(df.columns)}:{hash(tuple(df.columns[:20]))}"
+        if use_cache and cache_key in self._cache:
+            return self._cache[cache_key]
+        
+        # Try LLM analysis if provider is available
+        if self.provider is not None:
+            try:
+                result = self._llm_analyze(df, target_column)
+                if use_cache:
+                    self._cache[cache_key] = result
+                return result
+            except Exception:
+                # Fall back to rule-based
+                pass
+        
+        # Rule-based fallback
+        result = self._rule_based_analyze(df, target_column)
+        if use_cache:
+            self._cache[cache_key] = result
+        return result
+    
+    def _llm_analyze(
+        self,
+        df: Any,
+        target_column: str,
+    ) -> ColumnAnalysisResult:
+        """Use LLM to analyze columns."""
+        import pandas as pd
+        
+        # Prepare column info
+        column_info = []
+        for col in df.columns:
+            dtype = str(df[col].dtype)
+            nunique = df[col].nunique()
+            null_pct = df[col].isnull().mean() * 100
+            column_info.append(f"- {col}: dtype={dtype}, unique={nunique}, null%={null_pct:.1f}")
+        
+        # Get sample data (limit columns for prompt size)
+        sample_cols = list(df.columns)[:30]
+        sample_data = df[sample_cols].head().to_string()
+        
+        # Get describe stats
+        try:
+            describe_stats = df.describe(include='all').to_string()
+        except Exception:
+            describe_stats = "Unable to compute describe()"
+        
+        prompt = self.COLUMN_ANALYSIS_PROMPT.format(
+            target_column=target_column,
+            column_info="\n".join(column_info[:50]),  # Limit for prompt
+            sample_data=sample_data,
+            describe_stats=describe_stats[:2000],  # Limit size
+        )
+        
+        response = self.provider.generate(
+            system_prompt="You are a machine learning expert analyzing dataset columns for potential issues.",
+            user_prompt=prompt,
+        )
+        
+        # Parse JSON response
+        import json
+        try:
+            text = response.get("content", response.get("text", str(response)))
+            start = text.find('{')
+            end = text.rfind('}') + 1
+            if start >= 0 and end > start:
+                data = json.loads(text[start:end])
+            else:
+                raise ValueError("No JSON found in response")
+            
+            return ColumnAnalysisResult(
+                columns_to_exclude=data.get("columns_to_exclude", []),
+                exclusion_reasons=data.get("exclusion_reasons", {}),
+                leakage_columns=data.get("leakage_columns", []),
+                correlated_columns=data.get("correlated_columns", []),
+                id_columns=data.get("id_columns", []),
+                constant_columns=data.get("constant_columns", []),
+                recommendations=data.get("recommendations", []),
+                confidence=data.get("confidence", 0.8),
+            )
+        except json.JSONDecodeError:
+            raise ValueError("Failed to parse LLM response as JSON")
+    
+    def _rule_based_analyze(
+        self,
+        df: Any,
+        target_column: str,
+    ) -> ColumnAnalysisResult:
+        """Rule-based fallback for column analysis."""
+        import pandas as pd
+        import numpy as np
+        
+        columns_to_exclude = []
+        exclusion_reasons = {}
+        leakage_columns = []
+        id_columns = []
+        constant_columns = []
+        
+        target_lower = target_column.lower()
+        
+        # Common time component names that might cause leakage
+        time_components = {
+            'second', 'sec', 'minute', 'min', 'hour', 'hr',
+            'day', 'month', 'year', 'date', 'time', 'timestamp',
+            'week', 'weekday', 'dayofweek', 'quarter'
+        }
+        
+        # If target looks like a time component, flag related columns
+        target_is_time = any(t in target_lower for t in time_components)
+        
+        for col in df.columns:
+            if col == target_column:
+                continue
+                
+            col_lower = col.lower()
+            
+            # Check for ID columns
+            if any(id_word in col_lower for id_word in ['_id', 'id_', 'userid', 'rowid', 'index']):
+                if df[col].nunique() > 0.9 * len(df):
+                    id_columns.append(col)
+                    columns_to_exclude.append(col)
+                    exclusion_reasons[col] = "ID-like column (mostly unique values)"
+                    continue
+            
+            # Check for constant columns
+            if df[col].nunique() <= 1:
+                constant_columns.append(col)
+                columns_to_exclude.append(col)
+                exclusion_reasons[col] = "Constant column (only one unique value)"
+                continue
+            
+            # Check for time component leakage
+            if target_is_time:
+                if any(t in col_lower for t in time_components):
+                    leakage_columns.append(col)
+                    columns_to_exclude.append(col)
+                    exclusion_reasons[col] = f"Potential time-based leakage (target '{target_column}' is time-related)"
+                    continue
+            
+            # Check for obvious target derivatives
+            if target_lower in col_lower or col_lower in target_lower:
+                if col != target_column:
+                    leakage_columns.append(col)
+                    columns_to_exclude.append(col)
+                    exclusion_reasons[col] = f"Column name contains target name - potential leakage"
+        
+        recommendations = []
+        if leakage_columns:
+            recommendations.append(f"Found {len(leakage_columns)} potential leakage columns - review carefully")
+        if id_columns:
+            recommendations.append(f"Found {len(id_columns)} ID columns that won't help prediction")
+        
+        return ColumnAnalysisResult(
+            columns_to_exclude=columns_to_exclude,
+            exclusion_reasons=exclusion_reasons,
+            leakage_columns=leakage_columns,
+            correlated_columns=[],
+            id_columns=id_columns,
+            constant_columns=constant_columns,
+            recommendations=recommendations,
+            confidence=0.7,  # Rule-based has lower confidence
+        )
+    
+    def get_clean_features(
+        self,
+        df: Any,
+        target_column: str,
+    ) -> Any:
+        """
+        Analyze and return a cleaned dataframe with problematic columns removed.
+        
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe.
+        target_column : str
+            Name of the target column.
+            
+        Returns
+        -------
+        pd.DataFrame
+            Cleaned dataframe with target and problematic columns removed.
+        """
+        import pandas as pd
+        
+        result = self.analyze(df, target_column)
+        
+        cols_to_drop = set(result.columns_to_exclude)
+        cols_to_drop.add(target_column)
+        cols_to_drop = [c for c in cols_to_drop if c in df.columns]
+        
+        return df.drop(columns=cols_to_drop)
+
+
+def auto_exclude_columns(
+    df: Any,
+    target_column: str,
+    provider: Optional["BaseLLMProvider"] = None,
+    verbose: bool = True,
+) -> ColumnAnalysisResult:
+    """
+    Automatically analyze dataset and identify columns to exclude.
+    
+    This is the main entry point for LLM-powered column exclusion.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input dataframe.
+    target_column : str
+        Name of the target column.
+    provider : Optional[BaseLLMProvider]
+        LLM provider. If None, uses rule-based analysis.
+    verbose : bool
+        Whether to print analysis results.
+        
+    Returns
+    -------
+    ColumnAnalysisResult
+        Analysis result with columns to exclude.
+        
+    Examples
+    --------
+    >>> from acdso.advisors import auto_exclude_columns, OpenAIProvider
+    >>> import pandas as pd
+    >>> 
+    >>> df = pd.read_csv("brain.csv")
+    >>> result = auto_exclude_columns(df, target_column="Sec", provider=OpenAIProvider())
+    >>> 
+    >>> # Print what will be excluded
+    >>> for col, reason in result.exclusion_reasons.items():
+    ...     print(f"  - {col}: {reason}")
+    >>> 
+    >>> # Get clean features
+    >>> X = df.drop(columns=result.columns_to_exclude + ["Sec"])
+    >>> y = df["Sec"]
+    """
+    analyzer = LLMColumnAnalyzer(provider=provider)
+    result = analyzer.analyze(df, target_column)
+    
+    if verbose and result.columns_to_exclude:
+        print(f"\n  🔍 Auto-Exclusion Analysis (confidence: {result.confidence:.0%})")
+        print(f"  ─" * 30)
+        for col in result.columns_to_exclude:
+            reason = result.exclusion_reasons.get(col, "Unknown reason")
+            print(f"    ✗ {col}: {reason}")
+        if result.recommendations:
+            print(f"\n  Recommendations:")
+            for rec in result.recommendations:
+                print(f"    ℹ {rec}")
+    
+    return result
+
+
+# =============================================================================
 # Backward Compatibility Alias
 # =============================================================================
 

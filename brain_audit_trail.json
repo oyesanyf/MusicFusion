@@ -1,0 +1,95 @@
+{
+  "risk_report": {
+    "task": "classification",
+    "target_type": "binary",
+    "n_rows": 737,
+    "n_cols": 11834,
+    "n_numeric": 11834,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": 0.35850986700986703,
+    "temporal_leakage_gap": null,
+    "class_imbalance_max_ratio": 0.5223880597014925,
+    "imbalance_severity": 0.04477611940298498,
+    "vif_max": 999999.9999712444,
+    "vif_features": [
+      "network_1970-01-01 00:00:00.000000003",
+      "network_1970-01-01 00:00:00.000000021",
+      "network_1970-01-01 00:00:00.000000028",
+      "network_1970-01-01 00:00:00.000000029",
+      "network_1970-01-01 00:00:00.000000031",
+      "network_1970-01-01 00:00:00.000000037"
+    ],
+    "cv_score_std": 0.02301309020231697,
+    "notes": [
+      "High multicollinearity: VIF max=1000000.0."
+    ]
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null
+  },
+  "candidates_evaluated": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.6756251214201102,
+      "train_time_s": 12.931684017181396,
+      "peak_mem_mb": 409.6785697937012,
+      "latency_ms_per_row": 0.4112822934985161,
+      "risk_penalty": 0.25787859776478916,
+      "cv_scores": [
+        0.6610443163751988,
+        0.6251633312702015,
+        0.7000673687196398,
+        0.6708657196462074,
+        0.7209848710893036
+      ],
+      "cv_score_std": 0.032974457961397405
+    },
+    {
+      "name": "RandomForest",
+      "metric": 0.6811935130643757,
+      "train_time_s": 10.743332862854004,
+      "peak_mem_mb": 249.9472370147705,
+      "latency_ms_per_row": 0.48406701534986496,
+      "risk_penalty": 0.22799449448754788,
+      "cv_scores": [
+        0.6539518241645901,
+        0.6850334205172914,
+        0.6638394835116147,
+        0.682084542299596,
+        0.7210582948287866
+      ],
+      "cv_score_std": 0.02301309020231697
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.6756251214201102,
+      "train_time_s": 12.931684017181396,
+      "peak_mem_mb": 409.6785697937012,
+      "latency_ms_per_row": 0.4112822934985161,
+      "risk_penalty": 0.25787859776478916
+    },
+    {
+      "name": "RandomForest",
+      "metric": 0.6811935130643757,
+      "train_time_s": 10.743332862854004,
+      "peak_mem_mb": 249.9472370147705,
+      "latency_ms_per_row": 0.48406701534986496,
+      "risk_penalty": 0.22799449448754788
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "LogisticRegression",
+    "metric": 0.6756251214201102,
+    "train_time_s": 12.931684017181396,
+    "peak_mem_mb": 409.6785697937012,
+    "latency_ms_per_row": 0.4112822934985161,
+    "risk_penalty": 0.25787859776478916
+  }
+}
