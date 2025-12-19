@@ -1,0 +1,87 @@
+{
+  "risk_report": {
+    "task": "classification",
+    "target_type": "binary",
+    "n_rows": 244,
+    "n_cols": 8,
+    "n_numeric": 8,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": 0.6639064538793535,
+    "temporal_leakage_gap": null,
+    "class_imbalance_max_ratio": 0.6188524590163934,
+    "imbalance_severity": 0.23770491803278682,
+    "vif_max": 11.647771783071619,
+    "vif_features": [
+      "day_Sat",
+      "day_Sun"
+    ],
+    "cv_score_std": 0.019446678515016996,
+    "notes": [
+      "High multicollinearity: VIF max=11.6."
+    ]
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null
+  },
+  "candidates_evaluated": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.7128876844323999,
+      "train_time_s": 0.18336987495422363,
+      "peak_mem_mb": 0.2426900863647461,
+      "latency_ms_per_row": 0.012925413788342085,
+      "risk_penalty": 0.2059279773726527,
+      "cv_scores": [
+        0.7682926829268293,
+        0.6790123456790124,
+        0.691358024691358
+      ],
+      "cv_score_std": 0.03950012102255521
+    },
+    {
+      "name": "RandomForest",
+      "metric": 0.6310348288668072,
+      "train_time_s": 2.290560483932495,
+      "peak_mem_mb": 0.526576042175293,
+      "latency_ms_per_row": 0.08629384588022701,
+      "risk_penalty": 0.14576764985003807,
+      "cv_scores": [
+        0.6585365853658537,
+        0.6172839506172839,
+        0.6172839506172839
+      ],
+      "cv_score_std": 0.019446678515016996
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.7128876844323999,
+      "train_time_s": 0.18336987495422363,
+      "peak_mem_mb": 0.2426900863647461,
+      "latency_ms_per_row": 0.012925413788342085,
+      "risk_penalty": 0.2059279773726527
+    },
+    {
+      "name": "RandomForest",
+      "metric": 0.6310348288668072,
+      "train_time_s": 2.290560483932495,
+      "peak_mem_mb": 0.526576042175293,
+      "latency_ms_per_row": 0.08629384588022701,
+      "risk_penalty": 0.14576764985003807
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "RandomForest",
+    "metric": 0.6310348288668072,
+    "train_time_s": 2.290560483932495,
+    "peak_mem_mb": 0.526576042175293,
+    "latency_ms_per_row": 0.08629384588022701,
+    "risk_penalty": 0.14576764985003807
+  }
+}

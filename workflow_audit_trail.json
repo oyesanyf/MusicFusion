@@ -1,0 +1,90 @@
+{
+  "risk_report": {
+    "task": "classification",
+    "target_type": "binary",
+    "n_rows": 195,
+    "n_cols": 8,
+    "n_numeric": 8,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": 0.5963897866839043,
+    "temporal_leakage_gap": null,
+    "class_imbalance_max_ratio": 0.5743589743589743,
+    "imbalance_severity": 0.14871794871794863,
+    "vif_max": 10.310525797493101,
+    "vif_features": [
+      "day_Sat"
+    ],
+    "cv_score_std": 0.04863473681322713,
+    "notes": [
+      "High multicollinearity: VIF max=10.3."
+    ]
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": 20.0
+  },
+  "candidates_evaluated": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.6669623655913978,
+      "train_time_s": 0.27184343338012695,
+      "peak_mem_mb": 0.32587432861328125,
+      "latency_ms_per_row": 0.012211921887520032,
+      "risk_penalty": 0.16071369451759468,
+      "cv_scores": [
+        0.5806451612903226,
+        0.7333333333333333,
+        0.6666666666666666,
+        0.6875,
+        0.6666666666666666
+      ],
+      "cv_score_std": 0.04955347499452317
+    },
+    {
+      "name": "RandomForest",
+      "metric": 0.5719516480427296,
+      "train_time_s": 3.4154744148254395,
+      "peak_mem_mb": 0.6246433258056641,
+      "latency_ms_per_row": 0.11781790317633213,
+      "risk_penalty": 0.15887621815500258,
+      "cv_scores": [
+        0.5294117647058824,
+        0.5185185185185185,
+        0.5555555555555556,
+        0.6111111111111112,
+        0.6451612903225806
+      ],
+      "cv_score_std": 0.04863473681322713
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.6669623655913978,
+      "train_time_s": 0.27184343338012695,
+      "peak_mem_mb": 0.32587432861328125,
+      "latency_ms_per_row": 0.012211921887520032,
+      "risk_penalty": 0.16071369451759468
+    },
+    {
+      "name": "RandomForest",
+      "metric": 0.5719516480427296,
+      "train_time_s": 3.4154744148254395,
+      "peak_mem_mb": 0.6246433258056641,
+      "latency_ms_per_row": 0.11781790317633213,
+      "risk_penalty": 0.15887621815500258
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "RandomForest",
+    "metric": 0.5719516480427296,
+    "train_time_s": 3.4154744148254395,
+    "peak_mem_mb": 0.6246433258056641,
+    "latency_ms_per_row": 0.11781790317633213,
+    "risk_penalty": 0.15887621815500258
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "risk_report": {
+    "task": "regression",
+    "target_type": "multiclass",
+    "n_rows": 519,
+    "n_cols": 52,
+    "n_numeric": 52,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": 0.8360168334025685,
+    "temporal_leakage_gap": -0.0055567178206487045,
+    "class_imbalance_max_ratio": null,
+    "imbalance_severity": 0.0,
+    "vif_max": 6.874050624967834,
+    "vif_features": [],
+    "cv_score_std": 0.04083371348725094,
+    "notes": []
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null
+  },
+  "candidates_evaluated": [
+    {
+      "name": "Ridge",
+      "metric": 0.822291081875005,
+      "train_time_s": 0.19366669654846191,
+      "peak_mem_mb": 1.1722345352172852,
+      "latency_ms_per_row": 0.00951625406742096,
+      "risk_penalty": 0.13374544421155982,
+      "cv_scores": [
+        0.8407278532652477,
+        0.8139985510832297,
+        0.8661464086729097,
+        0.7476099923457219,
+        0.8429726040079155
+      ],
+      "cv_score_std": 0.04083371348725094
+    },
+    {
+      "name": "RandomForestRegressor",
+      "metric": 0.8324786301628206,
+      "train_time_s": 3.934812545776367,
+      "peak_mem_mb": 1.2524232864379883,
+      "latency_ms_per_row": 0.12394040822982788,
+      "risk_penalty": 0.13838456796024945,
+      "cv_scores": [
+        0.8362166011929133,
+        0.7743650031585597,
+        0.8728362847839173,
+        0.7955433434650456,
+        0.8834319182136673
+      ],
+      "cv_score_std": 0.04238008807014749
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "Ridge",
+      "metric": 0.822291081875005,
+      "train_time_s": 0.19366669654846191,
+      "peak_mem_mb": 1.1722345352172852,
+      "latency_ms_per_row": 0.00951625406742096,
+      "risk_penalty": 0.13374544421155982
+    },
+    {
+      "name": "RandomForestRegressor",
+      "metric": 0.8324786301628206,
+      "train_time_s": 3.934812545776367,
+      "peak_mem_mb": 1.2524232864379883,
+      "latency_ms_per_row": 0.12394040822982788,
+      "risk_penalty": 0.13838456796024945
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "Ridge",
+    "metric": 0.822291081875005,
+    "train_time_s": 0.19366669654846191,
+    "peak_mem_mb": 1.1722345352172852,
+    "latency_ms_per_row": 0.00951625406742096,
+    "risk_penalty": 0.13374544421155982
+  }
+}

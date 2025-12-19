@@ -1,0 +1,135 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acdso"
+version = "2.0.0"
+description = "ACDSO v2.0: Risk-Optimized AutoML for Production Systems - A scikit-learn compatible AutoML library"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "DS-TUI Development Team", email = "dev@example.com"}
+]
+maintainers = [
+    {name = "DS-TUI Development Team", email = "dev@example.com"}
+]
+keywords = [
+    "automl",
+    "machine-learning",
+    "scikit-learn",
+    "risk-analysis",
+    "multi-objective-optimization",
+    "pareto",
+    "production-ml",
+    "mlops",
+    "eda",
+    "exploratory-data-analysis",
+    "data-quality",
+    "data-profiling"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.21.0",
+    "pandas>=1.3.0",
+    "scikit-learn>=1.0.0",
+]
+
+[project.optional-dependencies]
+# Boosting libraries
+xgboost = ["xgboost>=1.5.0"]
+lightgbm = ["lightgbm>=3.3.0"]
+boosters = ["xgboost>=1.5.0", "lightgbm>=3.3.0"]
+
+# LLM providers
+openai = ["openai>=1.0.0"]
+anthropic = ["anthropic>=0.18.0"]
+litellm = ["litellm>=1.0.0"]
+llm = ["openai>=1.0.0", "anthropic>=0.18.0"]
+
+# AutoML integrations
+autosklearn = ["auto-sklearn>=0.15.0"]
+tpot = ["tpot>=0.12.0"]
+flaml = ["flaml>=2.0.0"]
+h2o = ["h2o>=3.40.0"]
+autogluon = ["autogluon>=0.8.0"]
+automl = ["flaml>=2.0.0"]  # FLAML is most lightweight
+
+# Auto EDA integrations
+ydata-profiling = ["ydata-profiling>=4.0.0"]
+sweetviz = ["sweetviz>=2.1.0"]
+dataprep = ["dataprep>=0.4.0"]
+dtale = ["dtale>=2.0.0"]
+great-expectations = ["great-expectations>=0.15.0"]
+eda = ["ydata-profiling>=4.0.0", "sweetviz>=2.1.0"]  # Common EDA tools
+
+# Development
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "mypy>=0.990",
+    "flake8>=5.0.0",
+]
+
+# All extras
+all = [
+    "xgboost>=1.5.0",
+    "lightgbm>=3.3.0",
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
+    "flaml>=2.0.0",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ds-tui/acdso"
+Documentation = "https://github.com/ds-tui/acdso#readme"
+Repository = "https://github.com/ds-tui/acdso.git"
+Issues = "https://github.com/ds-tui/acdso/issues"
+Changelog = "https://github.com/ds-tui/acdso/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["acdso", "acdso.*"]
+
+[tool.black]
+line-length = 120
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
