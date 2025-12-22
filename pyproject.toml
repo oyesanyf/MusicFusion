@@ -64,11 +64,21 @@ llm = ["openai>=1.0.0", "anthropic>=0.18.0"]
 
 # AutoML integrations
 autosklearn = ["auto-sklearn>=0.15.0"]
-tpot = ["tpot>=0.12.0"]
+tpot = ["tpot>=1.0.0"]
 flaml = ["flaml>=2.0.0"]
 h2o = ["h2o>=3.40.0"]
-autogluon = ["autogluon>=0.8.0"]
-automl = ["flaml>=2.0.0"]  # FLAML is most lightweight
+autogluon = ["autogluon.tabular[fastai]==1.4.1b20251209"]
+pycaret = ["pycaret>=3.0.0"]
+mljar = ["mljar-supervised>=1.0.0"]
+automl = ["flaml>=2.0.0", "tpot>=1.0.0"]  # Lightweight AutoML tools
+automl-full = [
+    "flaml>=2.0.0",
+    "tpot>=1.0.0", 
+    "h2o>=3.40.0",
+    "autogluon.tabular[fastai]==1.4.1b20251209",
+    "pycaret>=3.0.0",
+    "mljar-supervised>=1.0.0",
+]
 
 # Auto EDA integrations
 ydata-profiling = ["ydata-profiling>=4.0.0"]

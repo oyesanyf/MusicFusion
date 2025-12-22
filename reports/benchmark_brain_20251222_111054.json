@@ -1,0 +1,36 @@
+{
+  "timestamp": "2025-12-22T11:11:06.157578",
+  "systems_tested": [
+    "ACDSO",
+    "TPOT",
+    "FLAML"
+  ],
+  "datasets_tested": [],
+  "time_budget_s": 60,
+  "results": [],
+  "leakage_tests": [
+    {
+      "system": "ACDSO",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": null
+    },
+    {
+      "system": "TPOT",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": "not_supported"
+    },
+    {
+      "system": "FLAML",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": "not_supported"
+    }
+  ],
+  "winner_by_metric": {},
+  "statistical_tests": {}
+}

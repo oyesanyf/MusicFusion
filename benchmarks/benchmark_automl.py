@@ -43,6 +43,18 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+# Suppress common warnings from AutoML libraries
+warnings.filterwarnings('ignore', message='.*pkg_resources.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='stopit')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='sklearn')
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', message='.*H2O.*')
+warnings.filterwarnings('ignore', message='.*h2o.*')
+warnings.filterwarnings('ignore', message='.*fastai.*')
+warnings.filterwarnings('ignore', message='.*NeuralNet.*')
+warnings.filterwarnings('ignore', category=UserWarning, module='autogluon')
+warnings.filterwarnings('ignore', category=UserWarning, module='h2o')
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -80,14 +92,56 @@ except ImportError:
     pass
 
 try:
-    from tpot import TPOTClassifier, TPOTRegressor
+    # TPOT 1.0+ uses TPOTEstimator
+    from tpot import TPOTEstimator
     _HAS_TPOT = True
+    _TPOT_V1 = True
 except ImportError:
-    pass
+    _TPOT_V1 = False
+    try:
+        # TPOT < 1.0 uses TPOTClassifier/TPOTRegressor
+        from tpot import TPOTClassifier, TPOTRegressor
+        _HAS_TPOT = True
+    except ImportError:
+        pass
 
 try:
     from flaml import AutoML as FLAMLAutoML
     _HAS_FLAML = True
+except ImportError:
+    pass
+
+# PyCaret - popular, user-friendly AutoML
+_HAS_PYCARET = False
+try:
+    from pycaret.classification import ClassificationExperiment
+    from pycaret.regression import RegressionExperiment
+    _HAS_PYCARET = True
+except ImportError:
+    pass
+
+# AutoGluon - Amazon's AutoML
+_HAS_AUTOGLUON = False
+try:
+    from autogluon.tabular import TabularPredictor
+    _HAS_AUTOGLUON = True
+except ImportError:
+    pass
+
+# H2O AutoML
+_HAS_H2O = False
+try:
+    import h2o
+    from h2o.automl import H2OAutoML
+    _HAS_H2O = True
+except ImportError:
+    pass
+
+# MLJAR - simple and fast
+_HAS_MLJAR = False
+try:
+    from supervised import AutoML as MLJARAutoML
+    _HAS_MLJAR = True
 except ImportError:
     pass
 
@@ -137,6 +191,7 @@ class BenchmarkResult:
     n_features: int = 0
     time_budget_s: float = 0.0
     error: Optional[str] = None
+    model_name: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -183,6 +238,83 @@ class BenchmarkSummary:
 # =============================================================================
 # Dataset Loading
 # =============================================================================
+
+def load_custom_dataset(
+    file_path: str,
+    target_column: str,
+    task: str = "auto",
+    exclude_columns: List[str] = None,
+) -> Dict[str, Any]:
+    """
+    Load a custom dataset from a file.
+    
+    Parameters
+    ----------
+    file_path : str
+        Path to CSV, Excel, or Parquet file.
+    target_column : str
+        Name of the target column.
+    task : str
+        'classification', 'regression', or 'auto' (infer from target).
+    exclude_columns : list, optional
+        Columns to exclude from features.
+    
+    Returns
+    -------
+    dict
+        {'X': DataFrame, 'y': array, 'task': str, 'description': str}
+    """
+    import os
+    
+    # Load file based on extension
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == '.csv':
+        df = pd.read_csv(file_path)
+    elif ext in ['.xls', '.xlsx']:
+        df = pd.read_excel(file_path)
+    elif ext == '.parquet':
+        df = pd.read_parquet(file_path)
+    elif ext == '.json':
+        df = pd.read_json(file_path)
+    else:
+        raise ValueError(f"Unsupported file format: {ext}")
+    
+    if target_column not in df.columns:
+        raise ValueError(f"Target column '{target_column}' not found. Available: {list(df.columns)}")
+    
+    # Extract target
+    y = df[target_column].values
+    
+    # Exclude columns
+    drop_cols = [target_column]
+    if exclude_columns:
+        drop_cols.extend([c for c in exclude_columns if c in df.columns])
+    
+    X = df.drop(columns=drop_cols)
+    
+    # Auto-detect task
+    if task == "auto":
+        if np.issubdtype(y.dtype, np.floating):
+            unique_vals = np.unique(y)
+            if len(unique_vals) > 20:
+                task = "regression"
+            else:
+                task = "classification"
+        else:
+            unique_vals = np.unique(y)
+            if len(unique_vals) <= 20:
+                task = "classification"
+            else:
+                task = "regression"
+    
+    name = os.path.basename(file_path)
+    return {
+        'X': X,
+        'y': y,
+        'task': task,
+        'description': f'{name} ({len(df)} samples, {X.shape[1]} features, target: {target_column})'
+    }
+
 
 def load_benchmark_datasets(dataset_names: List[str] = None) -> Dict[str, Dict[str, Any]]:
     """
@@ -343,6 +475,7 @@ def run_acdso(
         system='ACDSO',
         dataset='',
         task=task,
+        test_score=0.0,  # Will be updated after fitting
         n_train=len(X_train),
         n_test=len(X_test),
         n_features=X_train.shape[1],
@@ -427,6 +560,9 @@ def run_acdso(
         
         if result.has_audit_trail:
             result.pareto_front_size = len(model.audit_trail_.get('pareto_front', []))
+            # Get selected model name
+            selected = model.audit_trail_.get('selected', {})
+            result.model_name = selected.get('name', 'Unknown')
         
     except Exception as e:
         result.error = str(e)
@@ -455,6 +591,7 @@ def run_autosklearn(
         system='Auto-sklearn',
         dataset='',
         task=task,
+        test_score=0.0,  # Will be updated after fitting
         n_train=len(X_train),
         n_test=len(X_test),
         n_features=X_train.shape[1],
@@ -538,6 +675,7 @@ def run_tpot(
         system='TPOT',
         dataset='',
         task=task,
+        test_score=0.0,  # Will be updated after fitting
         n_train=len(X_train),
         n_test=len(X_test),
         n_features=X_train.shape[1],
@@ -550,36 +688,98 @@ def run_tpot(
         
         t0 = time.time()
         
-        # TPOT uses generations/population, convert time budget to generations
-        # Rough estimate: 1 generation ≈ 30-60 seconds
-        generations = max(1, int(time_budget_s / 45))
+        # Suppress all warnings during TPOT execution
+        import sys
+        import io
         
-        if task == 'classification':
-            model = TPOTClassifier(
-                generations=generations,
-                population_size=20,
-                cv=5,
-                random_state=42,
-                verbosity=0,
-                n_jobs=1,
-                max_time_mins=time_budget_s / 60,
-            )
+        # TPOT 1.0+ has issues with genetic algorithm on small datasets/short budgets
+        # We need at least 120s and 500+ samples for reliable results
+        if _TPOT_V1 and (time_budget_s < 120 or len(X_train) < 200):
+            tracemalloc.stop()
+            result.error = f"TPOT 1.0+ requires >=120s budget and >=200 samples (got {time_budget_s}s, {len(X_train)} samples)"
+            return result
+        
+        # TPOT API changed significantly in version 1.0+
+        model = None
+        fit_success = False
+        
+        if _TPOT_V1:
+            # TPOT 1.0+ - use simplified configuration
+            from tpot.config import get_search_space
+            
+            try:
+                # Use a single fast estimator for more reliable fitting
+                if task == 'classification':
+                    search_space = get_search_space('RandomForestClassifier')
+                    scorers = ['accuracy']
+                else:
+                    search_space = get_search_space('RandomForestRegressor')
+                    scorers = ['neg_mean_squared_error']
+                
+                model = TPOTEstimator(
+                    search_space=search_space,
+                    scorers=scorers,
+                    scorers_weights=[1.0],
+                    classification=(task == 'classification'),
+                    max_time_mins=max(2, time_budget_s / 60),
+                    max_eval_time_mins=max(1, time_budget_s / 120),
+                    population_size=10,
+                    generations=3,
+                    n_jobs=1,
+                    verbose=0,
+                    random_state=42,
+                    cv=3,
+                )
+                
+                # Suppress stderr during fit
+                old_stderr = sys.stderr
+                sys.stderr = io.StringIO()
+                try:
+                    model.fit(X_train.values, y_train)
+                    fit_success = hasattr(model, 'fitted_pipeline_') and model.fitted_pipeline_ is not None
+                finally:
+                    sys.stderr = old_stderr
+            except Exception as e:
+                fit_success = False
         else:
-            model = TPOTRegressor(
-                generations=generations,
-                population_size=20,
-                cv=5,
-                random_state=42,
-                verbosity=0,
-                n_jobs=1,
-                max_time_mins=time_budget_s / 60,
-            )
+            # TPOT < 1.0 uses TPOTClassifier/TPOTRegressor
+            if task == 'classification':
+                model = TPOTClassifier(
+                    generations=2,
+                    population_size=10,
+                    cv=3,
+                    random_state=42,
+                    verbosity=0,
+                    n_jobs=1,
+                    max_time_mins=time_budget_s / 60,
+                )
+            else:
+                model = TPOTRegressor(
+                    generations=2,
+                    population_size=10,
+                    cv=3,
+                    random_state=42,
+                    verbosity=0,
+                    n_jobs=1,
+                    max_time_mins=time_budget_s / 60,
+                )
+            
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+            try:
+                model.fit(X_train.values, y_train)
+                fit_success = True
+            finally:
+                sys.stderr = old_stderr
         
-        model.fit(X_train.values, y_train)
         fit_time = time.time() - t0
         
         current, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
+        
+        # Check if TPOT actually fitted a model
+        if not fit_success or model is None:
+            raise RuntimeError("TPOT genetic algorithm failed - try increasing --time-budget to 180+")
         
         t0 = time.time()
         y_pred = model.predict(X_test.values)
@@ -606,7 +806,7 @@ def run_tpot(
         result.pareto_front_size = len(getattr(model, 'pareto_front_', [])) if hasattr(model, 'pareto_front_') else None
         
     except Exception as e:
-        result.error = str(e)
+        result.error = str(e)[:60] + "..." if len(str(e)) > 60 else str(e)
         if tracemalloc.is_tracing():
             tracemalloc.stop()
     
@@ -632,6 +832,7 @@ def run_flaml(
         system='FLAML',
         dataset='',
         task=task,
+        test_score=0.0,  # Will be updated after fitting
         n_train=len(X_train),
         n_test=len(X_test),
         n_features=X_train.shape[1],
@@ -681,6 +882,417 @@ def run_flaml(
         
     except Exception as e:
         result.error = str(e)
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
+    
+    return result
+
+
+def run_pycaret(
+    X_train: pd.DataFrame,
+    y_train: np.ndarray,
+    X_test: pd.DataFrame,
+    y_test: np.ndarray,
+    task: str,
+    time_budget_s: float,
+) -> BenchmarkResult:
+    """Run PyCaret and collect metrics."""
+    if not _HAS_PYCARET:
+        return BenchmarkResult(
+            system='PyCaret', dataset='', task=task,
+            test_score=0.0, error='PyCaret not installed (pip install pycaret)'
+        )
+    
+    result = BenchmarkResult(
+        system='PyCaret',
+        dataset='',
+        task=task,
+        test_score=0.0,
+        n_train=len(X_train),
+        n_test=len(X_test),
+        n_features=X_train.shape[1],
+        time_budget_s=time_budget_s,
+    )
+    
+    try:
+        gc.collect()
+        tracemalloc.start()
+        
+        t0 = time.time()
+        
+        # Combine X and y for PyCaret
+        train_df = X_train.copy()
+        train_df['target'] = y_train
+        
+        # Suppress PyCaret output
+        import sys
+        import io
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+        
+        try:
+            if task == 'classification':
+                exp = ClassificationExperiment()
+                exp.setup(train_df, target='target', session_id=42, verbose=False, html=False)
+                best_model = exp.compare_models(budget_time=time_budget_s/60, verbose=False)
+            else:
+                exp = RegressionExperiment()
+                exp.setup(train_df, target='target', session_id=42, verbose=False, html=False)
+                best_model = exp.compare_models(budget_time=time_budget_s/60, verbose=False)
+        finally:
+            sys.stdout = old_stdout
+        
+        fit_time = time.time() - t0
+        
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        
+        t0 = time.time()
+        y_pred = exp.predict_model(best_model, data=X_test)['prediction_label'].values
+        predict_time = time.time() - t0
+        
+        result.fit_time_s = fit_time
+        result.predict_time_s = predict_time
+        result.latency_ms_per_row = (predict_time * 1000) / len(X_test)
+        result.peak_memory_mb = peak / (1024 * 1024)
+        
+        if task == 'classification':
+            result.test_score = accuracy_score(y_test, y_pred)
+            result.test_f1 = f1_score(y_test, y_pred, average='weighted')
+            result.test_precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+            result.test_recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+        else:
+            result.test_score = r2_score(y_test, y_pred)
+            result.test_rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            result.test_mae = mean_absolute_error(y_test, y_pred)
+        
+        result.has_risk_report = False
+        result.has_audit_trail = False
+        
+    except Exception as e:
+        result.error = str(e)[:60] + "..." if len(str(e)) > 60 else str(e)
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
+    
+    return result
+
+
+def run_autogluon(
+    X_train: pd.DataFrame,
+    y_train: np.ndarray,
+    X_test: pd.DataFrame,
+    y_test: np.ndarray,
+    task: str,
+    time_budget_s: float,
+) -> BenchmarkResult:
+    """Run AutoGluon and collect metrics."""
+    if not _HAS_AUTOGLUON:
+        return BenchmarkResult(
+            system='AutoGluon', dataset='', task=task,
+            test_score=0.0, error='AutoGluon not installed (pip install autogluon)'
+        )
+    
+    result = BenchmarkResult(
+        system='AutoGluon',
+        dataset='',
+        task=task,
+        test_score=0.0,
+        n_train=len(X_train),
+        n_test=len(X_test),
+        n_features=X_train.shape[1],
+        time_budget_s=time_budget_s,
+    )
+    
+    try:
+        gc.collect()
+        tracemalloc.start()
+        
+        t0 = time.time()
+        
+        # Suppress AutoGluon warnings
+        import io
+        import logging
+        logging.getLogger("autogluon").setLevel(logging.ERROR)
+        warnings.filterwarnings('ignore', module='autogluon')
+        warnings.filterwarnings('ignore', message='.*fastai.*')
+        warnings.filterwarnings('ignore', message='.*NeuralNet.*')
+        
+        # Combine X and y for AutoGluon
+        train_df = X_train.copy()
+        train_df['target'] = y_train
+        test_df = X_test.copy()
+        
+        # Create temp directory for AutoGluon
+        import tempfile
+        import shutil
+        temp_dir = tempfile.mkdtemp()
+        
+        try:
+            # Redirect stderr during fit to suppress warnings
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+            
+            try:
+                predictor = TabularPredictor(
+                    label='target',
+                    path=temp_dir,
+                    verbosity=0,
+                    problem_type=task if task == 'regression' else 'multiclass'
+                )
+                predictor.fit(
+                    train_df,
+                    time_limit=int(time_budget_s),
+                    presets='medium_quality_faster_train',
+                )
+            finally:
+                sys.stderr = old_stderr
+            
+            fit_time = time.time() - t0
+            
+            current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            
+            t0 = time.time()
+            y_pred = predictor.predict(test_df)
+            predict_time = time.time() - t0
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        result.fit_time_s = fit_time
+        result.predict_time_s = predict_time
+        result.latency_ms_per_row = (predict_time * 1000) / len(X_test)
+        result.peak_memory_mb = peak / (1024 * 1024)
+        
+        if task == 'classification':
+            result.test_score = accuracy_score(y_test, y_pred)
+            result.test_f1 = f1_score(y_test, y_pred, average='weighted')
+            result.test_precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+            result.test_recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+        else:
+            result.test_score = r2_score(y_test, y_pred)
+            result.test_rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            result.test_mae = mean_absolute_error(y_test, y_pred)
+        
+        result.has_risk_report = False
+        result.has_audit_trail = False
+        
+    except Exception as e:
+        result.error = str(e)[:60] + "..." if len(str(e)) > 60 else str(e)
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
+    
+    return result
+
+
+def run_h2o(
+    X_train: pd.DataFrame,
+    y_train: np.ndarray,
+    X_test: pd.DataFrame,
+    y_test: np.ndarray,
+    task: str,
+    time_budget_s: float,
+) -> BenchmarkResult:
+    """Run H2O AutoML and collect metrics."""
+    if not _HAS_H2O:
+        return BenchmarkResult(
+            system='H2O', dataset='', task=task,
+            test_score=0.0, error='H2O not installed (pip install h2o)'
+        )
+    
+    result = BenchmarkResult(
+        system='H2O',
+        dataset='',
+        task=task,
+        test_score=0.0,
+        n_train=len(X_train),
+        n_test=len(X_test),
+        n_features=X_train.shape[1],
+        time_budget_s=time_budget_s,
+    )
+    
+    try:
+        gc.collect()
+        tracemalloc.start()
+        
+        t0 = time.time()
+        
+        # Suppress H2O output completely
+        import io
+        import contextlib
+        import logging
+        
+        # Suppress H2O logging
+        logging.getLogger("h2o").setLevel(logging.CRITICAL)
+        
+        # Suppress all warnings during H2O
+        warnings.filterwarnings('ignore')
+        
+        # Redirect stdout/stderr during H2O init and training
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+        
+        try:
+            # Initialize H2O (suppress output)
+            h2o.init(verbose=False)
+            
+            # Combine X and y
+            train_df = X_train.copy()
+            train_df['target'] = y_train
+            test_df = X_test.copy()
+            test_df['target'] = y_test
+            
+            # Convert to H2O frames
+            train_h2o = h2o.H2OFrame(train_df)
+            test_h2o = h2o.H2OFrame(test_df)
+            
+            # Set target column type
+            if task == 'classification':
+                train_h2o['target'] = train_h2o['target'].asfactor()
+                test_h2o['target'] = test_h2o['target'].asfactor()
+            
+            # Run AutoML
+            aml = H2OAutoML(
+                max_runtime_secs=int(time_budget_s),
+                seed=42,
+                verbosity='error',
+            )
+            aml.train(y='target', training_frame=train_h2o)
+            
+            fit_time = time.time() - t0
+            
+            current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            
+            t0 = time.time()
+            preds = aml.leader.predict(test_h2o)
+            y_pred = preds.as_data_frame()['predict'].values
+            predict_time = time.time() - t0
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+        
+        result.fit_time_s = fit_time
+        result.predict_time_s = predict_time
+        result.latency_ms_per_row = (predict_time * 1000) / len(X_test)
+        result.peak_memory_mb = peak / (1024 * 1024)
+        
+        if task == 'classification':
+            result.test_score = accuracy_score(y_test, y_pred)
+            result.test_f1 = f1_score(y_test, y_pred, average='weighted')
+            result.test_precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+            result.test_recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+        else:
+            result.test_score = r2_score(y_test, y_pred)
+            result.test_rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            result.test_mae = mean_absolute_error(y_test, y_pred)
+        
+        result.has_risk_report = False
+        result.has_audit_trail = False
+        
+        # Shutdown H2O silently
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+        try:
+            h2o.cluster().shutdown(prompt=False)
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+        
+    except Exception as e:
+        result.error = str(e)[:80] + "..." if len(str(e)) > 80 else str(e)
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
+        try:
+            h2o.cluster().shutdown(prompt=False)
+        except:
+            pass
+    
+    return result
+
+
+def run_mljar(
+    X_train: pd.DataFrame,
+    y_train: np.ndarray,
+    X_test: pd.DataFrame,
+    y_test: np.ndarray,
+    task: str,
+    time_budget_s: float,
+) -> BenchmarkResult:
+    """Run MLJAR AutoML and collect metrics."""
+    if not _HAS_MLJAR:
+        return BenchmarkResult(
+            system='MLJAR', dataset='', task=task,
+            test_score=0.0, error='MLJAR not installed (pip install mljar-supervised)'
+        )
+    
+    result = BenchmarkResult(
+        system='MLJAR',
+        dataset='',
+        task=task,
+        test_score=0.0,
+        n_train=len(X_train),
+        n_test=len(X_test),
+        n_features=X_train.shape[1],
+        time_budget_s=time_budget_s,
+    )
+    
+    try:
+        gc.collect()
+        tracemalloc.start()
+        
+        t0 = time.time()
+        
+        # Create temp directory for MLJAR
+        import tempfile
+        import shutil
+        temp_dir = tempfile.mkdtemp()
+        
+        try:
+            automl = MLJARAutoML(
+                mode='Compete',
+                total_time_limit=int(time_budget_s),
+                results_path=temp_dir,
+                ml_task=task,
+                random_state=42,
+                verbose=0,
+            )
+            automl.fit(X_train, y_train)
+            
+            fit_time = time.time() - t0
+            
+            current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            
+            t0 = time.time()
+            y_pred = automl.predict(X_test)
+            predict_time = time.time() - t0
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        result.fit_time_s = fit_time
+        result.predict_time_s = predict_time
+        result.latency_ms_per_row = (predict_time * 1000) / len(X_test)
+        result.peak_memory_mb = peak / (1024 * 1024)
+        
+        if task == 'classification':
+            result.test_score = accuracy_score(y_test, y_pred)
+            result.test_f1 = f1_score(y_test, y_pred, average='weighted')
+            result.test_precision = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+            result.test_recall = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+        else:
+            result.test_score = r2_score(y_test, y_pred)
+            result.test_rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            result.test_mae = mean_absolute_error(y_test, y_pred)
+        
+        result.has_risk_report = False
+        result.has_audit_trail = False
+        
+    except Exception as e:
+        result.error = str(e)[:60] + "..." if len(str(e)) > 60 else str(e)
         if tracemalloc.is_tracing():
             tracemalloc.stop()
     
@@ -902,7 +1514,7 @@ def print_comparison_table(results: List[BenchmarkResult], title: str = "Benchma
                 print(f"  {r.system:<15} ERROR: {r.error[:40]}")
             else:
                 f1_str = f"{r.test_f1:.4f}" if r.test_f1 else "-"
-                risk_str = "✓" if r.has_risk_report else "✗"
+                risk_str = "YES" if r.has_risk_report else "NO"
                 print(f"  {r.system:<15} {r.test_score:>8.4f} {f1_str:>8} "
                       f"{r.fit_time_s:>10.2f} {r.latency_ms_per_row:>10.3f} "
                       f"{r.peak_memory_mb:>10.1f} {risk_str:>6}")
@@ -923,13 +1535,13 @@ def print_summary(summary: BenchmarkSummary):
     print("\n  WINNERS BY METRIC:")
     print("-"*40)
     for metric, winner in summary.winner_by_metric.items():
-        print(f"    {metric:<25} → {winner}")
+        print(f"    {metric:<25} -> {winner}")
     
     # Leakage detection
     print("\n  LEAKAGE DETECTION CAPABILITY:")
     print("-"*40)
     for lt in summary.leakage_tests:
-        status = "✓ DETECTED" if lt.detected else "✗ NOT DETECTED"
+        status = "[OK] DETECTED" if lt.detected else "[X] NOT DETECTED"
         print(f"    {lt.system:<15} {status} (method: {lt.detection_method})")
     
     # Production readiness
@@ -940,8 +1552,8 @@ def print_summary(summary: BenchmarkSummary):
     systems_with_audit = set(r.system for r in summary.results if r.has_audit_trail)
     
     for sys in summary.systems_tested:
-        risk = "✓" if sys in systems_with_risk else "✗"
-        audit = "✓" if sys in systems_with_audit else "✗"
+        risk = "[OK]" if sys in systems_with_risk else "[X]"
+        audit = "[OK]" if sys in systems_with_audit else "[X]"
         print(f"    {sys:<15} Risk Report: {risk}  Audit Trail: {audit}")
     
     # Statistical tests
@@ -965,6 +1577,7 @@ def run_benchmark(
     systems: List[str] = None,
     output_file: str = None,
     verbose: bool = True,
+    custom_datasets: Dict[str, Dict[str, Any]] = None,
 ) -> BenchmarkSummary:
     """
     Run the complete benchmark suite.
@@ -981,6 +1594,8 @@ def run_benchmark(
         Path to save JSON results.
     verbose : bool
         Print progress.
+    custom_datasets : dict, optional
+        Additional custom datasets to include. Format: {name: {'X': df, 'y': array, 'task': str}}
     
     Returns
     -------
@@ -997,6 +1612,14 @@ def run_benchmark(
         available_systems.append('TPOT')
     if _HAS_FLAML:
         available_systems.append('FLAML')
+    if _HAS_PYCARET:
+        available_systems.append('PyCaret')
+    if _HAS_AUTOGLUON:
+        available_systems.append('AutoGluon')
+    if _HAS_H2O:
+        available_systems.append('H2O')
+    if _HAS_MLJAR:
+        available_systems.append('MLJAR')
     
     if systems:
         available_systems = [s for s in systems if s in available_systems]
@@ -1011,17 +1634,22 @@ def run_benchmark(
         return None
     
     if verbose:
-        print("\n" + "█"*80)
-        print("█" + " "*78 + "█")
-        print("█" + "  ACDSO BENCHMARK SUITE".center(78) + "█")
-        print("█" + "  Fair Comparison Against Auto-Sklearn, TPOT, FLAML".center(78) + "█")
-        print("█" + " "*78 + "█")
-        print("█"*80)
+        print("\n" + "="*80)
+        print("=" + " "*78 + "=")
+        print("=" + "  ACDSO BENCHMARK SUITE".center(78) + "=")
+        print("=" + "  Fair Comparison Against Auto-Sklearn, TPOT, FLAML".center(78) + "=")
+        print("=" + " "*78 + "=")
+        print("="*80)
         print(f"\n  Available systems: {', '.join(available_systems)}")
         print(f"  Time budget: {time_budget_s}s per system per dataset")
     
     # Load datasets
     datasets = load_benchmark_datasets(dataset_names)
+    
+    # Merge custom datasets if provided
+    if custom_datasets:
+        datasets.update(custom_datasets)
+    
     if verbose:
         print(f"  Datasets to test: {len(datasets)}")
         for name, info in datasets.items():
@@ -1032,9 +1660,9 @@ def run_benchmark(
     
     for ds_name, ds_info in datasets.items():
         if verbose:
-            print(f"\n{'─'*80}")
+            print(f"\n{'-'*80}")
             print(f"  Dataset: {ds_name}")
-            print(f"{'─'*80}")
+            print(f"{'-'*80}")
         
         X = ds_info['X']
         y = ds_info['y']
@@ -1062,6 +1690,14 @@ def run_benchmark(
                 result = run_tpot(X_train, y_train, X_test, y_test, task, time_budget_s)
             elif sys_name == 'FLAML':
                 result = run_flaml(X_train, y_train, X_test, y_test, task, time_budget_s)
+            elif sys_name == 'PyCaret':
+                result = run_pycaret(X_train, y_train, X_test, y_test, task, time_budget_s)
+            elif sys_name == 'AutoGluon':
+                result = run_autogluon(X_train, y_train, X_test, y_test, task, time_budget_s)
+            elif sys_name == 'H2O':
+                result = run_h2o(X_train, y_train, X_test, y_test, task, time_budget_s)
+            elif sys_name == 'MLJAR':
+                result = run_mljar(X_train, y_train, X_test, y_test, task, time_budget_s)
             else:
                 continue
             
@@ -1070,15 +1706,17 @@ def run_benchmark(
             
             if verbose:
                 if result.error:
-                    print(f"ERROR: {result.error[:40]}")
+                    # Show more of the error message
+                    err_msg = result.error if len(result.error) <= 55 else result.error[:52] + "..."
+                    print(f"ERROR: {err_msg}")
                 else:
                     print(f"Score: {result.test_score:.4f}, Time: {result.fit_time_s:.1f}s")
     
     # Leakage detection tests
     if verbose:
-        print(f"\n{'─'*80}")
+        print(f"\n{'-'*80}")
         print("  Running Leakage Detection Tests...")
-        print(f"{'─'*80}")
+        print(f"{'-'*80}")
     
     leakage_results = test_leakage_detection(time_budget_s=min(60, time_budget_s))
     
@@ -1123,19 +1761,29 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Quick demo
   python benchmark_automl.py --quick
+  
+  # Standard datasets
   python benchmark_automl.py --datasets iris,wine --time-budget 60
   python benchmark_automl.py --datasets all --time-budget 300 --output results.json
-  python benchmark_automl.py --systems ACDSO,FLAML --datasets synthetic_clf
+  
+  # YOUR OWN DATASET
+  python benchmark_automl.py --file brain.csv --target Sec --task classification
+  python benchmark_automl.py --file data.csv --target price --task regression --exclude id,date
+  
+  # Mix custom + standard datasets
+  python benchmark_automl.py --file brain.csv --target Sec --datasets iris,wine
         """
     )
     
     parser.add_argument(
         '--datasets', '-d',
         type=str,
-        default='iris,wine,breast_cancer,diabetes',
+        default=None,
         help='Comma-separated dataset names or "all". Available: iris, wine, breast_cancer, '
-             'diabetes, california, synthetic_clf, synthetic_reg, leaky_clf, imbalanced_clf, multicollinear'
+             'diabetes, california, synthetic_clf, synthetic_reg, leaky_clf, imbalanced_clf, multicollinear. '
+             'Omit to only benchmark custom file.'
     )
     
     parser.add_argument(
@@ -1149,7 +1797,7 @@ Examples:
         '--systems', '-s',
         type=str,
         default=None,
-        help='Comma-separated systems to test: ACDSO, Auto-sklearn, TPOT, FLAML'
+        help='Comma-separated systems to test: ACDSO, Auto-sklearn, TPOT, FLAML, PyCaret, AutoGluon, H2O, MLJAR'
     )
     
     parser.add_argument(
@@ -1165,13 +1813,81 @@ Examples:
         help='Quick demo run (iris only, 30s budget)'
     )
     
+    # Custom dataset arguments
+    parser.add_argument(
+        '--file', '-f',
+        type=str,
+        default=None,
+        help='Path to your own dataset file (CSV, Excel, Parquet, JSON)'
+    )
+    
+    parser.add_argument(
+        '--target',
+        type=str,
+        default=None,
+        help='Target column name in your dataset (required with --file)'
+    )
+    
+    parser.add_argument(
+        '--task',
+        type=str,
+        choices=['classification', 'regression', 'auto'],
+        default='auto',
+        help='Task type: classification, regression, or auto (default: auto-detect)'
+    )
+    
+    parser.add_argument(
+        '--exclude', '-e',
+        type=str,
+        default=None,
+        help='Comma-separated list of columns to exclude from features'
+    )
+    
     args = parser.parse_args()
     
+    # Handle custom dataset
+    custom_datasets = {}
+    if args.file:
+        if not args.target:
+            parser.error("--target is required when using --file")
+        
+        exclude_cols = args.exclude.split(',') if args.exclude else None
+        
+        try:
+            custom_data = load_custom_dataset(
+                file_path=args.file,
+                target_column=args.target,
+                task=args.task,
+                exclude_columns=exclude_cols,
+            )
+            
+            # Use filename as dataset name
+            import os
+            ds_name = os.path.splitext(os.path.basename(args.file))[0]
+            custom_datasets[ds_name] = custom_data
+            
+            print(f"\n  Loaded custom dataset: {custom_data['description']}")
+            print(f"  Task: {custom_data['task']}")
+            if exclude_cols:
+                print(f"  Excluded columns: {exclude_cols}")
+        except Exception as e:
+            print(f"Error loading custom dataset: {e}")
+            return
+    
+    # Determine built-in datasets
     if args.quick:
         datasets = ['iris']
         time_budget = 30
-    else:
+    elif args.datasets:
         datasets = None if args.datasets == 'all' else args.datasets.split(',')
+        time_budget = args.time_budget
+    elif args.file:
+        # Only use custom dataset if no --datasets specified
+        datasets = []
+        time_budget = args.time_budget
+    else:
+        # Default datasets if nothing specified
+        datasets = ['iris', 'wine', 'breast_cancer', 'diabetes']
         time_budget = args.time_budget
     
     systems = args.systems.split(',') if args.systems else None
@@ -1182,6 +1898,7 @@ Examples:
         systems=systems,
         output_file=args.output,
         verbose=True,
+        custom_datasets=custom_datasets if custom_datasets else None,
     )
 
 
