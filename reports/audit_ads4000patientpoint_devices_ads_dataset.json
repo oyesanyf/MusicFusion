@@ -1,0 +1,177 @@
+{
+  "risk_report": {
+    "task": "regression",
+    "target_type": "multiclass",
+    "n_rows": 3200,
+    "n_cols": 4531,
+    "n_numeric": 4531,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": -0.0007108255720990275,
+    "temporal_leakage_gap": -0.013111279013146945,
+    "class_imbalance_max_ratio": null,
+    "imbalance_severity": 0.0,
+    "vif_max": 999999.9999712444,
+    "vif_features": [
+      "device_id_00775150-7941-47cd-a874-f2cb8e4a005c",
+      "device_id_00b0437a-a700-43fc-a24d-403e0a764017",
+      "device_id_00c8032f-c132-4317-9afc-781b500eede9",
+      "device_id_00d4ff5d-4772-4e33-b06a-bb8d5f81e716",
+      "device_id_00e0c176-7f63-44a0-a070-19963a9d8190",
+      "device_id_013feee2-1ba9-488a-b196-ccbb713d2ca6",
+      "device_id_017c2ce8-602d-4672-ad0a-f1e8765820d1",
+      "device_id_01c0f502-c656-45fd-b62a-1d017ec1fcf2",
+      "device_id_01e1a2ae-f4b1-4c94-9c22-c4fac4d0bbe5"
+    ],
+    "cv_score_std": 0.0021422351763760233,
+    "notes": [
+      "High multicollinearity: VIF max=1000000.0."
+    ]
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null
+  },
+  "candidates_evaluated": [
+    {
+      "name": "RandomForest_d5",
+      "metric": -0.007402198019921258,
+      "train_time_s": 20.408750772476196,
+      "peak_mem_mb": 0.0,
+      "latency_ms_per_row": 0.47074537724256516,
+      "risk_penalty": 0.1659724087513889,
+      "cv_scores": [
+        -0.001771235182976838,
+        -0.009247477162569462,
+        -0.007649090977782658,
+        -0.0020900377535570946,
+        -0.016253149022720237
+      ],
+      "cv_score_std": 0.005324136250462973,
+      "stress_worst_drop": 0.0,
+      "stress_tests": []
+    },
+    {
+      "name": "RandomForest_d10",
+      "metric": -0.012273275847247555,
+      "train_time_s": 24.95054006576538,
+      "peak_mem_mb": 0.0,
+      "latency_ms_per_row": 0.5160253494977951,
+      "risk_penalty": 0.17909008825251743,
+      "cv_scores": [
+        -0.0002425048905552174,
+        -0.01886955548204261,
+        -0.01580781830515754,
+        -0.0016564588770939803,
+        -0.02479004168138843
+      ],
+      "cv_score_std": 0.00969669608417248,
+      "stress_worst_drop": 0.0,
+      "stress_tests": []
+    },
+    {
+      "name": "RandomForestRegressor",
+      "metric": -0.039282348593477324,
+      "train_time_s": 57.538573265075684,
+      "peak_mem_mb": 58.09765625,
+      "latency_ms_per_row": 0.39298180490732193,
+      "risk_penalty": 0.19422691801783568,
+      "cv_scores": [
+        -0.02496478371196731,
+        -0.0448634906423806,
+        -0.05231490147496998,
+        -0.01881134275906904,
+        -0.05545722437899969
+      ],
+      "cv_score_std": 0.014742306005945227,
+      "stress_worst_drop": 0.0,
+      "stress_tests": []
+    },
+    {
+      "name": "ElasticNet",
+      "metric": -0.0559703548244558,
+      "train_time_s": 9.417230606079102,
+      "peak_mem_mb": 9.26171875,
+      "latency_ms_per_row": 0.1506861299276352,
+      "risk_penalty": 0.17241128607372197,
+      "cv_scores": [
+        -0.054282348204103714,
+        -0.0469842677983523,
+        -0.04955680503157023,
+        -0.062475795119730115,
+        -0.06655255796852266
+      ],
+      "cv_score_std": 0.007470428691240659,
+      "stress_worst_drop": 0.0,
+      "stress_tests": []
+    },
+    {
+      "name": "Ridge_alpha10",
+      "metric": -0.08032927187609133,
+      "train_time_s": 10.392800569534302,
+      "peak_mem_mb": 0.0,
+      "latency_ms_per_row": 0.206751748919487,
+      "risk_penalty": 0.15642670552912807,
+      "cv_scores": [
+        -0.0796740888991434,
+        -0.08428677096690729,
+        -0.08032178559774183,
+        -0.07783723097585593,
+        -0.07952648294080822
+      ],
+      "cv_score_std": 0.0021422351763760233,
+      "stress_worst_drop": 0.0,
+      "stress_tests": []
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "RandomForest_d5",
+      "metric": -0.007402198019921258,
+      "train_time_s": 20.408750772476196,
+      "peak_mem_mb": 0.0,
+      "latency_ms_per_row": 0.47074537724256516,
+      "risk_penalty": 0.1659724087513889
+    },
+    {
+      "name": "RandomForestRegressor",
+      "metric": -0.039282348593477324,
+      "train_time_s": 57.538573265075684,
+      "peak_mem_mb": 58.09765625,
+      "latency_ms_per_row": 0.39298180490732193,
+      "risk_penalty": 0.19422691801783568
+    },
+    {
+      "name": "ElasticNet",
+      "metric": -0.0559703548244558,
+      "train_time_s": 9.417230606079102,
+      "peak_mem_mb": 9.26171875,
+      "latency_ms_per_row": 0.1506861299276352,
+      "risk_penalty": 0.17241128607372197
+    },
+    {
+      "name": "Ridge_alpha10",
+      "metric": -0.08032927187609133,
+      "train_time_s": 10.392800569534302,
+      "peak_mem_mb": 0.0,
+      "latency_ms_per_row": 0.206751748919487,
+      "risk_penalty": 0.15642670552912807
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "RandomForestRegressor",
+    "metric": -0.039282348593477324,
+    "train_time_s": 57.538573265075684,
+    "peak_mem_mb": 58.09765625,
+    "latency_ms_per_row": 0.39298180490732193,
+    "risk_penalty": 0.19422691801783568,
+    "stress_worst_drop": 0.0
+  },
+  "risk_calibrator": {
+    "type": null,
+    "used": false
+  }
+}

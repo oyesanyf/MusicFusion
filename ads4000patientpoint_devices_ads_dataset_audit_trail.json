@@ -1,0 +1,69 @@
+{
+  "risk_report": {
+    "task": "regression",
+    "target_type": "multiclass",
+    "n_rows": 3200,
+    "n_cols": 527,
+    "n_numeric": 527,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": -0.0007237838022548404,
+    "temporal_leakage_gap": null,
+    "class_imbalance_max_ratio": null,
+    "imbalance_severity": 0.0,
+    "vif_max": 1.8732359844409587,
+    "vif_features": [],
+    "cv_score_std": 0.006169397190392898,
+    "notes": []
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null
+  },
+  "candidates_evaluated": [
+    {
+      "name": "RandomForestRegressor",
+      "metric": -0.036526510188581926,
+      "train_time_s": 32.10744762420654,
+      "peak_mem_mb": 56.0078125,
+      "latency_ms_per_row": 0.28182193636894226,
+      "risk_penalty": 0.01850819157117869,
+      "cv_scores": [
+        -0.03177987879224076,
+        -0.03619406935606562,
+        -0.030754607858985983,
+        -0.04809527025223659,
+        -0.0358087246833807
+      ],
+      "cv_score_std": 0.006169397190392898,
+      "stress_worst_drop": 0.0,
+      "stress_tests": []
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "RandomForestRegressor",
+      "metric": -0.036526510188581926,
+      "train_time_s": 32.10744762420654,
+      "peak_mem_mb": 56.0078125,
+      "latency_ms_per_row": 0.28182193636894226,
+      "risk_penalty": 0.01850819157117869
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "RandomForestRegressor",
+    "metric": -0.036526510188581926,
+    "train_time_s": 32.10744762420654,
+    "peak_mem_mb": 56.0078125,
+    "latency_ms_per_row": 0.28182193636894226,
+    "risk_penalty": 0.01850819157117869,
+    "stress_worst_drop": 0.0
+  },
+  "risk_calibrator": {
+    "type": null,
+    "used": false
+  }
+}

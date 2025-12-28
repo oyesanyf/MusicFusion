@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACDSO Multi-Target Report - ads4000patientpoint_devices_ads_dataset</title>
+    <style>
+        :root {
+            --primary: #667eea;
+            --secondary: #764ba2;
+            --success: #48bb78;
+            --warning: #ed8936;
+            --danger: #f56565;
+            --dark: #2d3748;
+            --light: #f7fafc;
+            --border: #e2e8f0;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+            color: var(--dark);
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header .subtitle {
+            color: #718096;
+            font-size: 1.1rem;
+        }
+        
+        .targets-overview {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .target-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            border-left: 4px solid var(--primary);
+        }
+        
+        .target-card h3 {
+            color: var(--primary);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .target-card .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .target-card .stat:last-child {
+            border-bottom: none;
+        }
+        
+        .section {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        
+        .section h2 {
+            color: var(--dark);
+            border-bottom: 3px solid var(--primary);
+            padding-bottom: 0.75rem;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .tab {
+            padding: 0.75rem 1.5rem;
+            background: var(--light);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--dark);
+            transition: all 0.3s;
+        }
+        
+        .tab:hover, .tab.active {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        th {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            font-weight: 600;
+        }
+        
+        tr:hover {
+            background: var(--light);
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .badge-success { background: #c6f6d5; color: #276749; }
+        .badge-warning { background: #feebc8; color: #c05621; }
+        .badge-primary { background: #e9d8fd; color: #553c9a; }
+        
+        .predictions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+        
+        .prediction-box {
+            background: var(--light);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+        }
+        
+        .prediction-box h4 {
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+        
+        .embedded-report {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 1rem;
+        }
+        
+        .embedded-report iframe {
+            width: 100%;
+            height: 600px;
+            border: none;
+        }
+        
+        .file-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--light);
+            border-radius: 8px;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            margin: 0.25rem;
+        }
+        
+        .file-link:hover {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .stat-box {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 1.25rem;
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        .stat-box .value {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+        
+        .stat-box .label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 ACDSO Multi-Target Report</h1>
+            <p class="subtitle">ads4000patientpoint_devices_ads_dataset | 2 Targets | Generated: 2025-12-28 09:05:49</p>
+        </div>
+        
+        <div class="summary-stats">
+            <div class="stat-box">
+                <div class="value">2</div>
+                <div class="label">Targets</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">2</div>
+                <div class="label">Predictions Made</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">8,000</div>
+                <div class="label">Total Predictions</div>
+            </div>
+            <div class="stat-box">
+                <div class="value">0</div>
+                <div class="label">Full Reports</div>
+            </div>
+        </div>
+        
+        <div class="targets-overview">
+
+            <div class="target-card">
+                <h3>🎯 ads_served</h3>
+
+                <div class="stat"><span>Mean:</span><span>254.2916</span></div>
+                <div class="stat"><span>Std:</span><span>75.3209</span></div>
+                <div class="stat"><span>Min:</span><span>65.1880</span></div>
+                <div class="stat"><span>Max:</span><span>442.8000</span></div>
+
+                <div class="stat"><span>Predictions:</span><span>4,000</span></div>
+                <div class="stat"><span>Output:</span><span style="font-size:0.8em;">predictions_ads4000patientpoint_devices_ads_dataset_ads_served_full_dataset.csv</span></div>
+            </div>
+
+            <div class="target-card">
+                <h3>🎯 daily_views</h3>
+
+                <div class="stat"><span>Mean:</span><span>2485.2990</span></div>
+                <div class="stat"><span>Std:</span><span>767.7390</span></div>
+                <div class="stat"><span>Min:</span><span>704.2880</span></div>
+                <div class="stat"><span>Max:</span><span>4256.1680</span></div>
+
+                <div class="stat"><span>Predictions:</span><span>4,000</span></div>
+                <div class="stat"><span>Output:</span><span style="font-size:0.8em;">predictions_ads4000patientpoint_devices_ads_dataset_daily_views_full_dataset.csv</span></div>
+            </div>
+
+        </div>
+        
+        <div class="section">
+            <h2>📊 Detailed Target Reports</h2>
+            <div class="tabs">
+                <button class="tab active" onclick="showTab('ads_served')">ads_served</button>
+                <button class="tab " onclick="showTab('daily_views')">daily_views</button>
+            </div>
+
+            <div id="tab-ads_served" class="tab-content active">
+                <h3>Target: ads_served</h3>
+
+            </div>
+
+            <div id="tab-daily_views" class="tab-content ">
+                <h3>Target: daily_views</h3>
+
+            </div>
+
+        </div>
+        
+        <div class="section">
+            <h2>📁 Predictions Files</h2>
+            <div class="predictions-grid">
+
+                <div class="prediction-box">
+                    <h4>🎯 ads_served</h4>
+                    <p>Predictions: <strong>4,000</strong></p>
+                    <a href="reports/predictions_ads4000patientpoint_devices_ads_dataset_ads_served_full_dataset.csv" class="file-link">📥 Download CSV</a>
+                </div>
+
+                <div class="prediction-box">
+                    <h4>🎯 daily_views</h4>
+                    <p>Predictions: <strong>4,000</strong></p>
+                    <a href="reports/predictions_ads4000patientpoint_devices_ads_dataset_daily_views_full_dataset.csv" class="file-link">📥 Download CSV</a>
+                </div>
+
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>📜 Individual Report Links</h2>
+            <p>Each target has its own detailed autonomous report with full EDA, Time Series, AutoML, and Benchmark analysis:</p>
+            <div style="margin-top: 1rem;">
+
+                <a href="autonomous_ads4000patientpoint_devices_ads_dataset_ads_served_report.html" class="file-link">📊 ads_served Report</a>
+
+                <a href="autonomous_ads4000patientpoint_devices_ads_dataset_daily_views_report.html" class="file-link">📊 daily_views Report</a>
+
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function showTab(target) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById('tab-' + target).classList.add('active');
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>

@@ -559,13 +559,82 @@ wrapper = GenericModelWrapper(
 
 ## 🎮 Demo Suite
 
-ACDSO includes a comprehensive demo suite that showcases all features.
+ACDSO includes a comprehensive demo suite that showcases all features with **automated report generation**.
+
+### Quick Reference
+
+```bash
+# Most common: Run everything on your data
+python demo.py --autonomous --file data.csv
+
+# Complete workflow: Train + Predict
+python demo.py --autonomous --predict price --file data.csv
+
+# Just make predictions (model must exist)
+python demo.py --predict price --file data.csv
+
+# Time series forecasting
+python demo.py --autonomous --file sales.csv --target revenue --datetime-col date
+
+# Benchmark your dataset
+python demo.py --file data.csv --target price --benchmark
+```
+
+### Autonomous Mode (Recommended)
+
+Run everything automatically with a single command - generates a comprehensive combined HTML report:
+
+```bash
+# Run ALL analyses on your data (EDA, Risk, AutoML, Time Series, Benchmarks)
+python demo.py --autonomous --file data.csv
+
+# With custom target
+python demo.py --autonomous --file data.csv --target price
+
+# Short form
+python demo.py -a -f data.csv -t price
+```
+
+**What Autonomous Mode Does:**
+1. **Auto EDA** - Complete exploratory data analysis with quality scores
+2. **Risk Analysis** - Leakage detection, multicollinearity, imbalance analysis
+3. **AutoML** - Risk-aware model selection with full audit trail
+4. **Time Series** - Forecasting (if datetime column detected)
+5. **Benchmarks** - Comparison against other AutoML systems
+6. **Combined Report** - Single HTML file with everything embedded
+
+### Complete Workflow: Train + Predict
+
+Train a model and make predictions in one command:
+
+```bash
+# Train model and make predictions on full dataset
+python demo.py --autonomous --predict price --file data.csv
+
+# This will:
+# 1. Run all analyses (EDA, Risk, AutoML, Time Series, Benchmarks)
+# 2. Save the best trained model
+# 3. Make predictions on ALL rows in the dataset
+# 4. Generate ONE combined HTML report with everything
+```
+
+**Output Files:**
+- `reports/autonomous_{filename}_report.html` - **Combined HTML report** (EDA, Time Series, AutoML, Predictions)
+- `reports/autonomous_{filename}_combined.json` - JSON report with all data
+- `reports/model_{filename}.pkl` - Saved model for future predictions
+- `reports/predictions_{filename}_{target}_full_dataset.csv` - Predictions on full dataset
 
 ### Run Built-in Demos
 
 ```bash
 # Run all 18 demos using the Seaborn tips dataset
 python demo.py
+
+# Run specific demos
+python demo.py --v3              # v3 innovations demo
+python demo.py --timeseries     # Time series forecasting
+python demo.py --decision       # Decision intelligence
+python demo.py --benchmark      # Benchmark comparison
 ```
 
 ### Run on Your Own Data
@@ -580,9 +649,37 @@ python demo.py --file data.csv --target price
 # Specify task type
 python demo.py --file data.csv --target churn --task classification
 
+# Time series with datetime column
+python demo.py --file sales.csv --target revenue --datetime-col date --timeseries
+
 # Short form
 python demo.py -f customers.xlsx -t label
 ```
+
+### Make Predictions (After Training)
+
+```bash
+# Make predictions using a previously trained model
+python demo.py --predict price --file data.csv
+
+# Predictions are made on ALL rows in the dataset
+# Output: reports/predictions_{filename}_{target}_full_dataset.csv
+```
+
+### Combined HTML Reports
+
+All modes generate detailed **combined HTML reports** that include:
+
+- **EDA Section**: Complete exploratory data analysis with visualizations
+- **Risk Analysis**: Leakage detection, multicollinearity, data quality scores
+- **AutoML Results**: All models evaluated with scores, selected model details
+- **Time Series**: Forecasting results and benchmark comparisons (if applicable)
+- **Benchmark Results**: Comparison against other AutoML systems with model names
+- **Predictions**: Prediction statistics and distributions (if --predict used)
+- **Console Output**: Full execution log
+- **Audit Trails**: Complete model selection history
+
+**Report Location:** `reports/autonomous_{filename}_report.html`
 
 ### Supported File Formats
 
@@ -595,24 +692,22 @@ python demo.py -f customers.xlsx -t label
 | Feather | `.feather` |
 | Pickle | `.pkl`, `.pickle` |
 
-### What the Demo Does
-
-When you run `demo.py --file yourdata.csv`, it performs:
-
-1. **Auto EDA** - Data quality assessment, correlations, anomalies
-2. **Risk-Aware AutoML** - ACDSO classification or regression
-3. **Evaluation** - Performance metrics, confusion matrix
-4. **Risk Report** - VIF, imbalance, missing data warnings
-5. **Model Selection** - Best model and metrics
-6. **Export** - Saves `*_audit_trail.json` and `*_eda_report.json`
-
 ### Demo Arguments
 
 | Argument | Short | Description |
 |----------|-------|-------------|
+| `--autonomous` | `-a` | Run ALL analyses automatically (EDA, Risk, AutoML, Time Series, Benchmarks) |
 | `--file` | `-f` | Path to data file |
 | `--target` | `-t` | Target column name (default: last column) |
+| `--predict` | `-p` | Make predictions using best trained model (requires --file) |
 | `--task` | | `auto`, `classification`, or `regression` |
+| `--timeseries` | `-ts` | Run time series forecasting demo |
+| `--datetime-col` | | Datetime column for time series |
+| `--horizon` | | Forecast horizon (default: 7) |
+| `--benchmark` | `-b` | Compare against other AutoML systems |
+| `--decision` | `-d` | Run decision intelligence demo |
+| `--exclude` | `-e` | Comma-separated columns to exclude |
+| `--no-auto-exclude` | | Disable automatic column exclusion |
 | `--all` | | Run all built-in demos |
 
 ---

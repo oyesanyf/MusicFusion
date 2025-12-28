@@ -1,0 +1,40 @@
+{
+  "timestamp": "2025-12-25T06:35:58.328120",
+  "data_shape": [
+    1000,
+    10
+  ],
+  "treatment_col": "offered_incentive",
+  "outcome_col": "churned",
+  "causal_summary": {
+    "ate": -0.159932504930049,
+    "att": -0.20220461556847846,
+    "decision_ready": true,
+    "warnings": [
+      "Near-zero propensity scores detected (min=0.0003). Some units have almost no chance of treatment.",
+      "Poor overlap between treated and control groups."
+    ]
+  },
+  "uplift_summary": {
+    "best_model": "t_learner",
+    "qini_score": 0.02690829560145068,
+    "auuc": 0.2183177218007581,
+    "policy_value": 0.48259106168511423
+  },
+  "optimization_summary": {
+    "n_selected": 794,
+    "total_value": 206.3018127015649,
+    "total_cost": 6598.263699035253,
+    "roi": 0.0312660757604654,
+    "constraints_satisfied": {
+      "budget": "True"
+    }
+  },
+  "policy_summary": {},
+  "recommendations": {
+    "n_to_treat": 794,
+    "total_expected_benefit": 206.30181270156487
+  },
+  "warnings": [],
+  "total_time": 0.9551646709442139
+}

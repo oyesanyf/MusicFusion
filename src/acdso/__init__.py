@@ -1,5 +1,5 @@
 """
-ACDSO v2.0: Risk-Optimized AutoML for Production Systems
+ACDSO v3.0: Risk-Optimized AutoML for Production Systems
 =========================================================
 
 A production-oriented AutoML library that unifies contextual risk diagnostics,
@@ -148,12 +148,35 @@ from acdso.advisors import (
     auto_exclude_columns,
 )
 
-# Integrations (lazy import to avoid requiring all dependencies)
+# Integrations and submodules (lazy import to avoid requiring all dependencies)
 def __getattr__(name):
-    """Lazy import for integration modules."""
+    """Lazy import for integration modules and submodules."""
     if name == "integrations":
-        from acdso import integrations
-        return integrations
+        from acdso import integrations as _integrations
+        return _integrations
+    if name == "timeseries":
+        from acdso.timeseries import (
+            AutoTS, AutoTSResult, ForecastingPipeline, auto_forecast,
+            TimeSeriesSplitter, ExpandingWindowSplit, RollingWindowSplit, WalkForwardSplit,
+            LagFeatureTransformer, RollingWindowTransformer, DateTimeFeatureTransformer,
+            mae, rmse, mape, smape, mase, wape,
+            TimeSeriesRiskAnalyzer, TimeSeriesRiskReport,
+            NaiveForecaster, SeasonalNaiveForecaster, MovingAverageForecaster,
+            TimeSeriesBenchmark, run_ts_benchmark,
+        )
+        import acdso.timeseries as _timeseries
+        return _timeseries
+    if name == "decision":
+        from acdso.decision import (
+            DecisionIntelligence, DecisionResult, DecisionAuditTrail,
+            CausalAnalyzer, CausalModel, CausalEstimate, CausalReadinessReport,
+            UpliftModeler, UpliftResult, TLearner, SLearner, XLearner, DRLearner,
+            ActionOptimizer, OptimizationResult, BudgetConstraint, CapacityConstraint,
+            PolicyLearner, PolicyResult, ContextualBanditEnv,
+            qini_score, estimate_ate, optimize_actions,
+        )
+        import acdso.decision as _decision
+        return _decision
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -226,5 +249,9 @@ __all__ = [
     "StubLLMAdvisor",
     # Integrations submodule
     "integrations",
+    # Time series submodule (AutoTS)
+    "timeseries",
+    # Decision Intelligence submodule (DoWhy, EconML, OR-Tools, RLlib)
+    "decision",
 ]
 

@@ -1,0 +1,78 @@
+{
+  "risk_report": {
+    "task": "regression",
+    "target_type": "regression",
+    "n_rows": 195,
+    "n_cols": 8,
+    "n_numeric": 8,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": 0.38561212511297505,
+    "temporal_leakage_gap": null,
+    "class_imbalance_max_ratio": null,
+    "imbalance_severity": 0.0,
+    "vif_max": 7.644362549878242,
+    "vif_features": [],
+    "cv_score_std": 0.17866592790799957,
+    "notes": []
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null
+  },
+  "candidates_evaluated": [
+    {
+      "name": "Ridge",
+      "metric": 0.4572332288190418,
+      "train_time_s": 0.4414501190185547,
+      "peak_mem_mb": 0.24704360961914062,
+      "latency_ms_per_row": 0.018004882029997997,
+      "risk_penalty": 0.16586617529926945,
+      "cv_scores": [
+        0.5895453428208169,
+        0.5176183696662836,
+        0.37850495162897624,
+        0.14948779539716828,
+        0.6510096845819644
+      ],
+      "cv_score_std": 0.17866592790799957
+    },
+    {
+      "name": "RandomForestRegressor",
+      "metric": 0.3383231925937472,
+      "train_time_s": 9.803766012191772,
+      "peak_mem_mb": 0.6429080963134766,
+      "latency_ms_per_row": 0.45017340244391024,
+      "risk_penalty": 0.16586617529926945,
+      "cv_scores": [
+        0.583292931527611,
+        0.49972390718870197,
+        -0.009095966835005243,
+        0.08765740843507508,
+        0.530037682652353
+      ],
+      "cv_score_std": 0.24752705591493693
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "Ridge",
+      "metric": 0.4572332288190418,
+      "train_time_s": 0.4414501190185547,
+      "peak_mem_mb": 0.24704360961914062,
+      "latency_ms_per_row": 0.018004882029997997,
+      "risk_penalty": 0.16586617529926945
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "Ridge",
+    "metric": 0.4572332288190418,
+    "train_time_s": 0.4414501190185547,
+    "peak_mem_mb": 0.24704360961914062,
+    "latency_ms_per_row": 0.018004882029997997,
+    "risk_penalty": 0.16586617529926945
+  }
+}

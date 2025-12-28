@@ -1,0 +1,217 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACDSO Time Series Benchmark Report</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 0;
+            background: linear-gradient(135deg, var(--primary), #7c3aed);
+            color: white;
+            border-radius: 16px;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.5rem;
+        }
+        
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            margin-top: 0;
+            color: var(--primary);
+            border-bottom: 2px solid var(--primary);
+            padding-bottom: 10px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        th {
+            background: #f1f5f9;
+            font-weight: 600;
+        }
+        
+        tr:hover {
+            background: #f8fafc;
+        }
+        
+        .winner {
+            background: #dcfce7 !important;
+        }
+        
+        .failed-section {
+            background: #fef2f2;
+            border-left: 4px solid var(--danger);
+            padding: 16px;
+            border-radius: 8px;
+        }
+        
+        .winners-section ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .winners-section li {
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .timestamp {
+            text-align: center;
+            color: #64748b;
+            margin-top: 40px;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ACDSO Time Series Benchmark</h1>
+            <p>Comprehensive comparison of forecasting systems</p>
+        </div>
+        
+        <div class="card">
+            <h2>Benchmark Results</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>System</th>
+                        <th>RMSE</th>
+                        <th>MAE</th>
+                        <th>MAPE</th>
+                        <th>sMAPE</th>
+                        <th>MASE</th>
+                        <th>Fit Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                <tr>
+                    <td><strong>ACDSO</strong></td>
+                    <td>128.9925</td>
+                    <td>108.4341</td>
+                    <td>110.02%</td>
+                    <td>49.35%</td>
+                    <td>0.6597</td>
+                    <td>15.7s</td>
+                </tr>
+            
+
+                <tr>
+                    <td><strong>STATSFORECAST</strong></td>
+                    <td>139.5375</td>
+                    <td>119.9161</td>
+                    <td>125.21%</td>
+                    <td>52.96%</td>
+                    <td>0.7295</td>
+                    <td>20.9s</td>
+                </tr>
+            
+
+                <tr>
+                    <td><strong>PMDARIMA</strong></td>
+                    <td>139.5454</td>
+                    <td>119.9259</td>
+                    <td>125.10%</td>
+                    <td>52.98%</td>
+                    <td>0.7296</td>
+                    <td>6.3s</td>
+                </tr>
+            
+
+                <tr>
+                    <td><strong>PROPHET</strong></td>
+                    <td>139.7035</td>
+                    <td>119.8839</td>
+                    <td>121.16%</td>
+                    <td>53.18%</td>
+                    <td>0.7293</td>
+                    <td>0.3s</td>
+                </tr>
+            
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="card winners-section">
+            <h2>Winners by Metric</h2>
+            <ul><li><strong>mae:</strong> acdso</li>
+<li><strong>rmse:</strong> acdso</li>
+<li><strong>mape:</strong> acdso</li>
+<li><strong>smape:</strong> acdso</li>
+<li><strong>mase:</strong> acdso</li>
+<li><strong>fit_time:</strong> prophet</li></ul>
+        </div>
+        
+        
+                <div class="failed-section">
+                    <h3>Failed Systems</h3>
+                    <ul><li><strong>autots:</strong> forecast_length is too large for training data.
+What this means is you don't have enough history to </li>
+<li><strong>sktime:</strong> unsupported operand type(s) for *: 'int' and 'NoneType'</li></ul>
+                </div>
+            
+        
+        <div class="card">
+            <h2>Benchmark Configuration</h2>
+            <ul>
+                <li><strong>Datasets:</strong> ads4000patientpoint_devices_ads_dataset</li>
+                <li><strong>Systems Tested:</strong> acdso, prophet, autots, statsforecast, sktime, pmdarima</li>
+                <li><strong>Forecast Horizon:</strong> 7</li>
+                <li><strong>Time Budget:</strong> 120s per system</li>
+                <li><strong>Total Time:</strong> 49.7s</li>
+            </ul>
+        </div>
+        
+        <p class="timestamp">
+            Generated: 2025-12-28T08:52:57.520913
+        </p>
+    </div>
+</body>
+</html>
+        

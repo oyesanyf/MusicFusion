@@ -1,5 +1,5 @@
 """
-ACDSO v2.0 - Risk Analysis Module
+ACDSO v3.0 - Risk Analysis Module
 ==================================
 
 Advanced risk diagnostics for production-relevant analysis including:

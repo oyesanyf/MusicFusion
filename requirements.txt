@@ -18,6 +18,11 @@ scikit-learn>=1.0.0
 seaborn>=0.12.0  # For demo datasets
 
 # ===================================
+# Optional Dependencies (Recommended)
+# ===================================
+psutil>=5.9.0  # Better memory measurement for native allocations (NumPy/BLAS/LightGBM/XGBoost)
+
+# ===================================
 # Boosting Libraries (Recommended)
 # ===================================
 xgboost>=1.5.0
@@ -48,6 +53,59 @@ mljar-supervised>=1.0.0
 
 # Auto-sklearn (Linux only - comment out on Windows)
 # auto-sklearn>=0.15.0
+
+# ===================================
+# Time Series Tools for AutoTS Benchmarking
+# ===================================
+
+# Facebook/Meta Prophet - Popular business forecasting
+prophet>=1.1.0
+
+# AutoTS - Automated time series forecasting
+autots>=0.5.0
+
+# StatsForecast - Fast statistical models (Nixtla)
+statsforecast>=1.5.0
+
+# MLForecast - ML models for forecasting (Nixtla)
+mlforecast>=0.10.0
+
+# sktime - Scikit-learn compatible time series
+sktime>=0.24.0
+
+# pmdarima - Auto-ARIMA
+pmdarima>=2.0.0
+
+# NeuralProphet - Neural network based forecasting
+neuralprophet>=0.7.0
+
+# Darts - Time series library with many models
+darts>=0.26.0
+
+# statsmodels - Statistical modeling (for decomposition, etc.)
+statsmodels>=0.14.0
+
+# ===================================
+# Decision Intelligence Tools
+# ===================================
+
+# DoWhy - Causal inference and effect estimation
+dowhy>=0.10.0
+
+# EconML - Heterogeneous treatment effects / uplift modeling
+econml>=0.14.0
+
+# OR-Tools - Optimization under constraints
+ortools>=9.7.0
+
+# Ray/RLlib - Reinforcement learning for policy optimization
+ray[rllib]>=2.7.0
+
+# Gymnasium - RL environments
+gymnasium>=0.29.0
+
+# PandasAI - LLM-powered data analysis (optional)
+# pandasai>=1.5.0
 
 # ===================================
 # EDA Tools (Optional)

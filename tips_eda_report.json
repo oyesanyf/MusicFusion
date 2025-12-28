@@ -1,0 +1,456 @@
+{
+  "dataset_name": "tips.csv",
+  "n_rows": 244,
+  "n_cols": 8,
+  "analysis_timestamp": "2025-12-22T14:33:17.967557",
+  "column_profiles": [
+    {
+      "name": "tip",
+      "dtype": "float64",
+      "n_unique": 123,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 2.998279,
+      "std": 1.383638,
+      "min_val": 1.0,
+      "max_val": 10.0,
+      "median": 2.9,
+      "q25": 2.0,
+      "q75": 3.5625,
+      "skewness": 1.4564,
+      "kurtosis": 3.5496,
+      "n_zeros": 0,
+      "n_negative": 0,
+      "n_outliers_iqr": 9,
+      "n_outliers_zscore": 3,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": true
+    },
+    {
+      "name": "size",
+      "dtype": "int64",
+      "n_unique": 6,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 2.569672,
+      "std": 0.9511,
+      "min_val": 1.0,
+      "max_val": 6.0,
+      "median": 2.0,
+      "q25": 2.0,
+      "q75": 3.0,
+      "skewness": 1.439,
+      "kurtosis": 1.6719,
+      "n_zeros": 0,
+      "n_negative": 0,
+      "n_outliers_iqr": 9,
+      "n_outliers_zscore": 4,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": true
+    },
+    {
+      "name": "sex_Male",
+      "dtype": "int64",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 0.643443,
+      "std": 0.479967,
+      "min_val": 0.0,
+      "max_val": 1.0,
+      "median": 1.0,
+      "q25": 0.0,
+      "q75": 1.0,
+      "skewness": -0.5989,
+      "kurtosis": -1.6413,
+      "n_zeros": 87,
+      "n_negative": 0,
+      "n_outliers_iqr": 0,
+      "n_outliers_zscore": 0,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "smoker_Yes",
+      "dtype": "int64",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 0.381148,
+      "std": 0.486667,
+      "min_val": 0.0,
+      "max_val": 1.0,
+      "median": 0.0,
+      "q25": 0.0,
+      "q75": 1.0,
+      "skewness": 0.4894,
+      "kurtosis": -1.7605,
+      "n_zeros": 151,
+      "n_negative": 0,
+      "n_outliers_iqr": 0,
+      "n_outliers_zscore": 0,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "day_Sat",
+      "dtype": "int64",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 0.356557,
+      "std": 0.479967,
+      "min_val": 0.0,
+      "max_val": 1.0,
+      "median": 0.0,
+      "q25": 0.0,
+      "q75": 1.0,
+      "skewness": 0.5989,
+      "kurtosis": -1.6413,
+      "n_zeros": 157,
+      "n_negative": 0,
+      "n_outliers_iqr": 0,
+      "n_outliers_zscore": 0,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "day_Sun",
+      "dtype": "int64",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 0.311475,
+      "std": 0.464049,
+      "min_val": 0.0,
+      "max_val": 1.0,
+      "median": 0.0,
+      "q25": 0.0,
+      "q75": 1.0,
+      "skewness": 0.8142,
+      "kurtosis": -1.3371,
+      "n_zeros": 168,
+      "n_negative": 0,
+      "n_outliers_iqr": 0,
+      "n_outliers_zscore": 0,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "day_Thur",
+      "dtype": "int64",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 0.254098,
+      "std": 0.436248,
+      "min_val": 0.0,
+      "max_val": 1.0,
+      "median": 0.0,
+      "q25": 0.0,
+      "q75": 1.0,
+      "skewness": 1.1297,
+      "kurtosis": -0.7239,
+      "n_zeros": 182,
+      "n_negative": 0,
+      "n_outliers_iqr": 0,
+      "n_outliers_zscore": 0,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "time_Lunch",
+      "dtype": "int64",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 0.278689,
+      "std": 0.449276,
+      "min_val": 0.0,
+      "max_val": 1.0,
+      "median": 0.0,
+      "q25": 0.0,
+      "q75": 1.0,
+      "skewness": 0.9872,
+      "kurtosis": -1.0254,
+      "n_zeros": 176,
+      "n_negative": 0,
+      "n_outliers_iqr": 0,
+      "n_outliers_zscore": 0,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    }
+  ],
+  "data_quality": {
+    "n_rows": 244,
+    "n_cols": 8,
+    "n_numeric": 8,
+    "n_categorical": 0,
+    "n_datetime": 0,
+    "total_missing": 0,
+    "total_missing_pct": 0.0,
+    "cols_with_missing": 0,
+    "cols_all_missing": 0,
+    "n_duplicate_rows": 28,
+    "duplicate_pct": 11.48,
+    "n_constant_cols": 0,
+    "constant_cols": [],
+    "n_id_like_cols": 0,
+    "id_like_cols": [],
+    "memory_mb": 0.01,
+    "quality_score": 94.3,
+    "issues": [
+      "Duplicate rows detected: 28 (11.5%)"
+    ],
+    "recommendations": [
+      "Review and potentially remove duplicate rows"
+    ]
+  },
+  "high_correlations": [
+    {
+      "feature_1": "day_Thur",
+      "feature_2": "time_Lunch",
+      "correlation": 0.918,
+      "p_value": 0.0,
+      "method": "pearson"
+    }
+  ],
+  "correlation_matrix": {
+    "tip": {
+      "tip": 1.0,
+      "size": 0.48929877523035714,
+      "sex_Male": 0.08886206109073634,
+      "smoker_Yes": 0.005928539527806666,
+      "day_Sat": -0.002790034361457655,
+      "day_Sun": 0.1251139826151663,
+      "day_Thur": -0.09587917325745665,
+      "time_Lunch": -0.12162906226028693
+    },
+    "size": {
+      "tip": 0.48929877523035714,
+      "size": 1.0,
+      "sex_Male": 0.08619481538252462,
+      "smoker_Yes": -0.1331782460287774,
+      "day_Sat": -0.041120801337655354,
+      "day_Sun": 0.19305353678208725,
+      "day_Thur": -0.07259818669325303,
+      "time_Lunch": -0.10341090969324013
+    },
+    "sex_Male": {
+      "tip": 0.08886206109073634,
+      "size": 0.08619481538252462,
+      "sex_Male": 1.0,
+      "smoker_Yes": 0.002815951733696174,
+      "day_Sat": 0.05395709788417892,
+      "day_Sun": 0.16810556278792452,
+      "day_Thur": -0.19444477363836737,
+      "time_Lunch": -0.20523129613344482
+    },
+    "smoker_Yes": {
+      "tip": 0.005928539527806666,
+      "size": -0.1331782460287774,
+      "sex_Male": 0.002815951733696174,
+      "smoker_Yes": 1.0,
+      "day_Sat": 0.1557437920405818,
+      "day_Sun": -0.18162356069094024,
+      "day_Thur": -0.12853370627170327,
+      "time_Lunch": -0.054921103595707434
+    },
+    "day_Sat": {
+      "tip": -0.002790034361457655,
+      "size": -0.041120801337655354,
+      "sex_Male": 0.05395709788417892,
+      "smoker_Yes": 0.1557437920405818,
+      "day_Sat": 1.0,
+      "day_Sun": -0.5006819734926831,
+      "day_Thur": -0.434480161145548,
+      "time_Lunch": -0.4627089740569583
+    },
+    "day_Sun": {
+      "tip": 0.1251139826151663,
+      "size": 0.19305353678208725,
+      "sex_Male": 0.16810556278792452,
+      "smoker_Yes": -0.18162356069094024,
+      "day_Sat": -0.5006819734926831,
+      "day_Sun": 1.0,
+      "day_Thur": -0.39256565943156513,
+      "time_Lunch": -0.41807122573019734
+    },
+    "day_Thur": {
+      "tip": -0.09587917325745665,
+      "size": -0.07259818669325303,
+      "sex_Male": -0.19444477363836737,
+      "smoker_Yes": -0.12853370627170327,
+      "day_Sat": -0.434480161145548,
+      "day_Sun": -0.39256565943156513,
+      "day_Thur": 1.0,
+      "time_Lunch": 0.9179957657306149
+    },
+    "time_Lunch": {
+      "tip": -0.12162906226028693,
+      "size": -0.10341090969324013,
+      "sex_Male": -0.20523129613344482,
+      "smoker_Yes": -0.054921103595707434,
+      "day_Sat": -0.4627089740569583,
+      "day_Sun": -0.41807122573019734,
+      "day_Thur": 0.9179957657306149,
+      "time_Lunch": 1.0
+    }
+  },
+  "anomalies": [
+    {
+      "row_index": 170,
+      "anomaly_score": 5.06,
+      "anomaly_type": "extreme_value",
+      "affected_columns": [
+        "tip"
+      ],
+      "description": "Value 10 is 5.1 std from mean"
+    },
+    {
+      "row_index": 212,
+      "anomaly_score": 4.34,
+      "anomaly_type": "extreme_value",
+      "affected_columns": [
+        "tip"
+      ],
+      "description": "Value 9 is 4.3 std from mean"
+    }
+  ],
+  "statistical_summary": {
+    "numeric_features": {
+      "count": 8,
+      "total_missing": 0,
+      "avg_missing_pct": 0.0,
+      "n_with_zeros": 6,
+      "n_with_negatives": 0,
+      "n_with_outliers": 2,
+      "n_highly_skewed": 0
+    },
+    "categorical_features": {
+      "count": 0,
+      "total_unique_values": 0,
+      "avg_cardinality": 0,
+      "n_high_cardinality": 0
+    },
+    "constants_and_ids": {
+      "n_constant": 0,
+      "n_id_like": 0
+    }
+  },
+  "insights": [],
+  "recommendations": [
+    "Review and potentially remove duplicate rows",
+    "Consider removing or combining highly correlated features (1 pairs with |r| >= 0.7)",
+    "Investigate 2 detected anomalies before modeling"
+  ],
+  "total_analysis_time_s": 0.08,
+  "pareto_front": [
+    {
+      "name": "column_profiling",
+      "analysis_type": "profiling",
+      "quality_score": 0.95,
+      "compute_time_s": 0.054576873779296875,
+      "coverage": 1.0,
+      "insight_count": 2,
+      "objectives": [
+        0.95,
+        1.0,
+        2,
+        -0.054576873779296875
+      ],
+      "results": {
+        "n_profiles": 8
+      },
+      "meta": {}
+    },
+    {
+      "name": "statistical_summary",
+      "analysis_type": "statistics",
+      "quality_score": 0.9,
+      "compute_time_s": 0.0002410411834716797,
+      "coverage": 1.0,
+      "insight_count": 13,
+      "objectives": [
+        0.9,
+        1.0,
+        10,
+        -0.0002410411834716797
+      ],
+      "results": {
+        "numeric_features": {
+          "count": 8,
+          "total_missing": 0,
+          "avg_missing_pct": 0.0,
+          "n_with_zeros": 6,
+          "n_with_negatives": 0,
+          "n_with_outliers": 2,
+          "n_highly_skewed": 0
+        },
+        "categorical_features": {
+          "count": 0,
+          "total_unique_values": 0,
+          "avg_cardinality": 0,
+          "n_high_cardinality": 0
+        },
+        "constants_and_ids": {
+          "n_constant": 0,
+          "n_id_like": 0
+        }
+      },
+      "meta": {}
+    }
+  ],
+  "selected_analyses": [
+    "column_profiling",
+    "statistical_summary"
+  ]
+}

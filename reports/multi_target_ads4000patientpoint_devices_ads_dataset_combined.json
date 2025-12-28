@@ -1,0 +1,31 @@
+{
+  "file": "c:\\dataset\\ads4000patientpoint_devices_ads_dataset.csv",
+  "targets": [
+    "ads_served",
+    "daily_views"
+  ],
+  "mode": "multi_target_autonomous",
+  "target_reports": {},
+  "predictions": {
+    "ads_served": {
+      "output_file": "reports/predictions_ads4000patientpoint_devices_ads_dataset_ads_served_full_dataset.csv",
+      "count": 4000,
+      "statistics": {
+        "mean": 254.291582,
+        "std": 75.32089200253324,
+        "min": 65.188,
+        "max": 442.8
+      }
+    },
+    "daily_views": {
+      "output_file": "reports/predictions_ads4000patientpoint_devices_ads_dataset_daily_views_full_dataset.csv",
+      "count": 4000,
+      "statistics": {
+        "mean": 2485.2989970000003,
+        "std": 767.7390480311744,
+        "min": 704.288,
+        "max": 4256.168
+      }
+    }
+  }
+}

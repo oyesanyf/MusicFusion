@@ -238,10 +238,10 @@ class ACDSOMetaOptimizer(BaseEstimator):
         task: str,
     ) -> List[CandidateSource]:
         """Generate ACDSO's native candidates."""
-        from acdso.core import _ACDSOEngineV2
+        from acdso.core import _ACDSOEngineV3
 
         # Use a mini ACDSO run to generate candidates
-        engine = _ACDSOEngineV2(
+        engine = _ACDSOEngineV3(
             task=task,
             scorer=self.scorer,
             cv=self.cv,

@@ -1198,16 +1198,18 @@ Consider:
             total_samples=total_samples,
         )
         
-        response = self.provider.generate(
+        config = LLMConfig(max_tokens=500, temperature=0.1)
+        response = self.provider.complete(
             system_prompt="You are a machine learning expert analyzing dataset labels.",
             user_prompt=prompt,
+            config=config,
         )
         
         # Parse JSON response
         import json
         try:
-            # Extract JSON from response
-            text = response.get("content", response.get("text", str(response)))
+            # Extract JSON from response (response is now a string)
+            text = response if isinstance(response, str) else str(response)
             # Find JSON in response
             start = text.find('{')
             end = text.rfind('}') + 1
@@ -1560,15 +1562,18 @@ Be thorough but not overly aggressive. Only exclude columns with clear problems.
             describe_stats=describe_stats[:2000],  # Limit size
         )
         
-        response = self.provider.generate(
+        config = LLMConfig(max_tokens=1000, temperature=0.1)
+        response = self.provider.complete(
             system_prompt="You are a machine learning expert analyzing dataset columns for potential issues.",
             user_prompt=prompt,
+            config=config,
         )
         
         # Parse JSON response
         import json
         try:
-            text = response.get("content", response.get("text", str(response)))
+            # Response is now a string
+            text = response if isinstance(response, str) else str(response)
             start = text.find('{')
             end = text.rfind('}') + 1
             if start >= 0 and end > start:

@@ -26,7 +26,17 @@ keywords = [
     "eda",
     "exploratory-data-analysis",
     "data-quality",
-    "data-profiling"
+    "data-profiling",
+    "time-series",
+    "forecasting",
+    "prophet",
+    "autots",
+    "causal-inference",
+    "uplift-modeling",
+    "decision-intelligence",
+    "treatment-effects",
+    "dowhy",
+    "econml"
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -88,6 +98,51 @@ dtale = ["dtale>=2.0.0"]
 great-expectations = ["great-expectations>=0.15.0"]
 eda = ["ydata-profiling>=4.0.0", "sweetviz>=2.1.0"]  # Common EDA tools
 
+# Time Series integrations (AutoTS benchmarking)
+prophet = ["prophet>=1.1.0"]
+autots-lib = ["autots>=0.5.0"]
+statsforecast = ["statsforecast>=1.5.0"]
+mlforecast = ["mlforecast>=0.10.0"]
+sktime = ["sktime>=0.24.0"]
+pmdarima = ["pmdarima>=2.0.0"]
+neuralprophet = ["neuralprophet>=0.7.0"]
+darts = ["darts>=0.26.0"]
+statsmodels = ["statsmodels>=0.14.0"]
+timeseries = [  # Core time series tools
+    "statsmodels>=0.14.0",
+    "prophet>=1.1.0",
+    "pmdarima>=2.0.0",
+]
+timeseries-full = [  # All time series tools for benchmarking
+    "statsmodels>=0.14.0",
+    "prophet>=1.1.0",
+    "autots>=0.5.0",
+    "statsforecast>=1.5.0",
+    "mlforecast>=0.10.0",
+    "sktime>=0.24.0",
+    "pmdarima>=2.0.0",
+    "neuralprophet>=0.7.0",
+    "darts>=0.26.0",
+]
+
+# Decision Intelligence integrations
+dowhy = ["dowhy>=0.10.0"]
+econml = ["econml>=0.14.0"]
+ortools = ["ortools>=9.7.0"]
+rllib = ["ray[rllib]>=2.7.0", "gymnasium>=0.29.0"]
+decision = [  # Core decision intelligence tools
+    "dowhy>=0.10.0",
+    "econml>=0.14.0",
+    "ortools>=9.7.0",
+]
+decision-full = [  # All decision intelligence tools including RL
+    "dowhy>=0.10.0",
+    "econml>=0.14.0",
+    "ortools>=9.7.0",
+    "ray[rllib]>=2.7.0",
+    "gymnasium>=0.29.0",
+]
+
 # Development
 dev = [
     "pytest>=7.0.0",
@@ -105,6 +160,12 @@ all = [
     "openai>=1.0.0",
     "anthropic>=0.18.0",
     "flaml>=2.0.0",
+    "statsmodels>=0.14.0",
+    "prophet>=1.1.0",
+    "pmdarima>=2.0.0",
+    "dowhy>=0.10.0",
+    "econml>=0.14.0",
+    "ortools>=9.7.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
 ]

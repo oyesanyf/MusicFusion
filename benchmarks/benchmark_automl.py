@@ -67,6 +67,23 @@ from sklearn.metrics import (
     accuracy_score, f1_score, precision_score, recall_score,
     r2_score, mean_squared_error, mean_absolute_error
 )
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+
+def run_with_timeout(func, timeout_seconds, *args, **kwargs):
+    """
+    Run a function with a hard timeout.
+    Returns (result, error) tuple.
+    """
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            result = future.result(timeout=timeout_seconds)
+            return result, None
+        except FuturesTimeoutError:
+            return None, f"Timeout after {timeout_seconds}s"
+        except Exception as e:
+            return None, str(e)[:100]
 from sklearn.preprocessing import LabelEncoder
 
 # Suppress warnings for cleaner output
@@ -180,6 +197,9 @@ class BenchmarkResult:
     # Production metrics (ACDSO-specific)
     has_risk_report: bool = False
     has_audit_trail: bool = False
+    
+    # All models evaluated by this system (leaderboard)
+    models_evaluated: List[Dict[str, Any]] = field(default_factory=list)
     detected_leakage: bool = False
     detected_multicollinearity: bool = False
     risk_penalty: Optional[float] = None
@@ -563,6 +583,20 @@ def run_acdso(
             # Get selected model name
             selected = model.audit_trail_.get('selected', {})
             result.model_name = selected.get('name', 'Unknown')
+            
+            # Capture all models evaluated by ACDSO
+            candidates = model.audit_trail_.get('candidates_evaluated', [])
+            result.models_evaluated = []
+            for c in candidates:
+                result.models_evaluated.append({
+                    'name': c.get('name', 'Unknown'),
+                    'score': c.get('metric', c.get('cv_score', 0)),
+                    'fit_time': c.get('fit_time', 0),
+                    'memory_mb': c.get('memory_mb', 0),
+                    'latency_ms': c.get('latency_ms_per_row', 0),
+                    'risk_penalty': c.get('risk_penalty', 0),
+                    'is_best': c.get('name') == selected.get('name'),
+                })
         
     except Exception as e:
         result.error = str(e)
@@ -846,12 +880,16 @@ def run_flaml(
         t0 = time.time()
         
         model = FLAMLAutoML()
+        # CRITICAL: Force single-threaded execution and strict time budget
         model.fit(
             X_train, y_train,
             task=task,
             time_budget=time_budget_s,
             metric='f1' if task == 'classification' else 'r2',
             verbose=0,
+            n_jobs=1,  # Single-threaded to prevent hanging
+            early_stop=True,  # Enable early stopping
+            max_iter=100,  # Limit iterations to prevent infinite loops
         )
         fit_time = time.time() - t0
         
@@ -879,6 +917,26 @@ def run_flaml(
         
         result.has_risk_report = False
         result.has_audit_trail = False
+        
+        # Capture models evaluated by FLAML
+        try:
+            result.models_evaluated = [{
+                'name': str(type(model.best_estimator).__name__),
+                'score': float(model.best_loss) if hasattr(model, 'best_loss') else None,
+                'config': model.best_config if hasattr(model, 'best_config') else {},
+                'is_best': True,
+            }]
+            # Add config history if available
+            if hasattr(model, 'config_history'):
+                for i, (config, score) in enumerate(zip(model.config_history, model.best_loss_history if hasattr(model, 'best_loss_history') else [])):
+                    result.models_evaluated.append({
+                        'name': config.get('learner', 'Unknown'),
+                        'score': float(score) if score else None,
+                        'config': config,
+                        'is_best': False,
+                    })
+        except Exception:
+            pass
         
     except Exception as e:
         result.error = str(e)
@@ -1039,10 +1097,15 @@ def run_autogluon(
                     verbosity=0,
                     problem_type=task if task == 'regression' else 'multiclass'
                 )
+                # Use single-threaded, fast presets to prevent hanging
                 predictor.fit(
                     train_df,
                     time_limit=int(time_budget_s),
-                    presets='medium_quality_faster_train',
+                    presets='best_quality',  # More predictable than medium_quality
+                    num_cpus=1,  # Single-threaded
+                    num_gpus=0,  # No GPU
+                    hyperparameters={'GBM': {}, 'RF': {}, 'XT': {}},  # Only fast models
+                    excluded_model_types=['NN', 'FASTAI', 'KNN'],  # Exclude slow models
                 )
             finally:
                 sys.stderr = old_stderr
@@ -1075,6 +1138,22 @@ def run_autogluon(
         
         result.has_risk_report = False
         result.has_audit_trail = False
+        
+        # Capture AutoGluon leaderboard (all models evaluated)
+        try:
+            leaderboard = predictor.leaderboard(silent=True)
+            if leaderboard is not None and len(leaderboard) > 0:
+                result.models_evaluated = []
+                for idx, row in leaderboard.iterrows():
+                    result.models_evaluated.append({
+                        'name': str(row.get('model', idx)),
+                        'score': float(row.get('score_val', row.get('score_test', 0))),
+                        'fit_time': float(row.get('fit_time', 0)),
+                        'pred_time': float(row.get('pred_time_val', 0)),
+                        'is_best': idx == 0,
+                    })
+        except Exception:
+            pass
         
     except Exception as e:
         result.error = str(e)[:60] + "..." if len(str(e)) > 60 else str(e)
@@ -1134,8 +1213,8 @@ def run_h2o(
         sys.stderr = io.StringIO()
         
         try:
-            # Initialize H2O (suppress output)
-            h2o.init(verbose=False)
+            # Initialize H2O with single-threaded settings (suppress output)
+            h2o.init(verbose=False, nthreads=1, max_mem_size='2G')
             
             # Combine X and y
             train_df = X_train.copy()
@@ -1152,11 +1231,14 @@ def run_h2o(
                 train_h2o['target'] = train_h2o['target'].asfactor()
                 test_h2o['target'] = test_h2o['target'].asfactor()
             
-            # Run AutoML
+            # Run AutoML with single-threaded settings
             aml = H2OAutoML(
                 max_runtime_secs=int(time_budget_s),
                 seed=42,
                 verbosity='error',
+                nfolds=3,  # Reduce cross-validation folds
+                max_models=5,  # Limit number of models to prevent hanging
+                exclude_algos=['DeepLearning', 'StackedEnsemble'],  # Exclude slow models
             )
             aml.train(y='target', training_frame=train_h2o)
             
@@ -1190,6 +1272,20 @@ def run_h2o(
         
         result.has_risk_report = False
         result.has_audit_trail = False
+        
+        # Capture H2O leaderboard (all models evaluated)
+        try:
+            leaderboard = aml.leaderboard.as_data_frame()
+            if leaderboard is not None and len(leaderboard) > 0:
+                result.models_evaluated = []
+                for idx, row in leaderboard.iterrows():
+                    result.models_evaluated.append({
+                        'name': str(row.get('model_id', idx)),
+                        'score': float(row.get('auc', row.get('rmse', row.get('mean_per_class_error', 0)))),
+                        'is_best': idx == 0,
+                    })
+        except Exception:
+            pass
         
         # Shutdown H2O silently
         old_stdout = sys.stdout
@@ -1682,24 +1778,43 @@ def run_benchmark(
             if verbose:
                 print(f"    Running {sys_name}...", end=" ", flush=True)
             
+            # Hard timeout = 2x the time budget to catch runaway processes
+            hard_timeout = max(time_budget_s * 2, 120)  # At least 120 seconds
+            
+            run_func = None
             if sys_name == 'ACDSO':
-                result = run_acdso(X_train, y_train, X_test, y_test, task, time_budget_s)
+                run_func = run_acdso
             elif sys_name == 'Auto-sklearn':
-                result = run_autosklearn(X_train, y_train, X_test, y_test, task, time_budget_s)
+                run_func = run_autosklearn
             elif sys_name == 'TPOT':
-                result = run_tpot(X_train, y_train, X_test, y_test, task, time_budget_s)
+                run_func = run_tpot
             elif sys_name == 'FLAML':
-                result = run_flaml(X_train, y_train, X_test, y_test, task, time_budget_s)
+                run_func = run_flaml
             elif sys_name == 'PyCaret':
-                result = run_pycaret(X_train, y_train, X_test, y_test, task, time_budget_s)
+                run_func = run_pycaret
             elif sys_name == 'AutoGluon':
-                result = run_autogluon(X_train, y_train, X_test, y_test, task, time_budget_s)
+                run_func = run_autogluon
             elif sys_name == 'H2O':
-                result = run_h2o(X_train, y_train, X_test, y_test, task, time_budget_s)
+                run_func = run_h2o
             elif sys_name == 'MLJAR':
-                result = run_mljar(X_train, y_train, X_test, y_test, task, time_budget_s)
+                run_func = run_mljar
             else:
                 continue
+            
+            # Run with hard timeout to prevent hanging
+            result, timeout_error = run_with_timeout(
+                run_func, hard_timeout,
+                X_train, y_train, X_test, y_test, task, time_budget_s
+            )
+            
+            if timeout_error:
+                result = BenchmarkResult(
+                    system=sys_name,
+                    dataset=ds_name,
+                    task=task,
+                    test_score=0.0,
+                    error=timeout_error,
+                )
             
             result.dataset = ds_name
             all_results.append(result)

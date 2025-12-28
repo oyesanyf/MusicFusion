@@ -1,0 +1,305 @@
+{
+  "timestamp": "2025-12-27T15:33:37.085194",
+  "acdso_version": "3.0",
+  "mode": "autonomous_custom_file",
+  "file": "c:\\dataset\\ads4000patientpoint_devices_ads_dataset.csv",
+  "target": "ads_served",
+  "task": "regression",
+  "datetime_col": "daily_views",
+  "dataset_info": {
+    "rows": 4000,
+    "columns": 20,
+    "features": 19
+  },
+  "summary": {
+    "total_phases": 9,
+    "successful": 7,
+    "failed": 0,
+    "skipped": 2,
+    "total_time": 655.5056428909302,
+    "success_rate": 77.77777777777779
+  },
+  "phase_results": {
+    "All Phases": [
+      {
+        "name": "Data Loading",
+        "status": "SUCCESS",
+        "time": 0.03799152374267578,
+        "model_name": null
+      },
+      {
+        "name": "Target Detection",
+        "status": "SUCCESS",
+        "time": 0.04918384552001953,
+        "model_name": null
+      },
+      {
+        "name": "Auto EDA",
+        "status": "SUCCESS",
+        "time": 3.3934009075164795,
+        "model_name": null
+      },
+      {
+        "name": "Risk Analysis",
+        "status": "SUCCESS",
+        "time": 32.25534629821777,
+        "model_name": null
+      },
+      {
+        "name": "AutoML",
+        "status": "SUCCESS",
+        "time": 125.11145043373108,
+        "model_name": null
+      },
+      {
+        "name": "Time Series",
+        "status": "SUCCESS",
+        "time": 144.82573652267456,
+        "model_name": null
+      },
+      {
+        "name": "Advanced EDA Features",
+        "status": "SKIPPED: Advanced EDA features are included in basic EDA",
+        "time": 9.5367431640625e-07,
+        "model_name": null
+      },
+      {
+        "name": "Decision Intelligence",
+        "status": "SKIPPED: No treatment column",
+        "time": 0.0001685619354248047,
+        "model_name": null
+      },
+      {
+        "name": "Benchmark (Custom File)",
+        "status": "SUCCESS",
+        "time": 349.8646731376648,
+        "model_name": null
+      }
+    ]
+  },
+  "console_output": "",
+  "eda_report": {
+    "dataset_name": "ads4000patientpoint_devices_ads_dataset.csv",
+    "n_rows": 4000,
+    "n_cols": 20,
+    "quality_score": 96.0
+  },
+  "eda_html": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>ACDSO Auto EDA Report - ads4000patientpoint_devices_ads_dataset.csv</title>\n    <style>\n        :root {\n            --bg-primary: #0d1117;\n            --bg-secondary: #161b22;\n            --text-primary: #c9d1d9;\n            --text-secondary: #8b949e;\n            --accent: #58a6ff;\n            --success: #3fb950;\n            --warning: #d29922;\n            --error: #f85149;\n        }\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body {\n            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;\n            background: var(--bg-primary);\n            color: var(--text-primary);\n            line-height: 1.6;\n            padding: 2rem;\n        }\n        .container { max-width: 1200px; margin: 0 auto; }\n        h1, h2, h3 { color: var(--accent); margin-bottom: 1rem; }\n        h1 { font-size: 2rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.5rem; }\n        h2 { font-size: 1.5rem; margin-top: 2rem; }\n        .card {\n            background: var(--bg-secondary);\n            border-radius: 8px;\n            padding: 1.5rem;\n            margin: 1rem 0;\n            border: 1px solid #30363d;\n        }\n        .metric {\n            display: inline-block;\n            background: var(--bg-primary);\n            padding: 0.5rem 1rem;\n            border-radius: 4px;\n            margin: 0.25rem;\n        }\n        .metric-label { color: var(--text-secondary); font-size: 0.875rem; }\n        .metric-value { font-size: 1.25rem; font-weight: bold; }\n        .quality-score {\n            font-size: 3rem;\n            font-weight: bold;\n            color: var(--success);\n        }\n        .issue { color: var(--warning); margin: 0.5rem 0; }\n        .recommendation { color: var(--text-secondary); margin: 0.5rem 0; padding-left: 1rem; }\n        table {\n            width: 100%;\n            border-collapse: collapse;\n            margin: 1rem 0;\n        }\n        th, td {\n            padding: 0.75rem;\n            text-align: left;\n            border-bottom: 1px solid #30363d;\n        }\n        th { background: var(--bg-primary); color: var(--accent); }\n        tr:hover { background: rgba(88, 166, 255, 0.1); }\n        .footer {\n            margin-top: 2rem;\n            padding-top: 1rem;\n            border-top: 1px solid #30363d;\n            color: var(--text-secondary);\n            font-size: 0.875rem;\n        }\n    </style>\n</head>\n<body>\n    <div class=\"container\">\n        <h1>🔍 ACDSO Auto EDA Report</h1>\n        <p style=\"color: var(--text-secondary);\">Dataset: <strong>ads4000patientpoint_devices_ads_dataset.csv</strong> | Generated: 2025-12-27T15:22:44.932442</p>\n        \n        <div class=\"card\">\n            <h2>📊 Dataset Overview</h2>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Rows</div>\n                <div class=\"metric-value\">4,000</div>\n            </div>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Columns</div>\n                <div class=\"metric-value\">20</div>\n            </div>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Numeric</div>\n                <div class=\"metric-value\">11</div>\n            </div>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Categorical</div>\n                <div class=\"metric-value\">9</div>\n            </div>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Memory</div>\n                <div class=\"metric-value\">2.4 MB</div>\n            </div>\n        </div>\n        \n        <div class=\"card\">\n            <h2>⭐ Data Quality Score</h2>\n            <div class=\"quality-score\">96/100</div>\n            <div style=\"margin-top: 1rem;\">\n                <div class=\"metric\">\n                    <div class=\"metric-label\">Missing Values</div>\n                    <div class=\"metric-value\">0 (0.0%)</div>\n                </div>\n                <div class=\"metric\">\n                    <div class=\"metric-label\">Duplicates</div>\n                    <div class=\"metric-value\">0 (0.0%)</div>\n                </div>\n                <div class=\"metric\">\n                    <div class=\"metric-label\">Constant Cols</div>\n                    <div class=\"metric-value\">0</div>\n                </div>\n            </div>\n        </div>\n        \n        <div class='card'><h2>⚠️ Issues Detected</h2><div class='issue'>• ID-like columns detected: ['device_id', 'avg_session_duration_sec', 'uptime_hours', 'temperature_celsius']</div></div>\n        \n        \n        \n        <div class=\"card\">\n            <h2>💡 Recommendations</h2>\n            <div class='recommendation'>1. Exclude ID columns from modeling or use for grouping only</div>\n        </div>\n        \n        <div class=\"card\">\n            <h2>📋 Column Profiles</h2>\n            <table>\n                <tr>\n                    <th>Column</th>\n                    <th>Type</th>\n                    <th>Missing %</th>\n                    <th>Unique</th>\n                    <th>Flags</th>\n                </tr>\n                <tr><td>device_id</td><td>object</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>device_type</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>location_type</td><td>object</td><td>0.0%</td><td>5</td><td></td></tr><tr><td>region</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>daily_views</td><td>int64</td><td>0.0%</td><td>2751</td><td></td></tr><tr><td>ads_served</td><td>int64</td><td>0.0%</td><td>491</td><td></td></tr><tr><td>avg_session_duration_sec</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>ad_category</td><td>object</td><td>0.0%</td><td>7</td><td></td></tr><tr><td>content_type</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>time_slot</td><td>object</td><td>0.0%</td><td>3</td><td></td></tr><tr><td>ad_performance</td><td>object</td><td>0.0%</td><td>3</td><td></td></tr><tr><td>network_signal_strength</td><td>float64</td><td>0.0%</td><td>501</td><td></td></tr><tr><td>battery_level_percent</td><td>int64</td><td>0.0%</td><td>51</td><td></td></tr><tr><td>uptime_hours</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>temperature_celsius</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>firmware_version</td><td>object</td><td>0.0%</td><td>500</td><td></td></tr><tr><td>is_online</td><td>int64</td><td>0.0%</td><td>2</td><td></td></tr><tr><td>error_count</td><td>int64</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>last_maintenance_days_ago</td><td>int64</td><td>0.0%</td><td>61</td><td></td></tr><tr><td>ads_predicted_next_hour</td><td>int64</td><td>0.0%</td><td>76</td><td></td></tr>\n            </table>\n        </div>\n        \n        <div class=\"footer\">\n            <p>Generated by ACDSO v2.0 Auto EDA | Analysis time: 0.08s</p>\n        </div>\n    </div>\n</body>\n</html>",
+  "risk_report": {
+    "task": "regression",
+    "n_rows": 4000,
+    "n_cols": 4530,
+    "missing_ratio": 0.0,
+    "vif_max": 1.012470259002217,
+    "notes": []
+  },
+  "audit_trail": {
+    "risk_report": {
+      "task": "regression",
+      "target_type": "multiclass",
+      "n_rows": 3200,
+      "n_cols": 4530,
+      "n_numeric": 4530,
+      "n_categorical": 0,
+      "missing_ratio": 0.0,
+      "leakage_proxy_features": [],
+      "leakage_proxy_score_max": -0.00075572214347579,
+      "temporal_leakage_gap": 0.011914012182618991,
+      "class_imbalance_max_ratio": null,
+      "imbalance_severity": 0.0,
+      "vif_max": 999999.9999712444,
+      "vif_features": [
+        "device_id_00775150-7941-47cd-a874-f2cb8e4a005c",
+        "device_id_00b0437a-a700-43fc-a24d-403e0a764017",
+        "device_id_00c8032f-c132-4317-9afc-781b500eede9",
+        "device_id_00d4ff5d-4772-4e33-b06a-bb8d5f81e716",
+        "device_id_00e0c176-7f63-44a0-a070-19963a9d8190",
+        "device_id_013feee2-1ba9-488a-b196-ccbb713d2ca6",
+        "device_id_017c2ce8-602d-4672-ad0a-f1e8765820d1",
+        "device_id_01c0f502-c656-45fd-b62a-1d017ec1fcf2",
+        "device_id_01e1a2ae-f4b1-4c94-9c22-c4fac4d0bbe5"
+      ],
+      "cv_score_std": 0.009632600935193478,
+      "notes": [
+        "High multicollinearity: VIF max=1000000.0."
+      ]
+    },
+    "constraints": {
+      "max_train_time_s": null,
+      "max_peak_mem_mb": null,
+      "max_latency_ms_per_row": null
+    },
+    "candidates_evaluated": [
+      {
+        "name": "RandomForestRegressor",
+        "metric": -0.03439485477221917,
+        "train_time_s": 76.50228881835938,
+        "peak_mem_mb": 28.70703125,
+        "latency_ms_per_row": 0.3841156139969826,
+        "risk_penalty": 0.18485480889688993,
+        "cv_scores": [
+          -0.0344555616110227,
+          -0.0414014379558687,
+          -0.02975285060458721,
+          -0.01921170895080615,
+          -0.04715271473881111
+        ],
+        "cv_score_std": 0.009632600935193478,
+        "stress_worst_drop": 0.0,
+        "stress_tests": []
+      }
+    ],
+    "pareto_front": [
+      {
+        "name": "RandomForestRegressor",
+        "metric": -0.03439485477221917,
+        "train_time_s": 76.50228881835938,
+        "peak_mem_mb": 28.70703125,
+        "latency_ms_per_row": 0.3841156139969826,
+        "risk_penalty": 0.18485480889688993
+      }
+    ],
+    "pruned_or_failed": [],
+    "selected": {
+      "name": "RandomForestRegressor",
+      "metric": -0.03439485477221917,
+      "train_time_s": 76.50228881835938,
+      "peak_mem_mb": 28.70703125,
+      "latency_ms_per_row": 0.3841156139969826,
+      "risk_penalty": 0.18485480889688993,
+      "stress_worst_drop": 0.0
+    },
+    "risk_calibrator": {
+      "type": null,
+      "used": false
+    }
+  },
+  "selected_model": {
+    "name": "RandomForestRegressor",
+    "type": "Pipeline",
+    "metrics": {
+      "metric": -0.03439485477221917,
+      "train_time_s": 76.50228881835938,
+      "peak_mem_mb": 28.70703125,
+      "latency_ms_per_row": 0.3841156139969826,
+      "risk_penalty": 0.18485480889688993
+    },
+    "code_info": {
+      "system": "ACDSO",
+      "model_name": "RandomForestRegressor",
+      "score": -0.03439485477221917,
+      "fit_time": 76.50228881835938,
+      "code": "# ═══════════════════════════════════════════════════════════════════════════\n# ACDSO AutoML - ACTUAL EXECUTION CODE\n# ═══════════════════════════════════════════════════════════════════════════\n# File: c:\\dataset\\ads4000patientpoint_devices_ads_dataset.csv\n# Target: ads_served\n# Task: regression\n# Selected Model: RandomForestRegressor\n# Score: -0.0344\n# Fit Time: 76.5s\n# ═══════════════════════════════════════════════════════════════════════════\n\nfrom acdso import ACDSORegressor\nimport pandas as pd\nfrom sklearn.model_selection import train_test_split\n\n# Load data\ndf = pd.read_csv('c:\\dataset\\ads4000patientpoint_devices_ads_dataset.csv')\n\n# Exclude columns (auto-detected problematic columns)\nexclude_cols = []\nX = df.drop(columns=['ads_served'] + exclude_cols)\ny = df['ads_served']\n\n# Encode categorical columns\ncat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()\nif cat_cols:\n    X = pd.get_dummies(X, columns=cat_cols, drop_first=True)\n\n# Split data\nX_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\n\n# Train ACDSO (with risk-aware selection)\nmodel = ACDSORegressor(\n    scorer='r2',\n    cv=5,\n    preference='safe',\n    max_latency_ms_per_row=10.0,\n    verbose=1,\n)\nmodel.fit(X_train, y_train)\n\n# Results\npredictions = model.predict(X_test)\nscore = model.score(X_test, y_test)\n\n# ACDSO provides:\n# 1. Risk Report - production safety analysis\nprint(f\"Risk Report: {model.risk_report_}\")\n\n# 2. Audit Trail - full decision transparency\nprint(f\"Selected Model: {model.audit_trail_['selected']['name']}\")\nprint(f\"Score: {score:.4f}\")\n\n# 3. Pareto Front - all optimal models\nprint(f\"Pareto Front: {len(model.pareto_front_)} optimal models\")\n\n# Save audit trail for compliance\nimport json\nwith open('audit_trail.json', 'w') as f:\n    json.dump(model.audit_trail_, f, indent=2)\n",
+      "execution_summary": "ACDSO selected RandomForestRegressor with score -0.0344 in 76.5s"
+    }
+  },
+  "test_performance": {
+    "r2": -0.05717475845650388,
+    "rmse": 146.22720492979408
+  },
+  "timeseries": {
+    "horizon": 7,
+    "datetime_col": "daily_views",
+    "target": "ads_served",
+    "best_model": "RandomForest (n=100, d=5)",
+    "summary": "============================================================\nACDSO AutoTS Results\n============================================================\nBest Model: RandomForest (n=100, d=5)\n  CV Score (rmse): 131.0945\n  Fit Time: 0.24s\n  Family: tree\n\nBaseline Score: 142.1251\nImprovement: 7.8%\n\nModels Evaluated: 24\nPareto-Optimal: 7\n\nRisk Severity: MEDIUM\nSeasonality: None detected\nStationary: Yes\n============================================================",
+    "leaderboard": [
+      {
+        "Model": "RandomForest (n=100, d=5)",
+        "Score": 131.09449531482946,
+        "Fit Time (s)": 0.2360215663909912,
+        "Family": "tree",
+        "Is Baseline": false
+      },
+      {
+        "Model": "RandomForest (n=50, d=5)",
+        "Score": 131.14850891633012,
+        "Fit Time (s)": 0.12326655387878419,
+        "Family": "tree",
+        "Is Baseline": false
+      },
+      {
+        "Model": "ElasticNet",
+        "Score": 131.44571131866576,
+        "Fit Time (s)": 0.014449596405029297,
+        "Family": "linear",
+        "Is Baseline": false
+      },
+      {
+        "Model": "Ridge (alpha=10.0)",
+        "Score": 131.5271273556158,
+        "Fit Time (s)": 0.016941642761230467,
+        "Family": "linear",
+        "Is Baseline": false
+      },
+      {
+        "Model": "Lasso",
+        "Score": 131.57071871991064,
+        "Fit Time (s)": 0.014288663864135742,
+        "Family": "linear",
+        "Is Baseline": false
+      },
+      {
+        "Model": "Ridge (alpha=1.0)",
+        "Score": 131.5802217374472,
+        "Fit Time (s)": 0.014355945587158202,
+        "Family": "linear",
+        "Is Baseline": false
+      },
+      {
+        "Model": "Ridge (alpha=0.1)",
+        "Score": 131.58627993172334,
+        "Fit Time (s)": 0.015918731689453125,
+        "Family": "linear",
+        "Is Baseline": false
+      },
+      {
+        "Model": "RandomForest (n=100, d=10)",
+        "Score": 131.95333712464034,
+        "Fit Time (s)": 0.43560338020324707,
+        "Family": "tree",
+        "Is Baseline": false
+      },
+      {
+        "Model": "RandomForest (n=50, d=10)",
+        "Score": 132.2502361049315,
+        "Fit Time (s)": 0.2149792194366455,
+        "Family": "tree",
+        "Is Baseline": false
+      },
+      {
+        "Model": "RandomForest (n=100, d=None)",
+        "Score": 132.64272943380206,
+        "Fit Time (s)": 0.572606372833252,
+        "Family": "tree",
+        "Is Baseline": false
+      }
+    ],
+    "benchmark": "TSBenchmarkSummary(results=[TSBenchmarkResult(system='acdso', dataset='ads4000patientpoint_devices_ads_dataset', mae=108.43405982598317, rmse=128.992451535886, mape=110.0158172907127, smape=49.34708603235498, mase=0.6596556008894539, fit_time=14.946686029434204, predict_time=0.03216218948364258, status='success', error_message='', notes=['Best model: RandomForest (n=50, d=5)']), TSBenchmarkResult(system='prophet', dataset='ads4000patientpoint_devices_ads_dataset', mae=119.88390613101318, rmse=139.7034880834121, mape=121.15859008721937, smape=53.18297663187618, mase=0.7293104238902487, fit_time=0.5994062423706055, predict_time=0.12398481369018555, status='success', error_message='', notes=[]), TSBenchmarkResult(system='autots', dataset='ads4000patientpoint_devices_ads_dataset', mae=nan, rmse=nan, mape=nan, smape=nan, mase=nan, fit_time=0.0, predict_time=0.0, status='error', error_message=\"forecast_length is too large for training data.\\nWhat this means is you don't have enough history to support cross validation with your forecast_length.\\nVarious solutions include bringing in more data, alter min_allowed_train_percent to something smaller,\\nand also setting a shorter forecast_length to class init for cross validation which you can then override with a longer value in .predict()\\nThis error is also often caused by errors in inputing of or preshaping the data.\\nCheck model.df_wide_numeric to make sure data was imported correctly.\\n            \", notes=[]), TSBenchmarkResult(system='statsforecast', dataset='ads4000patientpoint_devices_ads_dataset', mae=119.91612510681152, rmse=139.53754650690274, mape=125.20886668853584, smape=52.96486273591909, mase=0.7295064271375162, fit_time=20.02552819252014, predict_time=0.030980825424194336, status='success', error_message='', notes=[]), TSBenchmarkResult(system='sktime', dataset='ads4000patientpoint_devices_ads_dataset', mae=nan, rmse=nan, mape=nan, smape=nan, mase=nan, fit_time=7.565310955047607, predict_time=0.0, status='error', error_message=\"unsupported operand type(s) for *: 'int' and 'NoneType'\", notes=[]), TSBenchmarkResult(system='pmdarima', dataset='ads4000patientpoint_devices_ads_dataset', mae=119.925909375, rmse=139.54543490362343, mape=125.10059797401468, smape=52.97534234011027, mase=0.7295659494621576, fit_time=6.0900373458862305, predict_time=0.0171968936920166, status='success', error_message='', notes=[])], winners_by_metric={'mae': 'acdso', 'rmse': 'acdso', 'mape': 'acdso', 'smape': 'acdso', 'mase': 'acdso', 'fit_time': 'prophet'}, systems_tested=['acdso', 'prophet', 'autots', 'statsforecast', 'sktime', 'pmdarima'], datasets=['ads4000patientpoint_devices_ads_dataset'], timestamp='2025-12-27T15:26:39.269626', total_time=49.64957332611084)",
+    "code_info": {
+      "system": "ACDSO_TimeSeries",
+      "model_name": "RandomForest (n=100, d=5)",
+      "score": 131.09449531482946,
+      "fit_time": 0.2360215663909912,
+      "code": "# ═══════════════════════════════════════════════════════════════════════════\n# ACDSO Auto Time Series - ACTUAL EXECUTION CODE\n# ═══════════════════════════════════════════════════════════════════════════\n# File: c:\\dataset\\ads4000patientpoint_devices_ads_dataset.csv\n# Target: ads_served\n# Datetime Column: daily_views\n# Horizon: 7\n# Selected Model: RandomForest (n=100, d=5)\n# RMSE Score: 131.0945\n# Fit Time: 0.2s\n# ═══════════════════════════════════════════════════════════════════════════\n\nfrom acdso.timeseries import AutoTS\nimport pandas as pd\n\n# Load data\ndf = pd.read_csv('c:\\dataset\\ads4000patientpoint_devices_ads_dataset.csv')\ndf['daily_views'] = pd.to_datetime(df['daily_views'])\n\n# Train AutoTS (with time-aware cross-validation)\nts = AutoTS(\n    datetime_col='daily_views',\n    target_col='ads_served',\n    horizon=7,\n    cv_type='expanding',\n    n_splits=5,\n    primary_metric='rmse',\n    include_baselines=True,\n    verbose=True,\n)\nresult = ts.fit(df)\n\n# Results\nprint(f\"Best Model: {result.best_pipeline.name}\")\nprint(f\"CV Score (RMSE): {result.best_pipeline.cv_score:.4f}\")\nprint(f\"Fit Time: {result.best_pipeline.fit_time:.2f}s\")\n\n# Get model leaderboard\nleaderboard = result.get_leaderboard(top_n=10)\nprint(\"\\nModel Leaderboard:\")\nprint(leaderboard)\n\n# Make forecasts\nforecasts = result.forecast(df, horizon=7)\nprint(f\"\\nForecasts: {forecasts}\")\n",
+      "execution_summary": "AutoTS selected RandomForest (n=100, d=5) with RMSE 131.0945 in 0.2s"
+    }
+  },
+  "timeseries_benchmark_code": [],
+  "timeseries_html": "\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>ACDSO Time Series Benchmark Report</title>\n    <style>\n        :root {\n            --primary: #2563eb;\n            --success: #16a34a;\n            --warning: #d97706;\n            --danger: #dc2626;\n            --bg: #f8fafc;\n            --card-bg: #ffffff;\n            --text: #1e293b;\n        }\n        \n        body {\n            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;\n            background: var(--bg);\n            color: var(--text);\n            margin: 0;\n            padding: 20px;\n            line-height: 1.6;\n        }\n        \n        .container {\n            max-width: 1200px;\n            margin: 0 auto;\n        }\n        \n        .header {\n            text-align: center;\n            padding: 40px 0;\n            background: linear-gradient(135deg, var(--primary), #7c3aed);\n            color: white;\n            border-radius: 16px;\n            margin-bottom: 30px;\n        }\n        \n        .header h1 {\n            margin: 0 0 10px 0;\n            font-size: 2.5rem;\n        }\n        \n        .card {\n            background: var(--card-bg);\n            border-radius: 12px;\n            padding: 24px;\n            margin-bottom: 24px;\n            box-shadow: 0 1px 3px rgba(0,0,0,0.1);\n        }\n        \n        .card h2 {\n            margin-top: 0;\n            color: var(--primary);\n            border-bottom: 2px solid var(--primary);\n            padding-bottom: 10px;\n        }\n        \n        table {\n            width: 100%;\n            border-collapse: collapse;\n        }\n        \n        th, td {\n            padding: 12px 16px;\n            text-align: left;\n            border-bottom: 1px solid #e2e8f0;\n        }\n        \n        th {\n            background: #f1f5f9;\n            font-weight: 600;\n        }\n        \n        tr:hover {\n            background: #f8fafc;\n        }\n        \n        .winner {\n            background: #dcfce7 !important;\n        }\n        \n        .failed-section {\n            background: #fef2f2;\n            border-left: 4px solid var(--danger);\n            padding: 16px;\n            border-radius: 8px;\n        }\n        \n        .winners-section ul {\n            list-style: none;\n            padding: 0;\n        }\n        \n        .winners-section li {\n            padding: 8px 0;\n            border-bottom: 1px solid #e2e8f0;\n        }\n        \n        .timestamp {\n            text-align: center;\n            color: #64748b;\n            margin-top: 40px;\n            font-size: 0.875rem;\n        }\n    </style>\n</head>\n<body>\n    <div class=\"container\">\n        <div class=\"header\">\n            <h1>ACDSO Time Series Benchmark</h1>\n            <p>Comprehensive comparison of forecasting systems</p>\n        </div>\n        \n        <div class=\"card\">\n            <h2>Benchmark Results</h2>\n            <table>\n                <thead>\n                    <tr>\n                        <th>System</th>\n                        <th>RMSE</th>\n                        <th>MAE</th>\n                        <th>MAPE</th>\n                        <th>sMAPE</th>\n                        <th>MASE</th>\n                        <th>Fit Time</th>\n                    </tr>\n                </thead>\n                <tbody>\n                    \n                <tr>\n                    <td><strong>ACDSO</strong></td>\n                    <td>128.9925</td>\n                    <td>108.4341</td>\n                    <td>110.02%</td>\n                    <td>49.35%</td>\n                    <td>0.6597</td>\n                    <td>14.9s</td>\n                </tr>\n            \n\n                <tr>\n                    <td><strong>STATSFORECAST</strong></td>\n                    <td>139.5375</td>\n                    <td>119.9161</td>\n                    <td>125.21%</td>\n                    <td>52.96%</td>\n                    <td>0.7295</td>\n                    <td>20.0s</td>\n                </tr>\n            \n\n                <tr>\n                    <td><strong>PMDARIMA</strong></td>\n                    <td>139.5454</td>\n                    <td>119.9259</td>\n                    <td>125.10%</td>\n                    <td>52.98%</td>\n                    <td>0.7296</td>\n                    <td>6.1s</td>\n                </tr>\n            \n\n                <tr>\n                    <td><strong>PROPHET</strong></td>\n                    <td>139.7035</td>\n                    <td>119.8839</td>\n                    <td>121.16%</td>\n                    <td>53.18%</td>\n                    <td>0.7293</td>\n                    <td>0.6s</td>\n                </tr>\n            \n                </tbody>\n            </table>\n        </div>\n        \n        <div class=\"card winners-section\">\n            <h2>Winners by Metric</h2>\n            <ul><li><strong>mae:</strong> acdso</li>\n<li><strong>rmse:</strong> acdso</li>\n<li><strong>mape:</strong> acdso</li>\n<li><strong>smape:</strong> acdso</li>\n<li><strong>mase:</strong> acdso</li>\n<li><strong>fit_time:</strong> prophet</li></ul>\n        </div>\n        \n        \n                <div class=\"failed-section\">\n                    <h3>Failed Systems</h3>\n                    <ul><li><strong>autots:</strong> forecast_length is too large for training data.\nWhat this means is you don't have enough history to </li>\n<li><strong>sktime:</strong> unsupported operand type(s) for *: 'int' and 'NoneType'</li></ul>\n                </div>\n            \n        \n        <div class=\"card\">\n            <h2>Benchmark Configuration</h2>\n            <ul>\n                <li><strong>Datasets:</strong> ads4000patientpoint_devices_ads_dataset</li>\n                <li><strong>Systems Tested:</strong> acdso, prophet, autots, statsforecast, sktime, pmdarima</li>\n                <li><strong>Forecast Horizon:</strong> 7</li>\n                <li><strong>Time Budget:</strong> 120s per system</li>\n                <li><strong>Total Time:</strong> 49.6s</li>\n            </ul>\n        </div>\n        \n        <p class=\"timestamp\">\n            Generated: 2025-12-27T15:26:39.269626\n        </p>\n    </div>\n</body>\n</html>\n        ",
+  "benchmark_results": [],
+  "predictions": {
+    "target_column": "ads_served",
+    "requested_target": "ads_served",
+    "original_training_target": "ads_served",
+    "total_predictions": 4000,
+    "output_file": "reports/predictions_ads4000patientpoint_devices_ads_dataset_ads_served_full_dataset.csv",
+    "task": "regression",
+    "statistics": {
+      "mean": 254.291582,
+      "std": 75.32089200253324,
+      "min": 65.188,
+      "max": 442.8
+    }
+  }
+}
