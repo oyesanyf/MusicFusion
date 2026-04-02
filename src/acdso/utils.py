@@ -136,7 +136,9 @@ def detect_datetime_column(df: pd.DataFrame) -> Optional[str]:
     Detect a datetime-like column in the DataFrame.
 
     First checks for actual datetime64 columns, then falls back to
-    name-based heuristics (date, time, timestamp, ts).
+    word-boundary name heuristics (date, time, timestamp, etc.),
+    skipping numeric columns to avoid false positives like
+    ``sentiment_score_control`` matching on "time".
 
     Parameters
     ----------
@@ -148,16 +150,21 @@ def detect_datetime_column(df: pd.DataFrame) -> Optional[str]:
     Optional[str]
         Name of detected datetime column, or None if not found.
     """
+    import re
+
     # First, check for actual datetime columns
     for c in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df[c]):
             return str(c)
 
-    # Fall back to name-based heuristics
-    datetime_keywords = ["date", "time", "timestamp", "ts", "datetime", "created", "updated"]
+    # Fall back to word-boundary name heuristics, skipping numeric columns
+    _dt_pattern = re.compile(
+        r'(?<![a-z])(?:date|time|timestamp|ts|datetime|created|updated|week|period)(?![a-z])',
+        re.IGNORECASE,
+    )
     name_hits = [
         c for c in df.columns
-        if any(k in str(c).lower() for k in datetime_keywords)
+        if _dt_pattern.search(str(c)) and not pd.api.types.is_numeric_dtype(df[c])
     ]
     return str(name_hits[0]) if name_hits else None
 
