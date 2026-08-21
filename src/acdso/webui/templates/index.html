@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACDSO — Web GUI</title>
+<style>
+  :root {
+    --bg: #0f1116;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --text: #e6e9ef;
+    --muted: #98a1b3;
+    --accent: #5b9dff;
+    --ok: #4fd18b;
+    --warn: #ffc860;
+    --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: minmax(420px, 1fr) minmax(480px, 1.2fr); gap: 18px; padding: 18px 24px 40px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; margin-bottom: 18px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  label { display: block; font-weight: 600; margin-bottom: 4px; }
+  .hint { color: var(--muted); font-size: 12px; font-weight: 400; margin: 2px 0 8px; }
+  .field { margin-bottom: 14px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 7px 9px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; font: inherit;
+  }
+  select[multiple] { min-height: 118px; }
+  .check { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 10px; }
+  .check input { margin-top: 3px; }
+  .check label { margin: 0; }
+  .drop {
+    border: 1.5px dashed var(--line); border-radius: 10px; padding: 22px;
+    text-align: center; color: var(--muted); cursor: pointer; transition: .15s;
+  }
+  .drop.over, .drop:hover { border-color: var(--accent); color: var(--text); }
+  button, a.btn {
+    font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer;
+    text-decoration: none; display: inline-block; box-sizing: border-box;
+  }
+  button.primary, a.btn.primary { background: var(--accent); border-color: var(--accent); color: #08111f; }
+  button.danger, a.btn.danger { border-color: var(--err); color: var(--err); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  pre.cmd, pre.log {
+    background: #0b0d12; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; overflow: auto; font: 12px/1.55 Consolas, "SF Mono", monospace;
+    white-space: pre-wrap; word-break: break-word; margin: 0;
+  }
+  pre.log { height: 460px; }
+  .status { font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); }
+  .status.running { color: var(--warn); border-color: var(--warn); }
+  .status.finished { color: var(--ok); border-color: var(--ok); }
+  .status.failed, .status.cancelled { color: var(--err); border-color: var(--err); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 7px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; }
+  .scroll-x { overflow-x: auto; }
+  .msg { padding: 9px 12px; border-radius: 7px; font-size: 13px; margin-bottom: 12px; display: none; }
+  .msg.err { display: block; background: rgba(255,107,107,.12); border: 1px solid var(--err); color: #ffc9c9; }
+  .msg.ok { display: block; background: rgba(79,209,139,.12); border: 1px solid var(--ok); color: #c9ffe2; }
+  a { color: var(--accent); }
+  code.inline { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ACDSO</h1>
+  <span class="sub">risk-aware AutoML &mdash; upload a dataset, pick a target, run the pipeline</span>
+  <span class="sub" style="margin-left:auto">{{ repo_root }}</span>
+</header>
+
+<main>
+  <!-- ─────────────────────────── left: inputs ─────────────────────────── -->
+  <section>
+    <div class="card">
+      <h2>1 &middot; Data file</h2>
+      <div id="msg" class="msg"></div>
+      <div id="drop" class="drop">
+        <strong>Drop a file here</strong> or click to browse<br>
+        <span class="hint" style="margin:6px 0 0">{{ allowed | join(' &middot; ') | safe }}</span>
+      </div>
+      <input id="file" type="file" accept="{{ allowed | join(',') }}" hidden>
+      <div id="fileinfo" style="display:none; margin-top:12px">
+        <div class="row" style="justify-content:space-between">
+          <strong id="fname"></strong>
+          <span class="hint" id="fmeta" style="margin:0"></span>
+        </div>
+        <div class="scroll-x" style="margin-top:8px; max-height:200px; overflow-y:auto">
+          <table id="preview"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Forecast <span class="hint" style="display:inline">&mdash; one button, aggregated to period totals</span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        Collapses the file to one value per period, then projects it forward.
+        Use this for &ldquo;how much next month&rdquo; questions &mdash; the AutoML
+        pipeline below fits at row grain and cannot extrapolate.
+      </div>
+      <div class="row" style="gap:12px; align-items:flex-end">
+        <div style="flex:1 1 140px">
+          <label for="fc_date">Period column</label>
+          <select id="fc_date" data-columns="1"><option value="">(none)</option></select>
+        </div>
+        <div style="flex:1 1 140px">
+          <label for="fc_value">Value column</label>
+          <select id="fc_value" data-columns="1"><option value="">(none)</option></select>
+        </div>
+        <div style="flex:0 0 96px">
+          <label for="fc_agg">Aggregate</label>
+          <select id="fc_agg">
+            <option value="sum" selected>sum</option>
+            <option value="mean">mean</option>
+            <option value="max">max</option>
+            <option value="count">count</option>
+          </select>
+        </div>
+        <div style="flex:0 0 90px">
+          <label for="fc_horizon">Periods</label>
+          <input id="fc_horizon" type="number" value="3" min="1" max="36">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="row" style="font-weight:400; gap:6px; margin:0">
+          <input type="checkbox" id="fc_drop_first"> drop first period (partial)
+        </label>
+        <label class="row" style="font-weight:400; gap:6px; margin:0">
+          <input type="checkbox" id="fc_drop_last"> drop last period (partial)
+        </label>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="fcBtn" type="button">Forecast</button>
+        <span class="hint" id="fcStatus" style="margin:0"></span>
+      </div>
+      <div id="fcOut" style="margin-top:14px"></div>
+    </div>
+
+    <form id="form">
+      {% for group, flags in groups.items() %}
+      <div class="card">
+        <h2>{{ group }}</h2>
+        {% for flag in flags %}
+          {% if flag.kind == 'bool' %}
+            <div class="check">
+              <input type="checkbox" id="f_{{ flag.name }}" name="{{ flag.name }}"
+                     data-kind="bool" {% if flag.default %}checked{% endif %}>
+              <label for="f_{{ flag.name }}">
+                {{ flag.label }} <code class="inline">{{ flag.cli }}</code>
+                <div class="hint">{{ flag.help }}</div>
+              </label>
+            </div>
+          {% elif flag.kind == 'columns' %}
+            <div class="field">
+              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code></label>
+              <div class="hint">{{ flag.help }}</div>
+              <select id="f_{{ flag.name }}" name="{{ flag.name }}" data-kind="columns" data-columns="1"
+                      {% if flag.name in ('predict', 'target', 'exclude') %}multiple{% endif %}>
+                {% if flag.name not in ('predict', 'target', 'exclude') %}<option value="">(none)</option>{% endif %}
+              </select>
+            </div>
+          {% elif flag.kind == 'choice' %}
+            <div class="field">
+              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code></label>
+              <div class="hint">{{ flag.help }}</div>
+              <select id="f_{{ flag.name }}" name="{{ flag.name }}" data-kind="choice">
+                {% for choice in flag.choices %}
+                <option value="{{ choice }}" {% if choice == flag.default %}selected{% endif %}>{{ choice }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% else %}
+            <div class="field">
+              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code></label>
+              <div class="hint">{{ flag.help }}</div>
+              <input id="f_{{ flag.name }}" name="{{ flag.name }}"
+                     data-kind="{{ flag.kind }}"
+                     type="{{ 'number' if flag.kind in ('int', 'float') else 'text' }}"
+                     {% if flag.kind == 'float' %}step="any"{% endif %}
+                     value="{{ '' if flag.default is none else flag.default }}">
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </form>
+  </section>
+
+  <!-- ─────────────────────────── right: run ─────────────────────────── -->
+  <section>
+    <div class="card">
+      <h2>2 &middot; Command</h2>
+      <pre class="cmd" id="cmd">python run_acdso.py</pre>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="runBtn" type="button">Run pipeline</button>
+        <button class="danger" id="stopBtn" type="button" disabled>Stop</button>
+        <span id="status" class="status" style="display:none"></span>
+        <span class="hint" id="elapsed" style="margin:0"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3 &middot; Live output</h2>
+      <pre class="log" id="log">Nothing running yet.</pre>
+      <div class="row" style="margin-top:10px">
+        <label class="row" style="font-weight:400; gap:6px; margin:0">
+          <input type="checkbox" id="autoscroll" checked> follow output
+        </label>
+        <span class="hint" id="logfile" style="margin:0"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>4 &middot; Artifacts <span class="hint" style="display:inline">(files in reports/ written by this run)</span></h2>
+      <div id="artifacts" class="hint" style="margin:0">None yet.</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { uploadId: null, columns: [], jobId: null, cursor: 0, poll: null };
+
+function flash(text, kind) {
+  const el = $('msg');
+  el.textContent = text;
+  el.className = text ? 'msg ' + (kind || 'err') : 'msg';
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ── upload ─────────────────────────────────────────────────────────── */
+const drop = $('drop'), fileInput = $('file');
+drop.addEventListener('click', () => fileInput.click());
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  if (e.dataTransfer.files.length) sendFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) sendFile(fileInput.files[0]);
+});
+
+async function sendFile(file) {
+  flash('Uploading and reading ' + file.name + '…', 'ok');
+  const body = new FormData();
+  body.append('file', file);
+  let res, data;
+  try {
+    res = await fetch('/api/upload', { method: 'POST', body });
+    data = await res.json();
+  } catch (err) {
+    flash('Upload failed: ' + err, 'err');
+    return;
+  }
+  if (!res.ok) { flash(data.error || 'Upload failed', 'err'); return; }
+
+  state.uploadId = data.upload_id;
+  state.columns = data.columns;
+  $('fname').textContent = data.filename;
+  $('fmeta').textContent =
+    data.columns.length + ' columns' + (data.rows != null ? ' · ' + data.rows + ' rows' : '');
+  renderPreview(data.columns, data.preview, data.dtypes);
+  $('fileinfo').style.display = 'block';
+  fillColumnSelects(data.columns);
+  preselectForecastColumns(data.columns, data.dtypes);
+  flash('Loaded ' + data.filename + '. Pick a target below.', 'ok');
+  refreshCommand();
+}
+
+function renderPreview(columns, rows, dtypes) {
+  const head = '<tr>' + columns.map(
+    (c) => '<th>' + esc(c) + '<br><span class="hint" style="margin:0">' + esc(dtypes[c] || '') + '</span></th>'
+  ).join('') + '</tr>';
+  const body = rows.map(
+    (r) => '<tr>' + columns.map((c) => '<td>' + esc(r[c] === null ? '' : String(r[c])) + '</td>').join('') + '</tr>'
+  ).join('');
+  $('preview').innerHTML = head + body;
+}
+
+function fillColumnSelects(columns) {
+  document.querySelectorAll('select[data-columns]').forEach((sel) => {
+    const blank = sel.multiple ? '' : '<option value="">(none)</option>';
+    sel.innerHTML = blank +
+      columns.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
+  });
+}
+
+/* ── forecast ───────────────────────────────────────────────────────── */
+/* Guess the period and value columns so the button works on first click. */
+function preselectForecastColumns(columns, dtypes) {
+  const isNumeric = (c) => /int|float/i.test(dtypes[c] || '');
+  // A period column is never the numeric measurement itself -- exclude
+  // numeric columns up front so a name like "Total Data Transfer (B)"
+  // can never win the date slot.
+  const dateCandidates = columns.filter((c) => !isNumeric(c));
+  const dateGuess = dateCandidates.find((c) => /^(date|month|period|day|time|timestamp)$/i.test(c))
+    || dateCandidates.find((c) => /date|month|period|time/i.test(c));
+  const numeric = columns.filter(isNumeric);
+  const valueGuess = numeric.find((c) => /total|amount|bytes|transfer|value|cost|qty|count/i.test(c))
+    || numeric[0];
+  if (dateGuess) $('fc_date').value = dateGuess;
+  if (valueGuess) $('fc_value').value = valueGuess;
+}
+
+function fmtValue(n, col) {
+  // Byte-valued columns are unreadable in raw units; show TB alongside.
+  if (/\(B\)|bytes?\b/i.test(col || '')) {
+    return (n / 1e12).toFixed(2) + ' TB';
+  }
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return n.toFixed(2);
+}
+
+$('fcBtn').addEventListener('click', async () => {
+  if (!state.uploadId) { flash('Upload a file first.', 'err'); return; }
+  const body = {
+    upload_id: state.uploadId,
+    date_col: $('fc_date').value,
+    value_col: $('fc_value').value,
+    agg: $('fc_agg').value,
+    horizon: Number($('fc_horizon').value),
+    drop_first: $('fc_drop_first').checked,
+    drop_last: $('fc_drop_last').checked,
+  };
+  if (!body.date_col || !body.value_col) {
+    flash('Pick a period column and a value column.', 'err');
+    return;
+  }
+  $('fcBtn').disabled = true;
+  $('fcStatus').textContent = 'aggregating and forecasting…';
+  let res, data;
+  try {
+    res = await fetch('/api/forecast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    data = await res.json();
+  } catch (err) {
+    $('fcStatus').textContent = '';
+    $('fcBtn').disabled = false;
+    flash('Forecast failed: ' + err, 'err');
+    return;
+  }
+  $('fcBtn').disabled = false;
+  $('fcStatus').textContent = '';
+  if (!res.ok) { flash(data.error || 'Forecast failed', 'err'); $('fcOut').innerHTML = ''; return; }
+  flash('');
+  renderForecast(data);
+});
+
+function renderForecast(d) {
+  const col = d.value_col;
+  const agg = d.aggregation;
+  const rows = (label, items) => items.map((p) =>
+    '<tr><td>' + esc(p.period) + '</td><td>' + fmtValue(p.value, col) + '</td>' +
+    '<td class="hint" style="margin:0">' + label + '</td></tr>').join('');
+
+  const hist = rows('actual', d.history);
+  const fc = d.forecast.map((p) =>
+    '<tr style="background:rgba(91,157,255,.10)"><td><strong>' + esc(p.period) + '</strong></td>' +
+    '<td><strong>' + fmtValue(p.value, col) + '</strong></td>' +
+    '<td class="hint" style="margin:0">forecast</td></tr>').join('');
+
+  const methods = d.methods.map((m) =>
+    '<tr' + (m.method === d.chosen_method ? ' style="background:rgba(79,209,139,.12)"' : '') +
+    '><td>' + esc(m.method) + '</td><td>' +
+    (m.mae == null ? '<span class="hint" style="margin:0">not testable</span>' : fmtValue(m.mae, col)) +
+    '</td><td>' + (m.method === d.chosen_method ? '&#10003; selected' : '') + '</td></tr>').join('');
+
+  $('fcOut').innerHTML =
+    '<div class="row" style="gap:18px; margin-bottom:10px">' +
+      '<div><div class="hint" style="margin:0">next ' + d.forecast.length + ' periods</div>' +
+      '<strong style="font-size:20px">' + fmtValue(d.forecast_total, col) + '</strong></div>' +
+      '<div><div class="hint" style="margin:0">method (lowest backtest MAE)</div>' +
+      '<strong>' + esc(d.chosen_method) + '</strong></div>' +
+      '<div><div class="hint" style="margin:0">grain / periods</div>' +
+      '<strong>' + esc(agg.grain) + ' &middot; ' + agg.periods + '</strong></div>' +
+    '</div>' +
+    '<div class="hint">' + agg.rows_used.toLocaleString() + ' of ' +
+      agg.rows_in.toLocaleString() + ' rows aggregated by ' + esc(agg.agg) +
+      (agg.dropped_periods.length ? ' &middot; dropped ' + agg.dropped_periods.join(', ') : '') +
+    '</div>' +
+    '<div class="row" style="margin:10px 0">' +
+      '<a class="btn primary" href="/api/artifact?path=' + encodeURIComponent(d.csv_path) + '">' +
+      'Download CSV</a>' +
+      '<span class="hint" style="margin:0">' + esc(d.csv_path) + '</span>' +
+    '</div>' +
+    '<div class="scroll-x" style="max-height:260px; overflow-y:auto">' +
+      '<table><tr><th>period</th><th>' + esc(col) + '</th><th></th></tr>' + hist + fc + '</table></div>' +
+    '<details style="margin-top:12px"><summary class="hint" style="cursor:pointer">' +
+      'method comparison (one-step-ahead backtest)</summary>' +
+      '<table><tr><th>method</th><th>MAE</th><th></th></tr>' + methods + '</table></details>' +
+    (d.warnings.length
+      ? '<div class="msg err" style="display:block; margin-top:12px"><strong>Read before quoting:</strong><ul style="margin:6px 0 0 18px">' +
+        d.warnings.map((w) => '<li>' + esc(w) + '</li>').join('') + '</ul></div>'
+      : '');
+}
+
+/* ── payload + command preview ──────────────────────────────────────── */
+function collectPayload() {
+  const payload = { upload_id: state.uploadId };
+  $('form').querySelectorAll('[data-kind]').forEach((el) => {
+    const kind = el.dataset.kind;
+    if (kind === 'bool') {
+      payload[el.name] = el.checked;
+    } else if (el.multiple) {
+      payload[el.name] = Array.from(el.selectedOptions).map((o) => o.value);
+    } else if (kind === 'int' || kind === 'float') {
+      payload[el.name] = el.value === '' ? null : Number(el.value);
+    } else {
+      payload[el.name] = el.value;
+    }
+  });
+  return payload;
+}
+
+/* Mirrors build_argv() in app.py so the preview matches what actually runs. */
+const FLAG_META = {{ flag_meta | safe }};
+function refreshCommand() {
+  const p = collectPayload();
+  const parts = ['python', 'run_acdso.py'];
+  if (state.uploadId) parts.push('--file', 'uploads/<your file>');
+  for (const meta of FLAG_META) {
+    const v = p[meta.name];
+    if (meta.kind === 'bool') { if (v) parts.push(meta.cli); continue; }
+    if (meta.kind === 'columns') {
+      const joined = (Array.isArray(v) ? v : String(v || '').split(','))
+        .map((s) => s.trim()).filter(Boolean).join(',');
+      if (joined) parts.push(meta.cli, joined);
+      continue;
+    }
+    if (v === null || v === '' || v === undefined) continue;
+    if (meta.kind === 'choice' && String(v) === String(meta.default)) continue;
+    parts.push(meta.cli, String(v));
+  }
+  $('cmd').textContent = parts.join(' ');
+}
+$('form').addEventListener('input', refreshCommand);
+$('form').addEventListener('change', refreshCommand);
+
+/* ── run / poll ─────────────────────────────────────────────────────── */
+$('runBtn').addEventListener('click', async () => {
+  flash('');
+  let res, data;
+  try {
+    res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectPayload()),
+    });
+    data = await res.json();
+  } catch (err) {
+    flash('Could not start the run: ' + err, 'err');
+    return;
+  }
+  if (!res.ok) { flash(data.error || 'Could not start the run', 'err'); return; }
+
+  state.jobId = data.job_id;
+  state.cursor = 0;
+  $('log').textContent = '';
+  $('cmd').textContent = data.command;
+  $('runBtn').disabled = true;
+  $('stopBtn').disabled = false;
+  setStatus('running');
+  poll();
+  state.poll = setInterval(poll, 1200);
+});
+
+$('stopBtn').addEventListener('click', async () => {
+  if (!state.jobId) return;
+  await fetch('/api/job/' + state.jobId + '/stop', { method: 'POST' });
+});
+
+async function poll() {
+  if (!state.jobId) return;
+  let data;
+  try {
+    const res = await fetch('/api/job/' + state.jobId + '?cursor=' + state.cursor);
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'poll failed');
+  } catch (err) {
+    return; // transient; the next tick retries
+  }
+  if (data.lines.length) {
+    $('log').textContent += data.lines.join('\n') + '\n';
+    state.cursor = data.cursor;
+    if ($('autoscroll').checked) $('log').scrollTop = $('log').scrollHeight;
+  }
+  $('elapsed').textContent = data.elapsed + 's elapsed';
+  $('logfile').textContent = 'log: ' + data.log_file;
+  setStatus(data.status, data.returncode);
+  renderArtifacts(data.artifacts);
+
+  if (data.status !== 'running') {
+    clearInterval(state.poll);
+    state.poll = null;
+    $('runBtn').disabled = false;
+    $('stopBtn').disabled = true;
+  }
+}
+
+function setStatus(status, code) {
+  const el = $('status');
+  el.style.display = 'inline';
+  el.className = 'status ' + status;
+  el.textContent = status + (code != null && status !== 'running' ? ' (exit ' + code + ')' : '');
+}
+
+function renderArtifacts(items) {
+  const box = $('artifacts');
+  if (!items || !items.length) { box.textContent = 'None yet.'; return; }
+  const viewable = new Set(['html', 'json', 'csv', 'txt', 'md', 'png', 'svg']);
+  box.innerHTML = '<div class="scroll-x"><table><tr><th>file</th><th>size</th><th></th></tr>' +
+    items.map((a) => {
+      const q = encodeURIComponent(a.path);
+      const view = viewable.has(a.kind)
+        ? '<a href="/api/artifact?path=' + q + '&inline=1" target="_blank">view</a>' : '';
+      return '<tr><td>' + esc(a.path) + '</td><td>' + fmtSize(a.size) + '</td>' +
+             '<td>' + view + ' <a href="/api/artifact?path=' + q + '">download</a></td></tr>';
+    }).join('') + '</table></div>';
+}
+
+function fmtSize(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
+
+refreshCommand();
+</script>
+</body>
+</html>

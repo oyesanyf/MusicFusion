@@ -18,6 +18,11 @@ scikit-learn>=1.0.0
 seaborn>=0.12.0  # For demo datasets
 
 # ===================================
+# Web GUI (python start.py)
+# ===================================
+flask>=3.0.0
+
+# ===================================
 # Optional Dependencies (Recommended)
 # ===================================
 psutil>=5.9.0  # Better memory measurement for native allocations (NumPy/BLAS/LightGBM/XGBoost)

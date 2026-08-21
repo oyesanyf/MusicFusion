@@ -124,3 +124,7 @@ Thumbs.db
 audit_trail.json
 *.log
 
+# Web GUI (start.py)
+uploads/
+reports/webui_logs/
+

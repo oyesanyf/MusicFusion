@@ -57,6 +57,29 @@ pip install -e ".[all]"
 
 ---
 
+## 🖥️ Web GUI
+
+```bash
+pip install flask
+python start.py
+```
+
+Opens `http://127.0.0.1:5000` — drop in a CSV / Excel / Parquet / JSON /
+Feather / Pickle file, pick the target column(s) from the detected schema,
+toggle any `run_acdso.py` flag, and watch the pipeline stream its output
+live. Reports, predictions and model files written to `reports/` are listed
+for viewing or download when the run finishes.
+
+Options: `--port 8000`, `--host 0.0.0.0` (binds beyond localhost — anyone who
+can reach the port can upload data and start runs), `--no-browser`, `--debug`.
+
+The GUI runs the same `run_acdso.py` command line you would type by hand and
+shows it before starting, so there is no separate execution path. One run at
+a time: ACDSO writes artifacts under deterministic dataset-derived names, so
+concurrent runs would overwrite each other.
+
+---
+
 ## 🚀 Quick Start
 
 ### Classification
@@ -565,19 +588,19 @@ ACDSO includes a comprehensive demo suite that showcases all features with **aut
 
 ```bash
 # Most common: Run everything on your data
-python demo.py --autonomous --file data.csv
+python run_acdso.py --autonomous --file data.csv
 
 # Complete workflow: Train + Predict
-python demo.py --autonomous --predict price --file data.csv
+python run_acdso.py --autonomous --predict price --file data.csv
 
 # Just make predictions (model must exist)
-python demo.py --predict price --file data.csv
+python run_acdso.py --predict price --file data.csv
 
 # Time series forecasting
-python demo.py --autonomous --file sales.csv --target revenue --datetime-col date
+python run_acdso.py --autonomous --file sales.csv --target revenue --datetime-col date
 
 # Benchmark your dataset
-python demo.py --file data.csv --target price --benchmark
+python run_acdso.py --file data.csv --target price --benchmark
 ```
 
 ### Autonomous Mode (Recommended)
@@ -586,13 +609,13 @@ Run everything automatically with a single command - generates a comprehensive c
 
 ```bash
 # Run ALL analyses on your data (EDA, Risk, AutoML, Time Series, Benchmarks)
-python demo.py --autonomous --file data.csv
+python run_acdso.py --autonomous --file data.csv
 
 # With custom target
-python demo.py --autonomous --file data.csv --target price
+python run_acdso.py --autonomous --file data.csv --target price
 
 # Short form
-python demo.py -a -f data.csv -t price
+python run_acdso.py -a -f data.csv -t price
 ```
 
 **What Autonomous Mode Does:**
@@ -609,7 +632,7 @@ Train a model and make predictions in one command:
 
 ```bash
 # Train model and make predictions on full dataset
-python demo.py --autonomous --predict price --file data.csv
+python run_acdso.py --autonomous --predict price --file data.csv
 
 # This will:
 # 1. Run all analyses (EDA, Risk, AutoML, Time Series, Benchmarks)
@@ -628,39 +651,39 @@ python demo.py --autonomous --predict price --file data.csv
 
 ```bash
 # Run all 18 demos using the Seaborn tips dataset
-python demo.py
+python run_acdso.py
 
 # Run specific demos
-python demo.py --v3              # v3 innovations demo
-python demo.py --timeseries     # Time series forecasting
-python demo.py --decision       # Decision intelligence
-python demo.py --benchmark      # Benchmark comparison
+python run_acdso.py --v3              # v3 innovations demo
+python run_acdso.py --timeseries     # Time series forecasting
+python run_acdso.py --decision       # Decision intelligence
+python run_acdso.py --benchmark      # Benchmark comparison
 ```
 
 ### Run on Your Own Data
 
 ```bash
 # Basic usage - uses last column as target
-python demo.py --file data.csv
+python run_acdso.py --file data.csv
 
 # Specify target column
-python demo.py --file data.csv --target price
+python run_acdso.py --file data.csv --target price
 
 # Specify task type
-python demo.py --file data.csv --target churn --task classification
+python run_acdso.py --file data.csv --target churn --task classification
 
 # Time series with datetime column
-python demo.py --file sales.csv --target revenue --datetime-col date --timeseries
+python run_acdso.py --file sales.csv --target revenue --datetime-col date --timeseries
 
 # Short form
-python demo.py -f customers.xlsx -t label
+python run_acdso.py -f customers.xlsx -t label
 ```
 
 ### Make Predictions (After Training)
 
 ```bash
 # Make predictions using a previously trained model
-python demo.py --predict price --file data.csv
+python run_acdso.py --predict price --file data.csv
 
 # Predictions are made on ALL rows in the dataset
 # Output: reports/predictions_{filename}_{target}_full_dataset.csv

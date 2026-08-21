@@ -143,6 +143,9 @@ decision-full = [  # All decision intelligence tools including RL
     "gymnasium>=0.29.0",
 ]
 
+# Web GUI (start.py)
+webui = ["flask>=3.0.0"]
+
 # Development
 dev = [
     "pytest>=7.0.0",
@@ -183,6 +186,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["acdso", "acdso.*"]
+
+[tool.setuptools.package-data]
+"acdso.webui" = ["templates/*.html"]
 
 [tool.black]
 line-length = 120

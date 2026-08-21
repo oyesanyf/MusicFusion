@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "acdso-webui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["start.py", "--no-browser", "--port", "5057"],
+      "port": 5057
+    }
+  ]
+}
