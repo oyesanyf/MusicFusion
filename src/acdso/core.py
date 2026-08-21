@@ -319,6 +319,7 @@ class _ACDSOEngineV3:
         enable_feature_selection: bool,
         llm_advisor: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]],
         verbose: int,
+        selection_mode: str = "knee_point",
     ):
         self.task = task
         self.scorer = scorer  # Will be adjusted in fit() based on y
@@ -328,6 +329,7 @@ class _ACDSOEngineV3:
         self.time_budget_s = time_budget_s
         self.max_candidates = max_candidates
         self.preference = preference
+        self.selection_mode = selection_mode  # "knee_point" or "best_score"
 
         self.max_train_time_s = max_train_time_s
         self.max_peak_mem_mb = max_peak_mem_mb
@@ -363,16 +365,42 @@ class _ACDSOEngineV3:
         - Severe imbalance → prefer class weights
         - Small datasets → simpler models
         - Large datasets → scalable learners (boosting if available)
+        - Very few features → skip feature selection, simpler models
+        - More features than samples → increased regularization
         """
         df = pd.DataFrame(X)
         num_cols, cat_cols = split_columns(df)
 
         pre = build_preprocessor(num_cols, cat_cols)
 
+        # Dataset size detection for adaptive model configuration
+        n_samples = rr.n_rows
+        n_features = rr.n_cols
+        
+        # Edge case flags
+        very_few_features = n_features <= 3
+        very_few_samples = n_samples < 50
+        few_samples = n_samples < 200
+        small = n_samples < 1000
+        large = n_samples >= 50000
+        more_features_than_samples = n_features > n_samples
+        
+        # Log edge cases for debugging
+        if self.verbose:
+            edge_cases = []
+            if very_few_features:
+                edge_cases.append(f"very_few_features ({n_features})")
+            if very_few_samples:
+                edge_cases.append(f"very_few_samples ({n_samples})")
+            if more_features_than_samples:
+                edge_cases.append(f"more_features_than_samples ({n_features}>{n_samples})")
+            if edge_cases:
+                self._log(f"Edge cases detected: {', '.join(edge_cases)}")
+
         # Add feature selection if high multicollinearity detected
-        # Calculate k to actually reduce features: keep top 50-75% based on VIF severity
+        # BUT skip if very few features (no point selecting from ≤3 features)
         selector = None
-        if self.enable_feature_selection and rr.vif_max >= 10.0:
+        if self.enable_feature_selection and rr.vif_max >= 10.0 and not very_few_features:
             score_func = f_classif if self.task == "classification" else f_regression
             # Determine k: more aggressive selection for higher VIF
             # VIF 10-20: keep 75% of features, VIF 20-50: keep 60%, VIF >50: keep 50%
@@ -383,39 +411,88 @@ class _ACDSOEngineV3:
             else:
                 k_ratio = 0.75
             
-            # Calculate actual k (ensure at least 5 features remain for small datasets)
-            n_features = len(num_cols) if num_cols else rr.n_cols
-            k = max(5, int(n_features * k_ratio))
-            k = min(k, n_features)  # Don't exceed available features
+            # Calculate actual k (ensure at least 2 features remain)
+            total_features = len(num_cols) if num_cols else n_features
+            k = max(2, int(total_features * k_ratio))
+            k = min(k, total_features)  # Don't exceed available features
             
-            selector = SelectKBest(score_func=score_func, k=k)
+            # Only add selector if k < total_features (otherwise it's useless)
+            if k < total_features:
+                selector = SelectKBest(score_func=score_func, k=k)
 
-        small = rr.n_rows < 1000
-        large = rr.n_rows >= 50000
+        # Adaptive n_estimators based on dataset size
+        if very_few_samples:
+            n_est_small, n_est_med, n_est_large = 30, 50, 80
+        elif few_samples:
+            n_est_small, n_est_med, n_est_large = 50, 80, 100
+        elif small:
+            n_est_small, n_est_med, n_est_large = 80, 100, 150
+        else:
+            n_est_small, n_est_med, n_est_large = 100, 150, 250
+        
+        # Adaptive max_depth based on features and samples
+        if very_few_features:
+            max_depth_shallow, max_depth_medium = 2, 3
+        elif very_few_samples or more_features_than_samples:
+            max_depth_shallow, max_depth_medium = 3, 5
+        elif few_samples:
+            max_depth_shallow, max_depth_medium = 4, 7
+        else:
+            max_depth_shallow, max_depth_medium = 5, 10
+        
+        # Adaptive min_samples_leaf for small datasets
+        if very_few_samples:
+            min_samples_leaf = max(1, n_samples // 10)
+        elif few_samples:
+            min_samples_leaf = 3
+        else:
+            min_samples_leaf = 1
+        
+        # Linearity detection - prioritize linear models if data is linear
+        is_linear = getattr(rr, 'is_linear', False)
+        linearity_score = getattr(rr, 'linearity_score', 0.0)
+        
+        if is_linear and self.verbose:
+            self._log(f"Linear data detected (score={linearity_score:.3f}). Prioritizing linear models.")
 
         models: List[Tuple[str, Any]] = []
 
         if self.task == "classification":
-            # Logistic Regression
-            # Logistic Regression with different regularization
-            lr_l2 = LogisticRegression(max_iter=2000, penalty='l2', C=1.0, random_state=self.random_state)
-            lr_weak = LogisticRegression(max_iter=2000, penalty='l2', C=0.1, random_state=self.random_state)
+            # Logistic Regression with adaptive regularization
+            # Increase regularization (lower C) when more features than samples
+            c_default = 0.1 if more_features_than_samples else 1.0
+            c_weak = 0.01 if more_features_than_samples else 0.1
             
-            # Random Forest with different configurations
+            lr_l2 = LogisticRegression(max_iter=2000, penalty='l2', C=c_default, random_state=self.random_state)
+            lr_weak = LogisticRegression(max_iter=2000, penalty='l2', C=c_weak, random_state=self.random_state)
+            
+            # Add more linear model variants for linear datasets
+            if is_linear:
+                # Additional regularization strengths for linear data
+                lr_strong = LogisticRegression(max_iter=2000, penalty='l2', C=10.0, random_state=self.random_state)
+                lr_elastic = LogisticRegression(
+                    max_iter=2000, penalty='elasticnet', solver='saga',
+                    l1_ratio=0.5, C=1.0, random_state=self.random_state
+                )
+            
+            # Random Forest with adaptive configurations
             rf_shallow = RandomForestClassifier(
-                n_estimators=80 if small else 150,
-                max_depth=5,
+                n_estimators=n_est_small,
+                max_depth=max_depth_shallow,
+                min_samples_leaf=min_samples_leaf,
                 random_state=self.random_state,
                 n_jobs=-1,
             )
             rf_medium = RandomForestClassifier(
-                n_estimators=80 if small else 150,
-                max_depth=10,
+                n_estimators=n_est_med,
+                max_depth=max_depth_medium,
+                min_samples_leaf=min_samples_leaf,
                 random_state=self.random_state,
                 n_jobs=-1,
             )
             rf_deep = RandomForestClassifier(
-                n_estimators=80 if small else 200,
+                n_estimators=n_est_large,
+                min_samples_leaf=min_samples_leaf,
                 random_state=self.random_state,
                 n_jobs=-1,
             )
@@ -427,78 +504,185 @@ class _ACDSOEngineV3:
                         model.set_params(class_weight="balanced")
                     except Exception:
                         pass
+                if is_linear:
+                    for model in [lr_strong, lr_elastic]:
+                        try:
+                            model.set_params(class_weight="balanced")
+                        except Exception:
+                            pass
                 for model in [rf_shallow, rf_medium, rf_deep]:
                     try:
                         model.set_params(class_weight="balanced")
                     except Exception:
                         pass
 
-            models.append(("LogisticRegression", lr_l2))
-            models.append(("LogisticRegression_C0.1", lr_weak))
-            models.append(("RandomForest_d5", rf_shallow))
+            # For linear data, prioritize linear models (add them first)
+            if is_linear:
+                models.append(("LogisticRegression_C10", lr_strong))
+                models.append(("LogisticRegression", lr_l2))
+                models.append(("LogisticRegression_ElasticNet", lr_elastic))
+                models.append(("LogisticRegression_C0.1", lr_weak))
+                # Still add some tree models for comparison
+                models.append(("RandomForest_d5", rf_shallow))
+            else:
+                models.append(("LogisticRegression", lr_l2))
+                models.append(("LogisticRegression_C0.1", lr_weak))
+                models.append(("RandomForest_d5", rf_shallow))
             models.append(("RandomForest_d10", rf_medium))
             models.append(("RandomForest", rf_deep))
 
-            # Add boosting for medium and large datasets (≥3000 rows)
-            if not small and _HAS_LGBM:
+            # Add boosting for medium+ datasets with enough features
+            # Skip LightGBM if <5 features, skip XGBoost if <3 features
+            can_use_lgbm = not small and _HAS_LGBM and n_features >= 5 and not very_few_samples
+            can_use_xgb = not small and _HAS_XGB and n_features >= 3 and not very_few_samples
+            
+            if can_use_lgbm:
+                # LightGBM with settings to prevent crashes on small/sparse data
+                lgbm_min_data = max(5, n_samples // 50) if few_samples else 20
                 models.append(("LightGBM", LGBMClassifier(
                     random_state=self.random_state,
                     verbose=-1,
-                    n_estimators=100,
+                    n_estimators=n_est_med,
+                    feature_pre_filter=False,  # Prevent "Forced splits" error
+                    min_data_in_leaf=lgbm_min_data,
                 )))
-            if not small and _HAS_XGB:
+            if can_use_xgb:
                 models.append(("XGBoost", XGBClassifier(
                     random_state=self.random_state,
                     n_jobs=-1,
                     verbosity=0,
-                    n_estimators=100,
+                    n_estimators=n_est_med,
+                    max_depth=max_depth_medium,
                 )))
 
         else:  # regression
-            # Ridge Regression (with different alpha values)
-            models.append(("Ridge_alpha0.1", Ridge(alpha=0.1, random_state=self.random_state)))
-            models.append(("Ridge_alpha1.0", Ridge(alpha=1.0, random_state=self.random_state)))
-            models.append(("Ridge_alpha10", Ridge(alpha=10.0, random_state=self.random_state)))
-
-            # ElasticNet
-            models.append(("ElasticNet", ElasticNet(random_state=self.random_state, max_iter=2000)))
+            # Ridge Regression with adaptive alpha
+            # Increase alpha (more regularization) when more features than samples
+            if more_features_than_samples:
+                alpha_low, alpha_mid, alpha_high = 1.0, 10.0, 100.0
+            elif very_few_samples:
+                alpha_low, alpha_mid, alpha_high = 0.5, 5.0, 50.0
+            else:
+                alpha_low, alpha_mid, alpha_high = 0.1, 1.0, 10.0
             
-            # Lasso
-            models.append(("Lasso", Lasso(random_state=self.random_state, max_iter=2000)))
-
-            # Random Forest Regressor (with different configurations)
-            models.append(("RandomForest_d5", RandomForestRegressor(
-                n_estimators=100 if small else 200,
-                max_depth=5,
-                random_state=self.random_state,
-                n_jobs=-1,
-            )))
-            models.append(("RandomForest_d10", RandomForestRegressor(
-                n_estimators=100 if small else 200,
-                max_depth=10,
-                random_state=self.random_state,
-                n_jobs=-1,
-            )))
-            models.append(("RandomForestRegressor", RandomForestRegressor(
-                n_estimators=100 if small else 250,
-                random_state=self.random_state,
-                n_jobs=-1,
-            )))
-
-            # Add boosting for medium and large datasets (≥3000 rows)
-            if not small and _HAS_LGBM:
-                models.append(("LightGBMRegressor", LGBMRegressor(
-                    random_state=self.random_state,
-                    verbose=-1,
-                    n_estimators=100,
+            # ElasticNet/Lasso with adaptive settings
+            # Reduce max_iter and increase tol for high-dimensional or small datasets
+            if more_features_than_samples or very_few_samples:
+                elastic_max_iter, elastic_tol = 200, 1e-2
+            else:
+                elastic_max_iter, elastic_tol = 500, 1e-3
+            
+            # For linear datasets, prioritize linear models with more variety
+            if is_linear:
+                from sklearn.linear_model import LinearRegression, SGDRegressor, HuberRegressor
+                
+                # LinearRegression (OLS) - best for truly linear data
+                models.append(("LinearRegression", LinearRegression()))
+                
+                # Ridge variants with different alphas
+                models.append(("Ridge_alpha0.01", Ridge(alpha=0.01, random_state=self.random_state)))
+                models.append(("Ridge_alpha0.1", Ridge(alpha=alpha_low, random_state=self.random_state)))
+                models.append(("Ridge_alpha1.0", Ridge(alpha=alpha_mid, random_state=self.random_state)))
+                models.append(("Ridge_alpha10", Ridge(alpha=alpha_high, random_state=self.random_state)))
+                
+                # ElasticNet with different l1_ratios
+                models.append(("ElasticNet_l1_0.2", ElasticNet(
+                    l1_ratio=0.2, random_state=self.random_state, 
+                    max_iter=elastic_max_iter, tol=elastic_tol
                 )))
-            if not small and _HAS_XGB:
-                models.append(("XGBoostRegressor", XGBRegressor(
+                models.append(("ElasticNet", ElasticNet(
+                    random_state=self.random_state, 
+                    max_iter=elastic_max_iter, 
+                    tol=elastic_tol
+                )))
+                models.append(("ElasticNet_l1_0.8", ElasticNet(
+                    l1_ratio=0.8, random_state=self.random_state, 
+                    max_iter=elastic_max_iter, tol=elastic_tol
+                )))
+                
+                # Lasso for sparse linear relationships
+                models.append(("Lasso", Lasso(
+                    random_state=self.random_state, 
+                    max_iter=elastic_max_iter, 
+                    tol=elastic_tol
+                )))
+                
+                # Huber for robust linear regression
+                if not very_few_samples:
+                    models.append(("HuberRegressor", HuberRegressor(max_iter=500)))
+                
+                # Add one tree model for comparison
+                models.append(("RandomForest_d5", RandomForestRegressor(
+                    n_estimators=n_est_small,
+                    max_depth=max_depth_shallow,
+                    min_samples_leaf=min_samples_leaf,
                     random_state=self.random_state,
                     n_jobs=-1,
-                    verbosity=0,
-                    n_estimators=100,
                 )))
+            else:
+                # Standard model selection for non-linear data
+                models.append(("Ridge_alpha0.1", Ridge(alpha=alpha_low, random_state=self.random_state)))
+                models.append(("Ridge_alpha1.0", Ridge(alpha=alpha_mid, random_state=self.random_state)))
+                models.append(("Ridge_alpha10", Ridge(alpha=alpha_high, random_state=self.random_state)))
+                
+                models.append(("ElasticNet", ElasticNet(
+                    random_state=self.random_state, 
+                    max_iter=elastic_max_iter, 
+                    tol=elastic_tol
+                )))
+                models.append(("Lasso", Lasso(
+                    random_state=self.random_state, 
+                    max_iter=elastic_max_iter, 
+                    tol=elastic_tol
+                )))
+
+                # Random Forest Regressor with adaptive configurations
+                models.append(("RandomForest_d5", RandomForestRegressor(
+                    n_estimators=n_est_small,
+                    max_depth=max_depth_shallow,
+                    min_samples_leaf=min_samples_leaf,
+                    random_state=self.random_state,
+                    n_jobs=-1,
+                )))
+                models.append(("RandomForest_d10", RandomForestRegressor(
+                    n_estimators=n_est_med,
+                    max_depth=max_depth_medium,
+                    min_samples_leaf=min_samples_leaf,
+                    random_state=self.random_state,
+                    n_jobs=-1,
+                )))
+                models.append(("RandomForestRegressor", RandomForestRegressor(
+                    n_estimators=n_est_large,
+                    min_samples_leaf=min_samples_leaf,
+                    random_state=self.random_state,
+                    n_jobs=-1,
+                )))
+
+            # Add boosting for medium+ datasets with enough features (unless linear)
+            # Skip LightGBM if <5 features, skip XGBoost if <3 features
+            # For linear data, skip tree-based models as they're unlikely to help
+            if not is_linear:
+                can_use_lgbm = not small and _HAS_LGBM and n_features >= 5 and not very_few_samples
+                can_use_xgb = not small and _HAS_XGB and n_features >= 3 and not very_few_samples
+                
+                if can_use_lgbm:
+                    # LightGBM with settings to prevent crashes on small/sparse data
+                    lgbm_min_data = max(5, n_samples // 50) if few_samples else 20
+                    models.append(("LightGBMRegressor", LGBMRegressor(
+                        random_state=self.random_state,
+                        verbose=-1,
+                        n_estimators=n_est_med,
+                        feature_pre_filter=False,  # Prevent "Forced splits" error
+                        min_data_in_leaf=lgbm_min_data,
+                    )))
+                if can_use_xgb:
+                    models.append(("XGBoostRegressor", XGBRegressor(
+                        random_state=self.random_state,
+                        n_jobs=-1,
+                        verbosity=0,
+                        n_estimators=n_est_med,
+                        max_depth=max_depth_medium,
+                    )))
 
         # Build pipelines
         candidates: List[Tuple[str, Pipeline]] = []
@@ -820,7 +1004,22 @@ class _ACDSOEngineV3:
         6. Select knee-point solution
         7. Build audit trail
         """
-        # Step 0: Auto-adjust scorer for multiclass or non-standard binary labels
+        # Step 0a: Adapt CV folds for small datasets
+        n_samples = len(y) if hasattr(y, '__len__') else np.array(y).shape[0]
+        original_cv = self.cv
+        
+        # Ensure we have at least 2 samples per fold
+        max_cv_for_data = n_samples // 2
+        if self.cv > max_cv_for_data:
+            self.cv = max(2, max_cv_for_data)
+            self._log(f"Reduced CV folds from {original_cv} to {self.cv} (small dataset: {n_samples} samples)")
+        
+        # For very small datasets, use leave-one-out style (but cap at 5)
+        if n_samples < 20:
+            self.cv = min(n_samples - 1, 5)
+            self._log(f"Using {self.cv}-fold CV for very small dataset ({n_samples} samples)")
+        
+        # Step 0b: Auto-adjust scorer for multiclass or non-standard binary labels
         adjusted_scorer = _auto_adjust_scorer(self.scorer, y, self.task)
         if adjusted_scorer != self.scorer:
             self._log(f"Auto-adjusted scorer: {self.scorer} → {adjusted_scorer}")
@@ -922,7 +1121,28 @@ class _ACDSOEngineV3:
                 results = stage_results
 
         if not results:
-            raise RuntimeError("No candidates passed evaluation/constraints.")
+            # Fallback: Create a simple baseline model that always works
+            self._log("WARNING: All candidates failed. Using fallback baseline model.")
+            from sklearn.dummy import DummyRegressor, DummyClassifier
+            from sklearn.pipeline import Pipeline
+            
+            if self.task == "classification":
+                fallback_model = DummyClassifier(strategy="most_frequent")
+            else:
+                fallback_model = DummyRegressor(strategy="mean")
+            
+            fallback_pipe = Pipeline([("pre", self._build_preprocessor(X)), ("model", fallback_model)])
+            
+            try:
+                fallback_res = self._evaluate_candidate(X, y, "Baseline_Fallback", fallback_pipe)
+                results = [fallback_res]
+                self._log(f"Fallback model: metric={fallback_res.metric:.4f}")
+            except Exception as fallback_e:
+                # If even the fallback fails, raise the original error with more context
+                raise RuntimeError(
+                    f"No candidates passed evaluation/constraints, and fallback also failed: {fallback_e}. "
+                    f"Failures: {failures[:5]}"  # Show first 5 failures
+                )
 
         self.all_results_ = results
 
@@ -945,10 +1165,17 @@ class _ACDSOEngineV3:
         self.pareto_front_ = front
         self._log(f"Pareto front size: {len(front)}")
 
-        # Step 6: Select knee-point solution
-        best = knee_point_selection(front)
+        # Step 6: Select best model based on selection_mode
+        if self.selection_mode == "best_score":
+            # Select purely by CV score (highest metric value)
+            best = max(results, key=lambda r: r.metric)
+            self._log(f"Selected: {best.name} (best-score: {best.metric:.4f})")
+        else:
+            # Default: knee-point selection (multi-objective trade-off)
+            best = knee_point_selection(front)
+            self._log(f"Selected: {best.name} (knee-point)")
+        
         self.best_result_ = best
-        self._log(f"Selected: {best.name} (knee-point)")
 
         # Step 7: Build audit trail
         self.audit_trail_ = {
@@ -1105,6 +1332,7 @@ class ACDSOClassifier(BaseEstimator, ClassifierMixin):
         enable_feature_selection: bool = True,
         llm_advisor: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
         verbose: int = 0,
+        selection_mode: str = "knee_point",
     ) -> None:
         self.scorer = scorer
         self.cv = cv
@@ -1118,6 +1346,7 @@ class ACDSOClassifier(BaseEstimator, ClassifierMixin):
         self.enable_feature_selection = enable_feature_selection
         self.llm_advisor = llm_advisor
         self.verbose = verbose
+        self.selection_mode = selection_mode  # "knee_point" or "best_score"
 
         # Fitted attributes
         self.best_estimator_: Optional[Pipeline] = None
@@ -1134,7 +1363,7 @@ class ACDSOClassifier(BaseEstimator, ClassifierMixin):
         1. Analyze dataset risk
         2. Generate adaptive candidates
         3. Evaluate with multi-objective metrics
-        4. Select optimal model via Pareto knee-point
+        4. Select optimal model via Pareto knee-point or best score
 
         Parameters
         ----------
@@ -1162,6 +1391,7 @@ class ACDSOClassifier(BaseEstimator, ClassifierMixin):
             enable_feature_selection=self.enable_feature_selection,
             llm_advisor=self.llm_advisor,
             verbose=self.verbose,
+            selection_mode=self.selection_mode,
         ).fit(X, y)
 
         assert self._engine.best_result_ is not None
@@ -1334,6 +1564,7 @@ class ACDSORegressor(BaseEstimator, RegressorMixin):
         enable_feature_selection: bool = True,
         llm_advisor: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
         verbose: int = 0,
+        selection_mode: str = "knee_point",
     ) -> None:
         self.scorer = scorer
         self.cv = cv
@@ -1347,6 +1578,7 @@ class ACDSORegressor(BaseEstimator, RegressorMixin):
         self.enable_feature_selection = enable_feature_selection
         self.llm_advisor = llm_advisor
         self.verbose = verbose
+        self.selection_mode = selection_mode  # "knee_point" or "best_score"
 
         # Fitted attributes
         self.best_estimator_: Optional[Pipeline] = None
@@ -1385,6 +1617,7 @@ class ACDSORegressor(BaseEstimator, RegressorMixin):
             enable_feature_selection=self.enable_feature_selection,
             llm_advisor=self.llm_advisor,
             verbose=self.verbose,
+            selection_mode=self.selection_mode,
         ).fit(X, y)
 
         assert self._engine.best_result_ is not None

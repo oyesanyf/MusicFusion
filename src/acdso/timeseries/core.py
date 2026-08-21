@@ -425,6 +425,15 @@ class AutoTS:
         # Sort by time
         df = df.sort_values(self.datetime_col).reset_index(drop=True)
         
+        # Drop non-numeric columns except datetime and target to avoid dtype issues
+        # Keep only: datetime_col, target_col, and numeric columns
+        cols_to_keep = [self.datetime_col, self.target_col]
+        for col in df.columns:
+            if col not in cols_to_keep:
+                if np.issubdtype(df[col].dtype, np.number):
+                    cols_to_keep.append(col)
+        df = df[cols_to_keep]
+        
         # Check for sufficient data
         min_samples = max(30, self.horizon * 3)
         if len(df) < min_samples:

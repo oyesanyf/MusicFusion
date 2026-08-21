@@ -31,6 +31,13 @@ Usage:
 
 from __future__ import annotations
 
+# MUST be before any imports to suppress pkg_resources deprecation warning
+import warnings
+warnings.filterwarnings('ignore', message='.*pkg_resources.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
+
 import argparse
 import gc
 import json
@@ -38,12 +45,11 @@ import os
 import sys
 import time
 import tracemalloc
-import warnings
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-# Suppress common warnings from AutoML libraries
+# Additional warning suppression after imports
 warnings.filterwarnings('ignore', message='.*pkg_resources.*')
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='stopit')
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='sklearn')
@@ -67,23 +73,6 @@ from sklearn.metrics import (
     accuracy_score, f1_score, precision_score, recall_score,
     r2_score, mean_squared_error, mean_absolute_error
 )
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-
-
-def run_with_timeout(func, timeout_seconds, *args, **kwargs):
-    """
-    Run a function with a hard timeout.
-    Returns (result, error) tuple.
-    """
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(func, *args, **kwargs)
-        try:
-            result = future.result(timeout=timeout_seconds)
-            return result, None
-        except FuturesTimeoutError:
-            return None, f"Timeout after {timeout_seconds}s"
-        except Exception as e:
-            return None, str(e)[:100]
 from sklearn.preprocessing import LabelEncoder
 
 # Suppress warnings for cleaner output
@@ -469,6 +458,93 @@ def load_benchmark_datasets(dataset_names: List[str] = None) -> Dict[str, Dict[s
             'has_multicollinearity': True
         }
     
+    # Linear datasets (best handled by linear models)
+    if dataset_names is None or 'linear_reg' in dataset_names:
+        # Perfect linear regression dataset
+        np.random.seed(42)
+        n = 800
+        X = pd.DataFrame({
+            'x1': np.random.randn(n),
+            'x2': np.random.randn(n),
+            'x3': np.random.randn(n),
+            'x4': np.random.randn(n),
+            'x5': np.random.randn(n),
+        })
+        # y = 3*x1 + 2*x2 - 1.5*x3 + 0.5*x4 + noise
+        y = 3*X['x1'] + 2*X['x2'] - 1.5*X['x3'] + 0.5*X['x4'] + np.random.randn(n) * 0.5
+        all_datasets['linear_reg'] = {
+            'X': X,
+            'y': y.values,
+            'task': 'regression',
+            'description': 'Linear regression (y = 3x1 + 2x2 - 1.5x3 + 0.5x4 + noise)',
+            'is_linear': True
+        }
+    
+    if dataset_names is None or 'linear_clf' in dataset_names:
+        # Linear classification (separable by hyperplane)
+        np.random.seed(42)
+        n = 800
+        X = pd.DataFrame({
+            'x1': np.random.randn(n),
+            'x2': np.random.randn(n),
+            'x3': np.random.randn(n),
+            'x4': np.random.randn(n),
+        })
+        # y = sign(2*x1 + 1.5*x2 - x3 + noise)
+        decision = 2*X['x1'] + 1.5*X['x2'] - X['x3'] + np.random.randn(n) * 0.3
+        y = (decision > 0).astype(int)
+        all_datasets['linear_clf'] = {
+            'X': X,
+            'y': y,
+            'task': 'classification',
+            'description': 'Linear classification (linearly separable)',
+            'is_linear': True
+        }
+    
+    if dataset_names is None or 'linear_sparse' in dataset_names:
+        # Sparse linear regression (only a few features matter)
+        np.random.seed(42)
+        n = 600
+        n_features = 20
+        X = pd.DataFrame(
+            np.random.randn(n, n_features),
+            columns=[f'x{i}' for i in range(n_features)]
+        )
+        # Only x0, x1, x2 matter: y = 5*x0 - 3*x1 + 2*x2 + noise
+        y = 5*X['x0'] - 3*X['x1'] + 2*X['x2'] + np.random.randn(n) * 0.5
+        all_datasets['linear_sparse'] = {
+            'X': X,
+            'y': y.values,
+            'task': 'regression',
+            'description': 'Sparse linear (3/20 features relevant)',
+            'is_linear': True,
+            'is_sparse': True
+        }
+    
+    if dataset_names is None or 'linear_highdim' in dataset_names:
+        # High-dimensional linear regression
+        np.random.seed(42)
+        n = 500
+        n_features = 100
+        # Generate features with some correlation structure
+        base = np.random.randn(n, 10)
+        X_mat = np.hstack([
+            base,
+            base @ np.random.randn(10, 90) * 0.5 + np.random.randn(n, 90) * 0.5
+        ])
+        X = pd.DataFrame(X_mat, columns=[f'x{i}' for i in range(n_features)])
+        # Linear combination of first 10 features
+        coeffs = np.array([3, 2, -1.5, 1, -0.5, 0.8, -0.3, 0.2, 0.1, -0.1])
+        y = X_mat[:, :10] @ coeffs + np.random.randn(n) * 0.5
+        all_datasets['linear_highdim'] = {
+            'X': X,
+            'y': y,
+            'task': 'regression',
+            'description': 'High-dimensional linear (100 features, linear signal)',
+            'is_linear': True,
+            'is_high_dimensional': True
+        }
+    
     return all_datasets
 
 
@@ -727,10 +803,13 @@ def run_tpot(
         import io
         
         # TPOT 1.0+ has issues with genetic algorithm on small datasets/short budgets
-        # We need at least 120s and 500+ samples for reliable results
-        if _TPOT_V1 and (time_budget_s < 120 or len(X_train) < 200):
+        # We need at least 180s for TPOT 1.0+ to have a chance to complete
+        min_budget = 180 if _TPOT_V1 else 60
+        actual_budget = max(time_budget_s, min_budget)
+        
+        if _TPOT_V1 and len(X_train) < 100:
             tracemalloc.stop()
-            result.error = f"TPOT 1.0+ requires >=120s budget and >=200 samples (got {time_budget_s}s, {len(X_train)} samples)"
+            result.error = f"TPOT 1.0+ requires >=100 samples (got {len(X_train)} samples)"
             return result
         
         # TPOT API changed significantly in version 1.0+
@@ -755,8 +834,8 @@ def run_tpot(
                     scorers=scorers,
                     scorers_weights=[1.0],
                     classification=(task == 'classification'),
-                    max_time_mins=max(2, time_budget_s / 60),
-                    max_eval_time_mins=max(1, time_budget_s / 120),
+                    max_time_mins=max(2, actual_budget / 60),
+                    max_eval_time_mins=max(1, actual_budget / 120),
                     population_size=10,
                     generations=3,
                     n_jobs=1,
@@ -785,7 +864,7 @@ def run_tpot(
                     random_state=42,
                     verbosity=0,
                     n_jobs=1,
-                    max_time_mins=time_budget_s / 60,
+                    max_time_mins=actual_budget / 60,
                 )
             else:
                 model = TPOTRegressor(
@@ -795,7 +874,7 @@ def run_tpot(
                     random_state=42,
                     verbosity=0,
                     n_jobs=1,
-                    max_time_mins=time_budget_s / 60,
+                    max_time_mins=actual_budget / 60,
                 )
             
             old_stderr = sys.stderr
@@ -813,7 +892,9 @@ def run_tpot(
         
         # Check if TPOT actually fitted a model
         if not fit_success or model is None:
-            raise RuntimeError("TPOT genetic algorithm failed - try increasing --time-budget to 180+")
+            result.error = "TPOT genetic algorithm failed - needs more time or data"
+            result.fit_time_s = fit_time
+            return result
         
         t0 = time.time()
         y_pred = model.predict(X_test.values)
@@ -838,6 +919,16 @@ def run_tpot(
         result.has_risk_report = False
         result.has_audit_trail = False
         result.pareto_front_size = len(getattr(model, 'pareto_front_', [])) if hasattr(model, 'pareto_front_') else None
+        
+        # Capture selected model name for TPOT
+        try:
+            if _TPOT_V1 and hasattr(model, 'fitted_pipeline_') and model.fitted_pipeline_ is not None:
+                # TPOT 1.0+ stores pipeline
+                result.model_name = str(type(model.fitted_pipeline_.steps[-1][1]).__name__)
+            elif hasattr(model, 'fitted_pipeline_') and model.fitted_pipeline_ is not None:
+                result.model_name = str(type(model.fitted_pipeline_.steps[-1][1]).__name__)
+        except Exception:
+            result.model_name = 'Unknown'
         
     except Exception as e:
         result.error = str(e)[:60] + "..." if len(str(e)) > 60 else str(e)
@@ -917,6 +1008,15 @@ def run_flaml(
         
         result.has_risk_report = False
         result.has_audit_trail = False
+        
+        # Capture selected model name for FLAML
+        try:
+            if hasattr(model, 'best_estimator') and model.best_estimator is not None:
+                result.model_name = str(type(model.best_estimator).__name__)
+            elif hasattr(model, 'model') and model.model is not None:
+                result.model_name = str(type(model.model.estimator).__name__)
+        except Exception:
+            result.model_name = 'Unknown'
         
         # Capture models evaluated by FLAML
         try:
@@ -1139,6 +1239,13 @@ def run_autogluon(
         result.has_risk_report = False
         result.has_audit_trail = False
         
+        # Capture selected model name for AutoGluon
+        try:
+            best_model = predictor.get_model_best()
+            result.model_name = str(best_model) if best_model else 'Unknown'
+        except Exception:
+            result.model_name = 'Unknown'
+        
         # Capture AutoGluon leaderboard (all models evaluated)
         try:
             leaderboard = predictor.leaderboard(silent=True)
@@ -1272,6 +1379,13 @@ def run_h2o(
         
         result.has_risk_report = False
         result.has_audit_trail = False
+        
+        # Capture selected model name for H2O
+        try:
+            if aml.leader is not None:
+                result.model_name = str(aml.leader.model_id)
+        except Exception:
+            result.model_name = 'Unknown'
         
         # Capture H2O leaderboard (all models evaluated)
         try:
@@ -1778,9 +1892,6 @@ def run_benchmark(
             if verbose:
                 print(f"    Running {sys_name}...", end=" ", flush=True)
             
-            # Hard timeout = 2x the time budget to catch runaway processes
-            hard_timeout = max(time_budget_s * 2, 120)  # At least 120 seconds
-            
             run_func = None
             if sys_name == 'ACDSO':
                 run_func = run_acdso
@@ -1801,19 +1912,16 @@ def run_benchmark(
             else:
                 continue
             
-            # Run with hard timeout to prevent hanging
-            result, timeout_error = run_with_timeout(
-                run_func, hard_timeout,
-                X_train, y_train, X_test, y_test, task, time_budget_s
-            )
-            
-            if timeout_error:
+            # Run directly without timeout - let each system complete
+            try:
+                result = run_func(X_train, y_train, X_test, y_test, task, time_budget_s)
+            except Exception as e:
                 result = BenchmarkResult(
                     system=sys_name,
                     dataset=ds_name,
                     task=task,
                     test_score=0.0,
-                    error=timeout_error,
+                    error=str(e)[:100],
                 )
             
             result.dataset = ds_name

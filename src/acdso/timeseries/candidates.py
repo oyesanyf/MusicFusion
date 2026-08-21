@@ -227,6 +227,19 @@ class TimeSeriesRegressor(BaseEstimator, RegressorMixin):
         
         y = np.asarray(y)
         
+        # First, drop non-numeric columns (except target and datetime which are handled later)
+        # This prevents datetime arithmetic errors
+        cols_to_drop_first = []
+        for col in X.columns:
+            if col != self.target_col and col != self.datetime_col:
+                try:
+                    if not np.issubdtype(X[col].dtype, np.number):
+                        cols_to_drop_first.append(col)
+                except Exception:
+                    cols_to_drop_first.append(col)
+        if cols_to_drop_first:
+            X = X.drop(columns=cols_to_drop_first, errors='ignore')
+        
         # Build feature transformer
         self._feature_transformer = create_ts_feature_pipeline(
             target_col=self.target_col,
@@ -282,6 +295,18 @@ class TimeSeriesRegressor(BaseEstimator, RegressorMixin):
             X = pd.DataFrame(X)
         else:
             X = X.copy()
+        
+        # First, drop non-numeric columns (except target and datetime which are handled later)
+        cols_to_drop_first = []
+        for col in X.columns:
+            if col != self.target_col and col != self.datetime_col:
+                try:
+                    if not np.issubdtype(X[col].dtype, np.number):
+                        cols_to_drop_first.append(col)
+                except Exception:
+                    cols_to_drop_first.append(col)
+        if cols_to_drop_first:
+            X = X.drop(columns=cols_to_drop_first, errors='ignore')
         
         # Transform features
         X_transformed = self._feature_transformer.transform(X)

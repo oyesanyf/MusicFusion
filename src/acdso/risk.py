@@ -41,7 +41,7 @@ class RiskReport:
     Comprehensive risk report for a dataset.
 
     Contains quantitative risk assessments across multiple dimensions
-    including leakage, imbalance, multicollinearity, and stability.
+    including leakage, imbalance, multicollinearity, stability, and linearity.
 
     Attributes
     ----------
@@ -75,6 +75,10 @@ class RiskReport:
         Features with high VIF (>=10).
     cv_score_std : float
         Standard deviation of cross-validation scores.
+    is_linear : bool
+        Whether the dataset exhibits strong linear relationships.
+    linearity_score : float
+        Score indicating how linear the data is (0.0 to 1.0).
     notes : List[str]
         Human-readable risk notes and warnings.
     """
@@ -102,6 +106,10 @@ class RiskReport:
 
     # Stability
     cv_score_std: float = 0.0
+    
+    # Linearity detection
+    is_linear: bool = False
+    linearity_score: float = 0.0
 
     notes: List[str] = field(default_factory=list)
 
@@ -333,6 +341,128 @@ def _vif_numeric(
     return vif_max, high
 
 
+def _detect_linearity(
+    df: pd.DataFrame,
+    y: Any,
+    task: str,
+    cv: int = 5,
+    random_state: int = 42,
+) -> Tuple[bool, float]:
+    """
+    Detect whether the dataset exhibits strong linear relationships.
+    
+    Compares linear model performance to a baseline to determine if
+    linear models are likely to perform well.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input features.
+    y : array-like
+        Target values.
+    task : str
+        Task type ("classification" or "regression").
+    cv : int, default=5
+        Number of cross-validation folds.
+    random_state : int, default=42
+        Random seed.
+
+    Returns
+    -------
+    Tuple[bool, float]
+        Tuple of (is_linear, linearity_score).
+        is_linear: True if linear models are likely optimal.
+        linearity_score: Score from 0.0 (non-linear) to 1.0 (highly linear).
+    """
+    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.impute import SimpleImputer
+    
+    # Get numeric columns only
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if not num_cols:
+        return False, 0.0
+    
+    X = df[num_cols].values.copy()
+    y_arr = np.asarray(y)
+    
+    # Sample for large datasets
+    n = len(y_arr)
+    max_samples = min(n, 2000)
+    rng = np.random.RandomState(random_state)
+    if n > max_samples:
+        idx = rng.choice(n, size=max_samples, replace=False)
+        X = X[idx]
+        y_arr = y_arr[idx]
+    
+    # Handle missing values and scale
+    try:
+        imputer = SimpleImputer(strategy='median')
+        X = imputer.fit_transform(X)
+        scaler = StandardScaler()
+        X = scaler.fit_transform(X)
+    except Exception:
+        return False, 0.0
+    
+    # Adjust cv for small datasets
+    n_samples = len(y_arr)
+    cv_actual = min(cv, n_samples // 2)
+    cv_actual = max(2, cv_actual)
+    
+    try:
+        if task == "classification":
+            splitter = StratifiedKFold(n_splits=cv_actual, shuffle=True, random_state=random_state)
+            linear_model = LogisticRegression(max_iter=1000, random_state=random_state)
+            nonlinear_model = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=random_state, n_jobs=-1)
+            scorer = "accuracy"
+        else:
+            splitter = KFold(n_splits=cv_actual, shuffle=True, random_state=random_state)
+            linear_model = Ridge(random_state=random_state)
+            nonlinear_model = RandomForestRegressor(n_estimators=50, max_depth=5, random_state=random_state, n_jobs=-1)
+            scorer = "r2"
+        
+        # Evaluate linear model
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore")
+            linear_scores = cross_val_score(linear_model, X, y_arr, cv=splitter, scoring=scorer)
+            linear_mean = float(np.mean(linear_scores))
+        
+        # Evaluate non-linear model
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore")
+            nonlinear_scores = cross_val_score(nonlinear_model, X, y_arr, cv=splitter, scoring=scorer)
+            nonlinear_mean = float(np.mean(nonlinear_scores))
+        
+        # Calculate linearity score
+        # If linear model performs similarly to or better than non-linear, data is likely linear
+        if nonlinear_mean <= 0:
+            # Avoid division by zero or negative scores
+            linearity_score = 1.0 if linear_mean >= 0 else 0.0
+        else:
+            # Ratio of linear to non-linear performance
+            ratio = linear_mean / nonlinear_mean
+            linearity_score = float(np.clip(ratio, 0.0, 1.2))  # Allow slight over 1.0
+            
+        # Also consider absolute linear performance
+        # High R² or accuracy with linear model suggests linearity
+        if task == "regression":
+            # For regression, R² > 0.7 with linear model indicates linearity
+            is_linear = linear_mean >= 0.7 or (ratio >= 0.95 and linear_mean >= 0.5)
+        else:
+            # For classification, accuracy > 0.85 with linear model indicates linearity
+            is_linear = linear_mean >= 0.85 or (ratio >= 0.95 and linear_mean >= 0.7)
+        
+        # Also detect truly linear datasets where linear >> random forest
+        if ratio > 1.05:  # Linear model outperforms RF significantly
+            is_linear = True
+            linearity_score = min(1.0, ratio)
+        
+        return is_linear, float(np.clip(linearity_score, 0.0, 1.0))
+        
+    except Exception:
+        return False, 0.0
+
+
 def _auto_adjust_scorer_for_risk(scorer: str, y: Any, task: str) -> str:
     """
     Auto-adjust scorer for risk analysis to handle multiclass/non-standard labels.
@@ -455,6 +585,16 @@ def analyze_risk(
     if vif_max >= 10.0:
         notes.append(f"High multicollinearity: VIF max={vif_max:.1f}.")
 
+    # Linearity detection
+    is_linear, linearity_score = _detect_linearity(
+        df, y,
+        task=task,
+        cv=max(3, cv),
+        random_state=random_state,
+    )
+    if is_linear:
+        notes.append(f"Linear relationship detected: linearity score={linearity_score:.3f}. Linear models recommended.")
+
     # LLM advisor (if provided)
     if llm_advisor is not None:
         try:
@@ -486,6 +626,8 @@ def analyze_risk(
         vif_max=float(vif_max),
         vif_features=[str(x) for x in vif_feats],
         cv_score_std=0.0,
+        is_linear=is_linear,
+        linearity_score=float(linearity_score),
         notes=notes,
     )
 

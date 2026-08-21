@@ -3,8 +3,8 @@ ACDSO v3.0 Demo - Comprehensive Usage Guide
 ============================================
 
 Run this script to see ACDSO in action with detailed result outputs:
-    python demo.py --autonomous    # Run EVERYTHING!
-    python demo.py                 # Run all demos sequentially
+    python run_acdso.py --autonomous    # Run EVERYTHING!
+    python run_acdso.py                 # Run all demos sequentially
 
 This demo showcases:
 - Basic classification and regression
@@ -30,6 +30,13 @@ Primary Dataset: Seaborn Tips Dataset
 - Restaurant tipping data with 244 observations
 - Features: total_bill, tip, sex, smoker, day, time, size
 """
+
+# Suppress warnings BEFORE any imports to catch pkg_resources deprecation
+import warnings
+warnings.filterwarnings('ignore', message='.*pkg_resources.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=UserWarning, module='stopit')
 
 import json
 import numpy as np
@@ -902,6 +909,54 @@ def generate_html_report_from_combined(report: Dict[str, Any], output_path: str 
             html += f"                <div class='summary-item'><div class='summary-value'>{formatted_value}</div><div class='summary-label'>{key.replace('_', ' ').title()}</div></div>\n"
         html += "            </div>\n        </div>\n"
     
+    # Add Files Generated section - comprehensive list of all output files
+    output_files = []
+    
+    # Collect all file paths from report
+    if 'html_report_path' in report:
+        output_files.append(("📄 Combined HTML Report", os.path.abspath(str(report.get('html_report_path', '')))))
+    
+    if 'model_path' in report:
+        output_files.append(("🤖 Trained Model (.pkl)", os.path.abspath(str(report.get('model_path', '')))))
+    
+    if 'audit_path' in report:
+        output_files.append(("📋 Audit Trail (.json)", os.path.abspath(str(report.get('audit_path', '')))))
+    
+    if 'predictions' in report and report['predictions'].get('output_file'):
+        output_files.append(("📊 Predictions CSV", os.path.abspath(str(report['predictions'].get('output_file', '')))))
+    
+    if 'eda_report_path' in report:
+        output_files.append(("📈 EDA Report (embedded)", str(report.get('eda_report_path', 'Embedded in this report'))))
+    
+    if 'timeseries_report_path' in report:
+        output_files.append(("📉 Time Series Report (embedded)", str(report.get('timeseries_report_path', 'Embedded in this report'))))
+    
+    if 'benchmark_report_path' in report:
+        output_files.append(("⚡ Benchmark Report (embedded)", str(report.get('benchmark_report_path', 'Embedded in this report'))))
+    
+    # Include any additional files from configuration
+    config = report.get('configuration', {})
+    if config.get('input_file'):
+        output_files.append(("📁 Input Dataset", str(config.get('input_file', ''))))
+    
+    if output_files:
+        html += """
+        <div class="card">
+            <h2>📁 Files Generated</h2>
+            <p class="info-text">All files generated during this analysis session. Click to copy paths.</p>
+            <table>
+                <tr><th>File Type</th><th>Path</th></tr>
+"""
+        for file_type, file_path in output_files:
+            if file_path and file_path != 'None':
+                # Create copyable path with onclick
+                html += f"""                <tr>
+                    <td>{file_type}</td>
+                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{file_path}').then(()=>alert('Path copied!'))">{file_path}</code></td>
+                </tr>
+"""
+        html += "            </table>\n        </div>\n"
+    
     # Close HTML
     html += """
     </div>
@@ -938,24 +993,31 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
     <title>ACDSO Multi-Target Report - {base_name}</title>
     <style>
         :root {{
-            --primary: #667eea;
-            --secondary: #764ba2;
-            --success: #48bb78;
-            --warning: #ed8936;
-            --danger: #f56565;
-            --dark: #2d3748;
+            --primary: #2563eb;
+            --primary-light: #3b82f6;
+            --secondary: #8b5cf6;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --info: #0891b2;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-highlight: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --dark: #0f172a;
             --light: #f7fafc;
-            --border: #e2e8f0;
         }}
         
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         
         body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, var(--bg) 0%, #1a1a2e 100%);
             min-height: 100vh;
             padding: 2rem;
-            color: var(--dark);
+            color: var(--text);
         }}
         
         .container {{
@@ -964,17 +1026,18 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         }}
         
         .header {{
-            background: white;
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(139, 92, 246, 0.1));
             border-radius: 16px;
             padding: 2rem;
             margin-bottom: 2rem;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
             text-align: center;
+            border: 1px solid var(--border);
         }}
         
         .header h1 {{
             font-size: 2.5rem;
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -982,7 +1045,7 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         }}
         
         .header .subtitle {{
-            color: #718096;
+            color: var(--text-muted);
             font-size: 1.1rem;
         }}
         
@@ -994,15 +1057,16 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         }}
         
         .target-card {{
-            background: white;
+            background: var(--bg-card);
             border-radius: 12px;
             padding: 1.5rem;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
             border-left: 4px solid var(--primary);
+            border: 1px solid var(--border);
         }}
         
         .target-card h3 {{
-            color: var(--primary);
+            color: var(--primary-light);
             margin-bottom: 1rem;
             display: flex;
             align-items: center;
@@ -1014,6 +1078,7 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
             justify-content: space-between;
             padding: 0.5rem 0;
             border-bottom: 1px solid var(--border);
+            color: var(--text);
         }}
         
         .target-card .stat:last-child {{
@@ -1021,15 +1086,16 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         }}
         
         .section {{
-            background: white;
+            background: var(--bg-card);
             border-radius: 16px;
             padding: 2rem;
             margin-bottom: 2rem;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            border: 1px solid var(--border);
         }}
         
         .section h2 {{
-            color: var(--dark);
+            color: var(--primary-light);
             border-bottom: 3px solid var(--primary);
             padding-bottom: 0.75rem;
             margin-bottom: 1.5rem;
@@ -1268,86 +1334,231 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         
         html += f"""
             <div id="tab-{target}" class="tab-content {active}">
-                <h3>Target: {target}</h3>
+                <h3>🎯 Target: {target}</h3>
 """
         
-        # AutoML results
-        automl = report.get("automl", {})
-        if automl:
+        # Selected Model (from the actual combined report structure)
+        selected_model = report.get("selected_model", {})
+        if selected_model:
+            model_name = selected_model.get('name', 'N/A')
+            metrics = selected_model.get('metrics', {})
             html += f"""
-                <h4>🤖 AutoML Results</h4>
+                <h4>🤖 Selected Model</h4>
                 <table>
                     <tr><th>Metric</th><th>Value</th></tr>
-                    <tr><td>Selected Model</td><td><span class="badge badge-primary">{automl.get('model_name', 'N/A')}</span></td></tr>
-                    <tr><td>Test Score</td><td>{automl.get('test_score', 'N/A')}</td></tr>
-                    <tr><td>CV Score</td><td>{automl.get('cv_score', 'N/A')}</td></tr>
-                </table>
+                    <tr><td>Model Name</td><td><span class="badge badge-primary">{model_name}</span></td></tr>
 """
-            # All candidates evaluated
-            candidates = automl.get("candidates_evaluated", [])
-            if candidates:
-                html += """
+            for key, value in metrics.items():
+                if value is not None:
+                    if isinstance(value, float):
+                        html += f"                    <tr><td>{key}</td><td>{value:.4f}</td></tr>\n"
+                    else:
+                        html += f"                    <tr><td>{key}</td><td>{value}</td></tr>\n"
+            html += """                </table>
+"""
+        
+        # All Models Evaluated (from audit_trail.candidates_evaluated)
+        audit_trail = report.get("audit_trail", {})
+        candidates = audit_trail.get("candidates_evaluated", [])
+        if candidates:
+            html += """
                 <h4>📋 All Models Evaluated</h4>
                 <table>
-                    <tr><th>Model</th><th>CV Score</th><th>Time (s)</th><th>Memory (MB)</th><th>Latency (ms/row)</th></tr>
+                    <tr><th>#</th><th>Model</th><th>CV Score</th><th>CV Std</th><th>Time (s)</th><th>Memory (MB)</th><th>Latency (ms/row)</th><th>Risk</th></tr>
 """
-                for c in candidates:
-                    html += f"""
+            for idx, c in enumerate(candidates, 1):
+                name = c.get('name', 'N/A')
+                metric = c.get('metric', 0) or 0
+                cv_std = c.get('cv_score_std', 0) or 0
+                train_time = c.get('train_time_s', 0) or 0
+                memory = c.get('peak_mem_mb', 0) or 0
+                latency = c.get('latency_ms_per_row', 0) or 0
+                risk = c.get('risk_penalty', 0) or 0
+                
+                # Format values safely
+                metric_str = f"{metric:.4f}" if isinstance(metric, (int, float)) else str(metric)
+                cv_std_str = f"{cv_std:.4f}" if isinstance(cv_std, (int, float)) else str(cv_std)
+                train_time_str = f"{train_time:.2f}" if isinstance(train_time, (int, float)) else str(train_time)
+                memory_str = f"{memory:.1f}" if isinstance(memory, (int, float)) else str(memory)
+                latency_str = f"{latency:.3f}" if isinstance(latency, (int, float)) else str(latency)
+                risk_str = f"{risk:.4f}" if isinstance(risk, (int, float)) else str(risk)
+                
+                html += f"""
                     <tr>
-                        <td>{c.get('name', 'N/A')}</td>
-                        <td>{c.get('cv_score', 'N/A')}</td>
-                        <td>{c.get('fit_time', 'N/A')}</td>
-                        <td>{c.get('memory_mb', 'N/A')}</td>
-                        <td>{c.get('latency_ms', 'N/A')}</td>
+                        <td>{idx}</td>
+                        <td>{name}</td>
+                        <td>{metric_str}</td>
+                        <td>{cv_std_str}</td>
+                        <td>{train_time_str}</td>
+                        <td>{memory_str}</td>
+                        <td>{latency_str}</td>
+                        <td>{risk_str}</td>
                     </tr>
 """
-                html += """                </table>
+            html += """                </table>
+"""
+        
+        # Pareto Front Models
+        pareto_front = audit_trail.get("pareto_front", [])
+        if pareto_front:
+            html += """
+                <h4>⚖️ Pareto Front Models (Optimal Trade-offs)</h4>
+                <table>
+                    <tr><th>Model</th><th>Score</th><th>Time (s)</th><th>Memory (MB)</th><th>Latency (ms/row)</th></tr>
+"""
+            for p in pareto_front:
+                name = p.get('name', 'N/A')
+                metric = p.get('metric', 0) or 0
+                train_time = p.get('train_time_s', 0) or 0
+                memory = p.get('peak_mem_mb', 0) or 0
+                latency = p.get('latency_ms_per_row', 0) or 0
+                
+                metric_str = f"{metric:.4f}" if isinstance(metric, (int, float)) else str(metric)
+                train_time_str = f"{train_time:.2f}" if isinstance(train_time, (int, float)) else str(train_time)
+                memory_str = f"{memory:.1f}" if isinstance(memory, (int, float)) else str(memory)
+                latency_str = f"{latency:.3f}" if isinstance(latency, (int, float)) else str(latency)
+                
+                html += f"""
+                    <tr>
+                        <td>{name}</td>
+                        <td>{metric_str}</td>
+                        <td>{train_time_str}</td>
+                        <td>{memory_str}</td>
+                        <td>{latency_str}</td>
+                    </tr>
+"""
+            html += """                </table>
 """
         
         # Time Series results
         ts = report.get("timeseries", {})
-        if ts:
+        ts_best = report.get("timeseries_best", {})
+        if ts or ts_best:
+            best_model = ts_best.get('best_model', ts.get('best_model', 'N/A'))
+            rmse = ts_best.get('rmse', ts.get('cv_score', 'N/A'))
             html += f"""
                 <h4>📈 Time Series Results</h4>
                 <table>
                     <tr><th>Metric</th><th>Value</th></tr>
-                    <tr><td>Best Model</td><td><span class="badge badge-success">{ts.get('best_model', 'N/A')}</span></td></tr>
-                    <tr><td>RMSE</td><td>{ts.get('rmse', 'N/A')}</td></tr>
-                    <tr><td>MAE</td><td>{ts.get('mae', 'N/A')}</td></tr>
+                    <tr><td>Best Model</td><td><span class="badge badge-success">{best_model}</span></td></tr>
+                    <tr><td>RMSE</td><td>{rmse}</td></tr>
                 </table>
 """
         
+        # Time Series Leaderboard
+        ts_leaderboard = report.get("timeseries_leaderboard", [])
+        if ts_leaderboard:
+            html += """
+                <h4>📊 Time Series Leaderboard</h4>
+                <table>
+                    <tr><th>System</th><th>RMSE</th><th>MAE</th><th>Time (s)</th></tr>
+"""
+            for row in ts_leaderboard:
+                if isinstance(row, dict):
+                    html += f"""
+                    <tr>
+                        <td>{row.get('System', row.get('system', 'N/A'))}</td>
+                        <td>{row.get('RMSE', row.get('rmse', 'N/A'))}</td>
+                        <td>{row.get('MAE', row.get('mae', 'N/A'))}</td>
+                        <td>{row.get('Time(s)', row.get('time', 'N/A'))}</td>
+                    </tr>
+"""
+            html += """                </table>
+"""
+        
         # Benchmark results
-        bench = report.get("benchmark", {})
-        if bench and bench.get("results"):
+        bench_results = report.get("benchmark_results", [])
+        if bench_results:
             html += """
                 <h4>🏆 Benchmark Comparison</h4>
                 <table>
-                    <tr><th>System</th><th>Score</th><th>Time (s)</th><th>Model</th></tr>
+                    <tr><th>System</th><th>Score</th><th>Time (s)</th><th>Latency (ms)</th><th>Model</th></tr>
 """
-            for res in bench.get("results", []):
+            for res in bench_results:
+                system = res.get('system', 'N/A')
+                score = res.get('test_score', 0) or 0
+                time_val = res.get('fit_time_s', 0) or 0
+                latency = res.get('latency_ms_per_row', 0) or 0
+                model_name = res.get('model_name', 'N/A')
+                
+                score_str = f"{score:.4f}" if isinstance(score, (int, float)) else str(score)
+                time_str = f"{time_val:.2f}" if isinstance(time_val, (int, float)) else str(time_val)
+                latency_str = f"{latency:.3f}" if isinstance(latency, (int, float)) else str(latency)
+                
                 html += f"""
                     <tr>
-                        <td>{res.get('system', 'N/A')}</td>
-                        <td>{res.get('score', 'N/A')}</td>
-                        <td>{res.get('time', 'N/A')}</td>
-                        <td>{res.get('model_name', 'N/A')}</td>
+                        <td>{system}</td>
+                        <td>{score_str}</td>
+                        <td>{time_str}</td>
+                        <td>{latency_str}</td>
+                        <td>{model_name}</td>
                     </tr>
 """
             html += """                </table>
 """
         
         # EDA summary
-        eda = report.get("eda", {})
-        if eda:
+        eda_report = report.get("eda_report", {})
+        if eda_report:
+            quality_score = eda_report.get('quality_score', 'N/A')
+            n_rows = eda_report.get('n_rows', 'N/A')
+            n_cols = eda_report.get('n_cols', 'N/A')
             html += f"""
                 <h4>🔍 EDA Summary</h4>
                 <table>
                     <tr><th>Metric</th><th>Value</th></tr>
-                    <tr><td>Quality Score</td><td><span class="badge badge-success">{eda.get('quality_score', 'N/A')}/100</span></td></tr>
-                    <tr><td>Issues Found</td><td>{len(eda.get('issues', []))}</td></tr>
-                    <tr><td>Recommendations</td><td>{len(eda.get('recommendations', []))}</td></tr>
+                    <tr><td>Quality Score</td><td><span class="badge badge-success">{quality_score}/100</span></td></tr>
+                    <tr><td>Rows</td><td>{n_rows:,}</td></tr>
+                    <tr><td>Columns</td><td>{n_cols}</td></tr>
                 </table>
+"""
+        
+        # Embedded EDA HTML (if available)
+        eda_html = report.get("eda_html", "")
+        if eda_html:
+            # Extract body content from EDA HTML
+            import re
+            if '<body' in eda_html:
+                body_start = eda_html.find('<body')
+                body_start = eda_html.find('>', body_start) + 1
+                body_end = eda_html.find('</body>')
+                if body_end > body_start:
+                    eda_html = eda_html[body_start:body_end]
+            eda_html = re.sub(r'<script[^>]*>.*?</script>', '', eda_html, flags=re.DOTALL | re.IGNORECASE)
+            html += f"""
+                <h4>📊 Full EDA Report</h4>
+                <div style="border: 1px solid var(--border); border-radius: 8px; padding: 10px; max-height: 600px; overflow-y: auto; background: white;">
+                    {eda_html}
+                </div>
+"""
+        
+        # Phase Results
+        phase_results = report.get("phase_results", {})
+        if phase_results:
+            html += """
+                <h4>📋 Phase Results</h4>
+                <table>
+                    <tr><th>Phase</th><th>Status</th><th>Model</th><th>Time (s)</th></tr>
+"""
+            for phase_name, items in phase_results.items():
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            name = item.get('name', 'N/A')
+                            status = item.get('status', 'N/A')
+                            model = item.get('model_name', 'N/A') or 'N/A'
+                            time_val = item.get('time', 0) or 0
+                            status_class = 'badge-success' if 'SUCCESS' in str(status) else 'badge-warning'
+                            time_str = f"{time_val:.2f}" if isinstance(time_val, (int, float)) else str(time_val)
+                            html += f"""
+                    <tr>
+                        <td>{name}</td>
+                        <td><span class="badge {status_class}">{status[:50] if len(str(status)) > 50 else status}</span></td>
+                        <td>{model}</td>
+                        <td>{time_str}</td>
+                    </tr>
+"""
+            html += """                </table>
 """
         
         html += """
@@ -1390,10 +1601,71 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
     html += """
             </div>
         </div>
+        
+        <div class="section">
+            <h2>📁 All Files Generated</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1rem;">Click any path to copy to clipboard.</p>
+            <table>
+                <tr><th>Type</th><th>Target</th><th>File Path</th></tr>
+"""
+    
+    # Add model files
+    for target in targets:
+        report = target_reports.get(target, {})
+        model_path = report.get("model_path", f"reports/model_{base_name}_{target}.pkl")
+        abs_path = os.path.abspath(model_path) if model_path else "N/A"
+        html += f"""                <tr>
+                    <td>🤖 Model</td>
+                    <td>{target}</td>
+                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_path}').then(()=>alert('Path copied!'))">{abs_path}</code></td>
+                </tr>
+"""
+    
+    # Add prediction CSV files
+    for target in targets:
+        pred = predictions.get(target, {})
+        output_file = pred.get('output_file', f"reports/predictions_{base_name}_{target}_full_dataset.csv")
+        abs_path = os.path.abspath(output_file) if output_file else "N/A"
+        html += f"""                <tr>
+                    <td>📊 Predictions CSV</td>
+                    <td>{target}</td>
+                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_path}').then(()=>alert('Path copied!'))">{abs_path}</code></td>
+                </tr>
+"""
+    
+    # Add individual report links
+    for target in targets:
+        report_path = f"reports/autonomous_{base_name}_{target}_report.html"
+        abs_path = os.path.abspath(report_path)
+        html += f"""                <tr>
+                    <td>📄 Individual Report</td>
+                    <td>{target}</td>
+                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_path}').then(()=>alert('Path copied!'))">{abs_path}</code></td>
+                </tr>
+"""
+    
+    # Add combined report
+    combined_html_path = f"reports/multi_target_{base_name}_combined_report.html"
+    abs_combined = os.path.abspath(combined_html_path)
+    combined_json_path = f"reports/multi_target_{base_name}_combined.json"
+    abs_json = os.path.abspath(combined_json_path)
+    
+    html += f"""                <tr>
+                    <td>📄 Combined HTML Report</td>
+                    <td>All Targets</td>
+                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_combined}').then(()=>alert('Path copied!'))">{abs_combined}</code></td>
+                </tr>
+                <tr>
+                    <td>📋 Combined JSON Data</td>
+                    <td>All Targets</td>
+                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_json}').then(()=>alert('Path copied!'))">{abs_json}</code></td>
+                </tr>
+            </table>
+        </div>
     </div>
     
     <script>
-        function showTab(target) {
+        function showTab(target) {{
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
@@ -1401,7 +1673,7 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
             // Show selected tab
             document.getElementById('tab-' + target).classList.add('active');
             event.target.classList.add('active');
-        }
+        }}
     </script>
 </body>
 </html>
@@ -4610,8 +4882,8 @@ def demo_benchmark_comparison():
   # Full benchmark with all datasets
   python benchmarks/benchmark_automl.py --datasets all --time-budget 300 --output results.json
   
-  # Direct from demo
-  python demo.py --benchmark --time-budget 60
+  # Direct from demo (default 6 hours, or specify shorter)
+  python run_acdso.py --benchmark --time-budget 300
   ```
 """)
     
@@ -6269,8 +6541,10 @@ def _run_autonomous_custom_file(
     task: str = None,
     exclude: List[str] = None,
     run_benchmark: bool = False,
+    skip_timeseries: bool = False,
     has_llm: bool = False,
     start_time: float = None,
+    selection_mode: str = "knee_point",
 ):
     """
     Run comprehensive autonomous analysis on a USER'S CUSTOM FILE.
@@ -6345,6 +6619,13 @@ def _run_autonomous_custom_file(
     # Use provided target if available, otherwise auto-detect
     detected_target = target if target and str(target).strip() else None
     if detected_target:
+        # Validate that the provided target column exists
+        if detected_target not in df.columns:
+            print(f"\n  [X] ERROR: Target column '{detected_target}' not found in dataset!")
+            print(f"      Available columns: {list(df.columns)}")
+            print(f"\n      Please use one of the available columns with --predict or --target")
+            all_results.append(("Target Detection", f"FAILED: Column '{detected_target}' not found", 0))
+            return
         print(f"\n  Using provided target column: '{detected_target}'")
     else:
         print("\n  Detecting target column...")
@@ -6406,21 +6687,7 @@ def _run_autonomous_custom_file(
         
         eda.print_summary()
         
-        # Save EDA report
-        os.makedirs("reports", exist_ok=True)
-        eda_report_path = f"reports/eda_{os.path.basename(custom_file).replace('.csv', '')}.html"
-        
-        # Use to_html method (not export_html)
-        if hasattr(eda, 'to_html'):
-            eda.to_html(eda_report_path)
-            print(f"\n  [OK] EDA report saved: {eda_report_path}")
-        elif hasattr(eda, 'export_html'):
-            # Fallback for old API
-            eda.export_html(eda_report_path)
-            print(f"\n  [OK] EDA report saved: {eda_report_path}")
-        else:
-            print(f"\n  [--] EDA report export not available (method not found)")
-        
+        # EDA will be embedded in the combined report (no separate file)
         analysis_outputs['eda'] = eda
         all_results.append(("Auto EDA", "SUCCESS", time.time() - phase2_start))
     except Exception as e:
@@ -6515,6 +6782,7 @@ def _run_autonomous_custom_file(
                     max_candidates=8,
                     cv=5,
                     verbose=1,
+                    selection_mode=selection_mode,
                 )
             else:
                 model = ACDSORegressor(
@@ -6522,6 +6790,7 @@ def _run_autonomous_custom_file(
                     max_candidates=8,
                     cv=5,
                     verbose=1,
+                    selection_mode=selection_mode,
                 )
             
             model.fit(X_train, y_train)
@@ -6557,6 +6826,7 @@ def _run_autonomous_custom_file(
             with open(audit_path, 'w') as f:
                 json.dump(model._engine.audit_trail_, f, indent=2, default=str)
             print(f"\n  [OK] Audit trail saved: {audit_path}")
+            analysis_outputs['audit_path'] = audit_path
             
             # Save the best model for later prediction use
             # Include target name in the model filename to support multi-target
@@ -6599,8 +6869,13 @@ def _run_autonomous_custom_file(
         traceback.print_exc()
         all_results.append(("AutoML", f"FAILED: {e}", time.time() - phase4_start))
     
-    # Phase 5: Time Series (if datetime column detected)
-    if detected_datetime_col:
+    # Phase 5: Time Series (if datetime column detected and not skipped)
+    if skip_timeseries:
+        print("\n" + "-" * 80)
+        print("  PHASE 5: Time Series - SKIPPED (quick mode)")
+        print("-" * 80)
+        all_results.append(("Time Series", "SKIPPED: Quick mode", 0))
+    elif detected_datetime_col:
         print("\n" + "-" * 80)
         print("  PHASE 5: Auto Time Series Forecasting")
         print("-" * 80)
@@ -6640,16 +6915,14 @@ def _run_autonomous_custom_file(
                 benchmark_summary = benchmark.run(df, dataset_name=dataset_name)
                 analysis_outputs['timeseries_benchmark'] = benchmark_summary
                 
-                # Get benchmark HTML report
-                os.makedirs("reports", exist_ok=True)
-                ts_report_path = f"reports/ts_benchmark_{os.path.basename(custom_file).replace('.csv', '')}.html"
-                benchmark.generate_report(ts_report_path)
-                analysis_outputs['timeseries_report_path'] = ts_report_path
-                
-                # Read the HTML content
+                # Get benchmark HTML content (embedded in combined report, no separate file)
+                import tempfile
                 try:
-                    with open(ts_report_path, 'r', encoding='utf-8') as f:
-                        analysis_outputs['timeseries_html'] = f.read()
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as tmp:
+                        benchmark.generate_report(tmp.name)
+                        with open(tmp.name, 'r', encoding='utf-8') as f:
+                            analysis_outputs['timeseries_html'] = f.read()
+                        os.unlink(tmp.name)  # Delete temp file
                 except Exception:
                     analysis_outputs['timeseries_html'] = None
             except Exception as e:
@@ -6814,18 +7087,29 @@ def _run_autonomous_custom_file(
             "success_rate": success_count / len(all_results) * 100 if all_results else 0,
         },
         "phase_results": {
-            "All Phases": [
-                {
-                    "name": name,
-                    "status": status,
-                    "time": duration,
-                    "model_name": None,  # Will be populated if available
-                }
-                for name, status, duration in all_results
-            ]
+            "All Phases": []  # Will be populated below with model names
         },
         "console_output": "",  # Console output can be added if captured separately
     }
+    
+    # Populate phase results with model names where applicable
+    selected_model_name = None
+    if 'model' in analysis_outputs:
+        model = analysis_outputs['model']
+        if hasattr(model, 'audit_trail_') and model.audit_trail_:
+            selected = model.audit_trail_.get('selected', {})
+            selected_model_name = selected.get('name', None)
+    
+    for name, status, duration in all_results:
+        model_name = None
+        if name == "AutoML" and "SUCCESS" in str(status):
+            model_name = selected_model_name
+        combined_report["phase_results"]["All Phases"].append({
+            "name": name,
+            "status": status,
+            "time": duration,
+            "model_name": model_name,
+        })
     
     # Add EDA information and HTML content if available
     if 'eda' in analysis_outputs:
@@ -6986,45 +7270,80 @@ def _run_autonomous_custom_file(
     # Add benchmark results if available
     if 'benchmark' in analysis_outputs:
         benchmark_summary = analysis_outputs['benchmark']
-        # Extract benchmark results from summary
-        if hasattr(benchmark_summary, 'results') or isinstance(benchmark_summary, dict):
-            combined_report["benchmark_results"] = []
-            # Try to extract results from benchmark summary
-            if isinstance(benchmark_summary, dict) and 'results' in benchmark_summary:
-                for result in benchmark_summary['results']:
-                    system = getattr(result, 'system', result.get('system', 'Unknown'))
-                    model_name = getattr(result, 'model_name', result.get('model_name', 'N/A'))
-                    test_score = getattr(result, 'test_score', result.get('test_score', 0))
-                    fit_time = getattr(result, 'fit_time_s', result.get('fit_time_s', 0))
-                    
-                    # Generate actual execution code for this framework
-                    code_info = _generate_framework_code(
-                        system=system,
-                        model_name=model_name,
-                        task=detected_task,
-                        target=detected_target,
-                        file_path=custom_file,
-                        score=test_score,
-                        fit_time=fit_time,
-                        exclude_cols=exclude,
-                    )
-                    
-                    combined_report["benchmark_results"].append({
-                        "system": system,
-                        "dataset": getattr(result, 'dataset', result.get('dataset', 'Unknown')),
-                        "test_score": test_score,
-                        "test_f1": getattr(result, 'test_f1', result.get('test_f1', None)),
-                        "fit_time_s": fit_time,
-                        "latency_ms_per_row": getattr(result, 'latency_ms_per_row', result.get('latency_ms_per_row', 0)),
-                        "model_name": model_name,
-                        "code_info": code_info,  # Full execution info including code and results
-                    })
+        combined_report["benchmark_results"] = []
+        
+        # Get results from BenchmarkSummary object or dict
+        results_list = []
+        if hasattr(benchmark_summary, 'results'):
+            # It's a BenchmarkSummary object
+            results_list = benchmark_summary.results
+        elif isinstance(benchmark_summary, dict) and 'results' in benchmark_summary:
+            # It's a dict with results
+            results_list = benchmark_summary['results']
+        
+        for result in results_list:
+            # Handle both object attributes and dict keys
+            if hasattr(result, 'system'):
+                system = result.system
+                model_name = result.model_name if hasattr(result, 'model_name') else 'N/A'
+                test_score = result.test_score if hasattr(result, 'test_score') else 0
+                fit_time = result.fit_time_s if hasattr(result, 'fit_time_s') else 0
+                dataset = result.dataset if hasattr(result, 'dataset') else 'Unknown'
+                test_f1 = result.test_f1 if hasattr(result, 'test_f1') else None
+                latency = result.latency_ms_per_row if hasattr(result, 'latency_ms_per_row') else 0
+            else:
+                system = result.get('system', 'Unknown')
+                model_name = result.get('model_name', 'N/A')
+                test_score = result.get('test_score', 0)
+                fit_time = result.get('fit_time_s', 0)
+                dataset = result.get('dataset', 'Unknown')
+                test_f1 = result.get('test_f1', None)
+                latency = result.get('latency_ms_per_row', 0)
+            
+            # Generate actual execution code for this framework
+            code_info = _generate_framework_code(
+                system=system,
+                model_name=model_name,
+                task=detected_task,
+                target=detected_target,
+                file_path=custom_file,
+                score=test_score,
+                fit_time=fit_time,
+                exclude_cols=exclude,
+            )
+            
+            combined_report["benchmark_results"].append({
+                "system": system,
+                "dataset": dataset,
+                "test_score": test_score,
+                "test_f1": test_f1,
+                "fit_time_s": fit_time,
+                "latency_ms_per_row": latency,
+                "model_name": model_name,
+                "code_info": code_info,
+            })
+    
+    # Add all file paths to combined report for the "Files Generated" section
+    if 'model_path' in analysis_outputs:
+        combined_report["model_path"] = os.path.abspath(analysis_outputs['model_path'])
+    if 'audit_path' in analysis_outputs:
+        combined_report["audit_path"] = os.path.abspath(analysis_outputs['audit_path'])
+    
+    # Add configuration with input file path
+    if "configuration" not in combined_report:
+        combined_report["configuration"] = {}
+    combined_report["configuration"]["input_file"] = os.path.abspath(custom_file)
     
     # Save JSON report - include target name in filename if specified
     os.makedirs("reports", exist_ok=True)
     base_file_name = os.path.basename(custom_file).replace('.csv', '')
     target_suffix = f"_{detected_target}" if detected_target else ""
     json_report_path = f"reports/autonomous_{base_file_name}{target_suffix}_combined.json"
+    
+    # Add file paths before saving
+    combined_report["html_report_path"] = os.path.abspath(f"reports/autonomous_{base_file_name}{target_suffix}_report.html")
+    combined_report["json_report_path"] = os.path.abspath(json_report_path)
+    
     save_combined_report(combined_report, json_report_path)
     
     # Generate comprehensive HTML report
@@ -7035,11 +7354,12 @@ def _run_autonomous_custom_file(
     json_abs_path = os.path.abspath(json_report_path)
     html_abs_path = os.path.abspath(html_report_path)
     
-    print(f"\n  [OK] Combined JSON report saved: {json_abs_path}")
-    print(f"  [OK] Comprehensive HTML report saved: {html_abs_path}")
-    
     print("\n" + "=" * 80)
-    print("  AUTONOMOUS ANALYSIS COMPLETE!")
+    print("  ONE COMBINED REPORT GENERATED (includes EDA, AutoML, Time Series, Benchmarks)")
+    print("=" * 80)
+    print(f"\n  📊 HTML REPORT: {html_abs_path}")
+    print(f"  📋 JSON DATA:   {json_abs_path}")
+    print("\n  Open the HTML report in your browser to view all analysis results.")
     print("=" * 80 + "\n")
     
     return all_results
@@ -7053,6 +7373,7 @@ def run_autonomous_demo(
     task: str = None,
     exclude: List[str] = None,
     run_benchmark: bool = True,  # Default to True for autonomous mode
+    selection_mode: str = "knee_point",  # "knee_point" or "best_score"
 ):
     """
     Run EVERYTHING autonomously - the complete ACDSO v3 showcase.
@@ -7158,6 +7479,7 @@ def run_autonomous_demo(
             run_benchmark=run_benchmark,
             has_llm=has_llm,
             start_time=start_time,
+            selection_mode=selection_mode,
         )
     
     # =========================================================================
@@ -10346,44 +10668,50 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # ═══════════════════════════════════════════════════════════════════════════
-  # RECOMMENDED: FULL WORKFLOW (Train + Benchmark + Predict)
-  # ═══════════════════════════════════════════════════════════════════════════
+  # ===========================================================================
+  # RECOMMENDED: FULL WORKFLOW (autonomous mode is DEFAULT)
+  # ===========================================================================
   
-  # Single target - complete pipeline with benchmarks:
-  python demo.py --file data.csv --autonomous --predict price --benchmark
+  # Single target - complete pipeline (autonomous is default!):
+  python run_acdso.py --file data.csv --predict price --benchmark
   
   # Multiple targets - train separate models for each:
-  python demo.py --file data.csv --autonomous --predict price,quantity --benchmark
+  python run_acdso.py --file data.csv --predict price,quantity --benchmark
   
   # Real example with actual dataset:
-  python demo.py --file c:\\dataset\\ads_data.csv --autonomous --predict ads_served,daily_views --benchmark
+  python run_acdso.py --file c:\\dataset\\ads_data.csv --predict ads_served,daily_views --benchmark
   
   # Skip benchmarks for faster execution:
-  python demo.py --file data.csv --autonomous --predict price --skip-benchmark
+  python run_acdso.py --file data.csv --predict price --skip-benchmark
+  
+  # Force fresh training (delete old models/reports first):
+  python run_acdso.py --file data.csv --predict price --force
+  
+  # Quick mode (EDA + AutoML only, skip TimeSeries/Benchmarks):
+  python run_acdso.py --file data.csv --predict price --simple
   
   # ═══════════════════════════════════════════════════════════════════════════
-  # AUTONOMOUS MODE - Run EVERYTHING automatically
+  # AUTONOMOUS MODE [DEFAULT] - Enabled automatically when --file is provided
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py --autonomous                           # Run ALL demos automatically!
-  python demo.py -a                                     # Short form
-  python demo.py --autonomous --file data.csv           # Run everything on your data
-  python demo.py -a -f data.csv --target price          # With custom target
+  python run_acdso.py --file data.csv                        # Autonomous is DEFAULT!
+  python run_acdso.py --file data.csv --target price         # With custom target
+  python run_acdso.py --file data.csv --simple               # Disable autonomous (quick mode)
+  python run_acdso.py --autonomous                           # Run built-in demos
   
   # ═══════════════════════════════════════════════════════════════════════════
   # MULTI-TARGET TRAINING (train separate models for each target)
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py --file data.csv --target price,quantity,rating
-  python demo.py --file data.csv --target price,quantity --multi-output  # Single multi-output model
+  python run_acdso.py --file data.csv --target price,quantity,rating
+  python run_acdso.py --file data.csv --target price,quantity --multi-output  # Single multi-output model
   
   # Multi-target with autonomous mode and predictions:
-  python demo.py --file data.csv --autonomous --predict price,quantity,rating --benchmark
+  python run_acdso.py --file data.csv --autonomous --predict price,quantity,rating --benchmark
   
   # ═══════════════════════════════════════════════════════════════════════════
   # COMPLETE WORKFLOW: Train + Predict (generates combined HTML report)
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py --autonomous --predict price --file data.csv
-  python demo.py -a -f data.csv -p price                # Short form
+  python run_acdso.py --autonomous --predict price --file data.csv
+  python run_acdso.py -a -f data.csv -p price                # Short form
   # This will:
   #   1. Run EDA, Risk Analysis, AutoML, Time Series, Benchmarks
   #   2. Save the best model
@@ -10393,45 +10721,63 @@ Examples:
   # ═══════════════════════════════════════════════════════════════════════════
   # SPECIFIC DEMOS
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py                                        # Run all demos sequentially
-  python demo.py --v3                                   # Run v3 innovations demo only
-  python demo.py --timeseries                           # Run time series demo
-  python demo.py --decision                             # Run decision intelligence demo
-  python demo.py --benchmark                            # Benchmark vs FLAML/TPOT/H2O/AutoGluon
+  python run_acdso.py                                        # Run all demos sequentially
+  python run_acdso.py --v3                                   # Run v3 innovations demo only
+  python run_acdso.py --timeseries                           # Run time series demo
+  python run_acdso.py --decision                             # Run decision intelligence demo
+  python run_acdso.py --benchmark                            # Benchmark vs FLAML/TPOT/H2O/AutoGluon
   
   # ═══════════════════════════════════════════════════════════════════════════
   # YOUR OWN DATA
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py --file data.csv                        # Run on your CSV file
-  python demo.py --file data.csv --target price         # Specify target column
-  python demo.py --file brain.csv --target Sec          # Auto-excludes time columns
-  python demo.py --file data.csv --exclude Hour,Day     # Manual exclusion
-  python demo.py --file data.csv --no-auto-exclude      # Skip auto-exclusion
+  python run_acdso.py --file data.csv                        # Run on your CSV file
+  python run_acdso.py --file data.csv --target price         # Specify target column
+  python run_acdso.py --file brain.csv --target Sec          # Auto-excludes time columns
+  python run_acdso.py --file data.csv --exclude Hour,Day     # Manual exclusion
+  python run_acdso.py --file data.csv --no-auto-exclude      # Skip auto-exclusion
   
   # ═══════════════════════════════════════════════════════════════════════════
   # BENCHMARK YOUR DATASET vs other AutoML tools
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py --file brain.csv --target Sec --benchmark
-  python demo.py --file data.csv --target price --benchmark --time-budget 120
+  python run_acdso.py --file brain.csv --target Sec --benchmark
+  python run_acdso.py --file data.csv --target price --benchmark --time-budget 3600  # 1 hour
   
   # ═══════════════════════════════════════════════════════════════════════════
   # TIME SERIES
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py --timeseries --file sales.csv --target revenue --datetime-col date
-  python demo.py --timeseries --file sales.csv --target revenue --datetime-col date --benchmark
+  python run_acdso.py --timeseries --file sales.csv --target revenue --datetime-col date
+  python run_acdso.py --timeseries --file sales.csv --target revenue --datetime-col date --benchmark
   
   # ═══════════════════════════════════════════════════════════════════════════
   # DECISION INTELLIGENCE - Causal Analysis & Uplift Modeling
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py --decision                                # Run decision intelligence demo
-  python demo.py --decision --file data.csv --target churn --treatment incentive
+  python run_acdso.py --decision                                # Run decision intelligence demo
+  python run_acdso.py --decision --file data.csv --target churn --treatment incentive
   
   # ═══════════════════════════════════════════════════════════════════════════
-  # PREDICTIONS (requires trained model)
+  # PREDICTIONS (always trains fresh - no model caching)
   # ═══════════════════════════════════════════════════════════════════════════
-  python demo.py --predict price --file data.csv        # Make predictions (model must exist)
-  # Or combine with --autonomous to train first:
-  python demo.py --autonomous --predict price --file data.csv
+  python run_acdso.py --predict price --file data.csv                    # Train + predict (single target)
+  python run_acdso.py --predict price,quantity --file data.csv           # Train + predict (multi-target)
+  python run_acdso.py --predict price --file data.csv --benchmark        # With benchmarks
+  python run_acdso.py --predict ads_served,daily_views --file data.csv --benchmark  # Real example
+  
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MODEL SELECTION MODE (--best-score)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Default: knee-point selection (balances score vs speed/memory/latency/risk)
+  python run_acdso.py --file data.csv --predict price --benchmark
+  
+  # Best-score mode: select model with HIGHEST CV score (ignores trade-offs)
+  python run_acdso.py --file data.csv --predict price --benchmark --best-score
+  
+  # Example: Without --best-score, ACDSO might select RandomForestRegressor (score=-0.04)
+  #          With --best-score, ACDSO will select RandomForest_d5 (score=-0.007) if it scores best
+  
+  # Use --best-score when:
+  #   - You want maximum accuracy regardless of speed/memory
+  #   - You're not concerned about production deployment constraints
+  #   - You want to compare raw model performance
 
 Report Generation:
   All modes generate detailed HTML reports in the 'reports/' directory:
@@ -10446,6 +10792,22 @@ Report Generation:
   - Benchmark results vs FLAML, TPOT, H2O, AutoGluon
   - Predictions statistics
   - ACTUAL EXECUTION CODE for each framework (real file paths, parameters, scores)
+  
+  Fresh Training (--force):
+  Use --force to delete old models and reports before training.
+  This ensures all results are generated anew with no cached data.
+  
+  Model Selection (--best-score):
+  By default, ACDSO uses multi-objective "knee-point" selection that balances:
+    - CV Score (accuracy/R2)
+    - Training time
+    - Memory usage
+    - Inference latency
+    - Risk penalty
+    - Robustness (stress test degradation)
+  
+  With --best-score, ACDSO selects purely by highest CV score, ignoring trade-offs.
+  This may select a slower/larger model if it has better accuracy.
   
 Auto-Exclusion (enabled by default):
   ACDSO automatically detects and excludes problematic columns:
@@ -10520,7 +10882,8 @@ Supported file formats:
         "--benchmark", "-b",
         action="store_true",
         help="Run benchmark comparison against other AutoML systems. "
-             "Can be combined with --file to benchmark your own dataset."
+             "With --file: runs FULL pipeline (EDA, AutoML, Time Series, Benchmarks) "
+             "and generates ONE combined report with all results."
     )
     
     parser.add_argument(
@@ -10531,10 +10894,24 @@ Supported file formats:
     )
     
     parser.add_argument(
+        "--force", "--fresh",
+        action="store_true",
+        help="Force fresh training: delete existing models and reports before running. "
+             "Ensures all results are generated anew (no cache reuse)."
+    )
+    
+    parser.add_argument(
         "--time-budget",
         type=int,
-        default=60,
-        help="Time budget per system in seconds for benchmark (default: 60)"
+        default=21600,
+        help="Time budget per system in seconds for benchmark (default: 21600 = 6 hours)"
+    )
+    
+    parser.add_argument(
+        "--best-score",
+        action="store_true",
+        help="Select model with best CV score instead of multi-objective knee-point selection. "
+             "Use this when you want the highest accuracy model regardless of speed/memory trade-offs."
     )
     
     parser.add_argument(
@@ -10600,7 +10977,15 @@ Supported file formats:
     parser.add_argument(
         "--autonomous", "-a",
         action="store_true",
-        help="Run ALL demos autonomously (classification, regression, time series, decision intelligence, benchmarks - everything!)"
+        default=True,  # Autonomous is now the default
+        help="[DEFAULT] Run full autonomous pipeline (EDA, Risk, AutoML, Time Series). "
+             "Enabled by default when --file is provided."
+    )
+    
+    parser.add_argument(
+        "--simple", "--quick",
+        action="store_true",
+        help="Quick mode: Run EDA + AutoML only (skip TimeSeries/Benchmarks for speed)."
     )
     
     parser.add_argument(
@@ -10613,10 +10998,76 @@ Supported file formats:
         "--predict", "-p",
         type=str,
         default=None,
-        help="Make predictions using the best trained model. Specify target column name. Requires --file and model must be trained first (use --autonomous)."
+        help="Train model(s) and make predictions. ALWAYS trains fresh (never loads cached models). "
+             "Single target: --predict price. Multiple targets: --predict price,quantity. Requires --file."
     )
     
     args = parser.parse_args()
+    
+    # AUTONOMOUS MODE IS DEFAULT for all operations with --file
+    # --simple/--quick runs EDA + AutoML only (skips Time Series and Benchmarks)
+    if args.file:
+        if getattr(args, 'simple', False):
+            args.autonomous = True  # Still run autonomous but skip some phases
+            args.skip_benchmark = True  # Skip benchmarks in simple mode
+            print("\n  [INFO] Quick mode: Running EDA + AutoML (skipping Time Series and Benchmarks)")
+        else:
+            # Autonomous is now the default for any operation with --file
+            args.autonomous = True
+            print("\n  [INFO] Autonomous mode enabled by default (full pipeline: EDA → Risk → AutoML → Time Series)")
+    
+    # Handle --force flag: clean up old models and reports
+    if getattr(args, 'force', False):
+        import glob
+        import shutil
+        
+        print("\n" + "=" * 80)
+        print("  FORCE MODE: Cleaning up old models and reports...")
+        print("=" * 80)
+        
+        # Get base name for file-specific cleanup
+        if args.file:
+            base_name = os.path.splitext(os.path.basename(args.file))[0]
+            patterns = [
+                f"reports/model_{base_name}*.pkl",
+                f"reports/audit_{base_name}*.json",
+                f"reports/autonomous_{base_name}*.json",
+                f"reports/autonomous_{base_name}*.html",
+                f"reports/predictions_{base_name}*.csv",
+                f"reports/multi_target_{base_name}*.json",
+                f"reports/multi_target_{base_name}*.html",
+                f"reports/ts_benchmark_{base_name}*.html",
+                f"reports/eda_{base_name}*.html",
+            ]
+        else:
+            # Clean all reports if no specific file
+            patterns = [
+                "reports/model_*.pkl",
+                "reports/audit_*.json",
+                "reports/autonomous_*.json",
+                "reports/autonomous_*.html",
+                "reports/predictions_*.csv",
+                "reports/multi_target_*.json",
+                "reports/multi_target_*.html",
+                "reports/ts_benchmark_*.html",
+                "reports/eda_*.html",
+            ]
+        
+        deleted_count = 0
+        for pattern in patterns:
+            for filepath in glob.glob(pattern):
+                try:
+                    os.remove(filepath)
+                    print(f"    [DELETED] {filepath}")
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"    [WARN] Could not delete {filepath}: {e}")
+        
+        if deleted_count > 0:
+            print(f"\n  Cleaned {deleted_count} old files. Starting fresh training...")
+        else:
+            print(f"\n  No old files found. Starting fresh training...")
+        print("=" * 80 + "\n")
     
     # Check for multi-target training
     if args.target and ',' in args.target:
@@ -10641,9 +11092,9 @@ Supported file formats:
         )
         return
     
-    # Handle --predict flag (load model and make predictions)
-    # If both --autonomous and --predict are set, run autonomous first to train the model
-    if args.predict and args.autonomous:
+    # Handle --predict flag: ALWAYS train fresh models first, then make predictions
+    # Note: --predict now implies training (no model caching/loading)
+    if args.predict:
         # Check if --predict contains multiple targets (comma-separated)
         if ',' in args.predict:
             predict_targets = [t.strip() for t in args.predict.split(',')]
@@ -10679,6 +11130,14 @@ Supported file formats:
             df = pd.read_csv(args.file)
             base_name = os.path.splitext(os.path.basename(args.file))[0]
             
+            # Validate all target columns exist
+            invalid_targets = [t for t in predict_targets if t not in df.columns]
+            if invalid_targets:
+                print(f"\n  [X] ERROR: Target column(s) not found in dataset: {invalid_targets}")
+                print(f"      Available columns: {list(df.columns)}")
+                print(f"\n      Please use columns that exist in your dataset.")
+                return
+            
             # Collect all results for combined report
             all_target_results = {
                 "file": args.file,
@@ -10707,6 +11166,7 @@ Supported file formats:
                     task=args.task,
                     exclude=args.exclude.split(",") if args.exclude else None,
                     run_benchmark=run_benchmarks,
+                    selection_mode="best_score" if getattr(args, 'best_score', False) else "knee_point",
                 )
                 
                 # Store the report path for this target (includes target name suffix)
@@ -10791,7 +11251,7 @@ Supported file formats:
                         print(f"      Distribution: {dist}")
                     
                     all_target_results["predictions"][target] = {
-                        "output_file": output_path,
+                        "output_file": os.path.abspath(output_path),  # Use absolute path
                         "count": len(predictions),
                         "statistics": pred_stats,
                     }
@@ -10836,6 +11296,20 @@ Supported file formats:
         # Run autonomous mode first to train and save the model
         # Use --predict target as the training target if --target not explicitly provided
         training_target = args.target if args.target else args.predict
+        
+        # Validate target column exists before proceeding
+        import pandas as pd
+        try:
+            df_check = pd.read_csv(args.file)
+            if training_target not in df_check.columns:
+                print(f"\n  [X] ERROR: Target column '{training_target}' not found in dataset!")
+                print(f"      Available columns: {list(df_check.columns)}")
+                print(f"\n      Please use one of the available columns with --predict or --target")
+                return
+        except Exception as e:
+            print(f"\n  [X] ERROR: Could not read file to validate target: {e}")
+            return
+        
         print("\n" + "=" * 80)
         print("  TRAINING MODEL FIRST (--autonomous), THEN MAKING PREDICTIONS (--predict)")
         print("=" * 80)
@@ -10851,7 +11325,8 @@ Supported file formats:
             horizon=args.horizon,
             task=args.task,
             exclude=args.exclude.split(",") if args.exclude else None,
-            run_benchmark=True,
+            run_benchmark=args.benchmark,  # Use user's --benchmark flag
+            selection_mode="best_score" if getattr(args, 'best_score', False) else "knee_point",
         )
         # Now continue to prediction logic below
         print("\n" + "=" * 80)
@@ -11049,7 +11524,7 @@ Supported file formats:
                         "requested_target": args.predict,
                         "original_training_target": original_target,
                         "total_predictions": len(predictions),
-                        "output_file": output_path,
+                        "output_file": os.path.abspath(output_path),  # Use absolute path
                         "task": task,
                         "statistics": pred_stats,
                         "sample_values": sample_predictions,
@@ -11077,8 +11552,8 @@ Supported file formats:
             traceback.print_exc()
             return
     
-    # If we ran --autonomous --predict, don't run any other demos
-    if args.predict and args.autonomous:
+    # If we ran --predict (which now implies training), don't run any other demos
+    if args.predict:
         return
     
     if args.autonomous and not args.predict:
@@ -11092,6 +11567,7 @@ Supported file formats:
             task=args.task,
             exclude=args.exclude.split(",") if args.exclude else None,
             run_benchmark=True,  # Always run benchmarks in autonomous mode
+            selection_mode="best_score" if getattr(args, 'best_score', False) else "knee_point",
         )
     elif args.v3:
         # Run v3 innovations demo only
@@ -11116,17 +11592,37 @@ Supported file formats:
             horizon=args.horizon,
         )
     elif args.benchmark:
-        # Run benchmark comparison
-        # If --file is also provided, benchmark that file
-        run_benchmark_only(
-            time_budget=args.time_budget,
-            datasets=args.datasets if not args.file else None,  # Skip built-in if custom file
-            output=args.output,
-            custom_file=args.file,
-            target=args.target,
-            task=args.task,
-            exclude=args.exclude.split(",") if args.exclude else None,
-        )
+        # If --file is provided, run FULL autonomous pipeline with benchmarks
+        # This ensures ONE combined report with EDA, AutoML, Time Series, and Benchmarks
+        if args.file:
+            print("\n" + "=" * 80)
+            print("  BENCHMARK MODE WITH CUSTOM FILE")
+            print("  Running FULL pipeline: EDA → Risk → AutoML → Time Series → Benchmarks")
+            print("  Output: ONE combined report with all results")
+            print("=" * 80 + "\n")
+            
+            # Use _run_autonomous_custom_file which handles single file with all phases
+            _run_autonomous_custom_file(
+                custom_file=args.file,
+                target=args.target,
+                task=args.task,
+                exclude=args.exclude.split(",") if args.exclude else None,
+                run_benchmark=True,  # Enable benchmarks
+                has_llm=bool(os.environ.get('OPENAI_API_KEY')),
+                start_time=time.time(),
+                selection_mode="best_score" if getattr(args, 'best_score', False) else "knee_point",
+            )
+        else:
+            # Run benchmark comparison on built-in datasets only
+            run_benchmark_only(
+                time_budget=args.time_budget,
+                datasets=args.datasets,
+                output=args.output,
+                custom_file=None,
+                target=args.target,
+                task=args.task,
+                exclude=args.exclude.split(",") if args.exclude else None,
+            )
     elif args.file:
         # Run demo on user file (without benchmark)
         demo_user_file(

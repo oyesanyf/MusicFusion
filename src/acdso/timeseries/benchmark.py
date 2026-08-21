@@ -318,6 +318,15 @@ class TimeSeriesBenchmark:
         df = df.copy()
         df[self.datetime_col] = pd.to_datetime(df[self.datetime_col])
         df = df.sort_values(self.datetime_col).reset_index(drop=True)
+        
+        # Keep only datetime_col, target_col, and numeric columns to avoid dtype errors
+        cols_to_keep = [self.datetime_col, self.target_col]
+        for col in df.columns:
+            if col not in cols_to_keep:
+                if np.issubdtype(df[col].dtype, np.number):
+                    cols_to_keep.append(col)
+        df = df[cols_to_keep]
+        
         return df
     
     def _split_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -660,48 +669,63 @@ class TimeSeriesBenchmark:
         y_test: np.ndarray,
         dataset_name: str,
     ) -> TSBenchmarkResult:
-        """Run sktime."""
+        """Run sktime with simple, fast models to avoid hanging."""
         result = TSBenchmarkResult(system='sktime', dataset=dataset_name)
         
         try:
-            from sktime.forecasting.model_selection import temporal_train_test_split
             from sktime.forecasting.naive import NaiveForecaster
-            from sktime.forecasting.arima import AutoARIMA
-            from sktime.forecasting.ets import AutoETS
+            from sktime.forecasting.trend import TrendForecaster
+            from sktime.forecasting.exp_smoothing import ExponentialSmoothing
             
             # Prepare data as pandas Series with datetime index
-            y = pd.Series(
-                y_train,
-                index=pd.DatetimeIndex(train_df[self.datetime_col]),
-            )
+            # Handle potential None values and ensure proper data types
+            if y_train is None or len(y_train) == 0:
+                raise ValueError("Empty training data")
+            
+            # Ensure datetime column exists and is valid
+            if self.datetime_col not in train_df.columns:
+                raise ValueError(f"Datetime column '{self.datetime_col}' not found")
+            
+            # Create datetime index, handling potential issues
+            try:
+                dt_index = pd.DatetimeIndex(train_df[self.datetime_col])
+            except Exception:
+                # Fallback: create a range index
+                dt_index = pd.RangeIndex(len(y_train))
+            
+            y = pd.Series(y_train, index=dt_index)
             
             t0 = time.time()
             
-            # Try AutoARIMA with seasonal period, fallback to non-seasonal if it fails
+            # Use simpler models to avoid AutoARIMA hanging issues
+            # Try Exponential Smoothing first (fast and reliable), then fallback to Naive
+            forecaster = None
             try:
-                forecaster = AutoARIMA(
-                    sp=7,
-                    suppress_warnings=True,
-                    max_p=5,
-                    max_d=2,
-                    max_q=5,
+                # Use ExponentialSmoothing - much faster than AutoARIMA
+                # sp must be None when seasonal is None to avoid 'int * None' error
+                forecaster = ExponentialSmoothing(
+                    trend="add",
+                    seasonal=None,  # No seasonality to avoid complexity
+                    sp=None,  # Must be None when seasonal=None
                 )
                 forecaster.fit(y)
             except Exception:
-                # Fallback to non-seasonal AutoARIMA
-                forecaster = AutoARIMA(
-                    seasonal=False,
-                    suppress_warnings=True,
-                    max_p=5,
-                    max_d=2,
-                    max_q=5,
-                )
-                forecaster.fit(y)
+                try:
+                    # Try TrendForecaster as second option
+                    forecaster = TrendForecaster()
+                    forecaster.fit(y)
+                except Exception:
+                    # Final fallback to NaiveForecaster
+                    forecaster = NaiveForecaster(strategy="mean")
+                    forecaster.fit(y)
             
             result.fit_time = time.time() - t0
             
             t0 = time.time()
-            fh = np.arange(1, len(test_df) + 1)
+            # Create forecast horizon safely
+            horizon_len = len(test_df) if test_df is not None and len(test_df) > 0 else self.horizon
+            fh = np.arange(1, horizon_len + 1)
+            
             # Handle case where predict might return None or fail
             try:
                 y_pred = forecaster.predict(fh=fh)
@@ -712,15 +736,26 @@ class TimeSeriesBenchmark:
                 # Fallback to naive forecast if prediction fails
                 naive = NaiveForecaster(strategy="last")
                 naive.fit(y)
-                y_pred = naive.predict(fh=fh).values
+                y_pred = naive.predict(fh=fh)
+                y_pred = y_pred.values if hasattr(y_pred, 'values') else np.array(y_pred)
+            
             result.predict_time = time.time() - t0
             
+            # Ensure predictions are valid
+            if y_pred is None or len(y_pred) == 0:
+                raise ValueError("No predictions generated")
+            
+            # Align prediction length with test data
+            min_len = min(len(y_test), len(y_pred))
+            y_test_aligned = y_test[:min_len]
+            y_pred_aligned = y_pred[:min_len]
+            
             # Compute metrics
-            result.mae = mae(y_test, y_pred)
-            result.rmse = rmse(y_test, y_pred)
-            result.mape = mape(y_test, y_pred)
-            result.smape = smape(y_test, y_pred)
-            result.mase = mase(y_test, y_pred, y_train)
+            result.mae = mae(y_test_aligned, y_pred_aligned)
+            result.rmse = rmse(y_test_aligned, y_pred_aligned)
+            result.mape = mape(y_test_aligned, y_pred_aligned)
+            result.smape = smape(y_test_aligned, y_pred_aligned)
+            result.mase = mase(y_test_aligned, y_pred_aligned, y_train)
             
             result.status = 'success'
             
