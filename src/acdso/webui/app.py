@@ -196,8 +196,9 @@ FLAGS: tuple[Flag, ...] = (
     Flag(
         "datasets", "--datasets", "text", "Benchmark datasets",
         "Comma-separated built-in dataset names, or 'all'. Only used for "
-        "benchmark runs without an uploaded file.",
-        default="tips", group="Runtime",
+        "benchmark runs without an uploaded file. Leave blank to omit the "
+        "flag entirely (run_acdso.py falls back to its own default, 'tips').",
+        default=None, group="Runtime",
     ),
     Flag(
         "output", "--output", "text", "Benchmark output JSON",
@@ -508,13 +509,28 @@ def _write_forecast_csv(result: dict[str, Any], upload_name: str) -> str:
     name = f"forecast_{base}_{safe_col}_{stamp}_{uuid.uuid4().hex[:6]}.csv"
     path = REPORTS_DIR / name
 
+    # Byte-valued columns (transfer volumes) are unreadable in raw units --
+    # add a GB column alongside the exact byte figure, matching the on-screen table.
+    is_bytes = bool(re.search(r"\(B\)|bytes?\b", result["value_col"], re.IGNORECASE))
+    header = ["period", result["value_col"]]
+    if is_bytes:
+        header.append(re.sub(r"\(B\)", "(GB)", result["value_col"], flags=re.IGNORECASE))
+    header.append("type")
+
+    def row_values(row: dict[str, Any], kind: str) -> list[Any]:
+        values = [row["period"], row["value"]]
+        if is_bytes:
+            values.append(round(row["value"] / 1e9, 3))
+        values.append(kind)
+        return values
+
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["period", result["value_col"], "type"])
+        writer.writerow(header)
         for row in result["history"]:
-            writer.writerow([row["period"], row["value"], "actual"])
+            writer.writerow(row_values(row, "actual"))
         for row in result["forecast"]:
-            writer.writerow([row["period"], row["value"], "forecast"])
+            writer.writerow(row_values(row, "forecast"))
 
     return name
 

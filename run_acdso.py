@@ -10662,7 +10662,8 @@ def run_multi_target_training(
 def main():
     """Main entry point with argument parsing."""
     import argparse
-    
+    import os
+
     parser = argparse.ArgumentParser(
         description="ACDSO Demo Suite - Risk-Aware AutoML with LLM-Powered Analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,

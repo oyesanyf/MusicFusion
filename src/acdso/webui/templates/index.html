@@ -328,9 +328,9 @@ function preselectForecastColumns(columns, dtypes) {
 }
 
 function fmtValue(n, col) {
-  // Byte-valued columns are unreadable in raw units; show TB alongside.
+  // Byte-valued columns are unreadable in raw units; show GB alongside.
   if (/\(B\)|bytes?\b/i.test(col || '')) {
-    return (n / 1e12).toFixed(2) + ' TB';
+    return (n / 1e9).toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' GB';
   }
   if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + 'B';
   if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
