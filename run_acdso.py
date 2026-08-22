@@ -11358,9 +11358,11 @@ Supported file formats:
             print(f"      Shape: {df.shape[0]} rows x {df.shape[1]} columns")
             print(f"      NOTE: Predictions will be made on ALL {df.shape[0]} rows (full dataset)")
             
-            # Find the saved model - check for target-specific model first
+            # Find the saved model - it was saved under training_target (see
+            # run_autonomous_demo's model_path above), which is args.target
+            # when given, not necessarily args.predict.
             base_name = os.path.splitext(os.path.basename(args.file))[0]
-            target_model_path = f"reports/model_{base_name}_{args.predict}.pkl"
+            target_model_path = f"reports/model_{base_name}_{training_target}.pkl"
             generic_model_path = f"reports/model_{base_name}.pkl"
             
             if os.path.exists(target_model_path):
