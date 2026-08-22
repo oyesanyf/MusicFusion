@@ -261,6 +261,34 @@ def save_combined_report(report: Dict[str, Any], output_path: str = "acdso_combi
     return output_path
 
 
+def _file_uri(path: str) -> str:
+    """Convert an absolute filesystem path to a clickable file:// URI.
+
+    Handles both Windows ('C:\\a\\b c.pkl') and POSIX ('/a/b c.pkl') paths,
+    percent-encoding spaces/parentheses so browsers open them reliably.
+    """
+    from urllib.parse import quote
+    p = path.replace('\\', '/')
+    if not p.startswith('/'):
+        p = '/' + p  # Windows drive letter: C:/... -> /C:/...
+    return 'file://' + quote(p, safe='/:')
+
+
+def _file_link_cell(path: str) -> str:
+    """Table cell for a generated-file path: click to open/download, or copy."""
+    uri = _file_uri(path)
+    return (
+        f'<a href="{uri}" target="_blank" rel="noopener" '
+        f'style="color:#93c5fd; text-decoration:none; background:#2d3748; '
+        f'padding:4px 8px; border-radius:4px; font-family:Consolas,monospace; '
+        f'font-size:0.85em; word-break:break-all;">{path}</a> '
+        f'<button type="button" onclick="navigator.clipboard.writeText(\'{path}\')'
+        f'.then(()=>alert(\'Path copied!\'))" '
+        f'style="background:#334155; color:#94a3b8; border:none; border-radius:4px; '
+        f'padding:3px 8px; cursor:pointer; font-size:0.75em; vertical-align:middle;">copy</button>'
+    )
+
+
 def generate_html_report_from_combined(report: Dict[str, Any], output_path: str = None) -> str:
     """
     Generate a comprehensive HTML report from combined report data.
@@ -305,6 +333,7 @@ def generate_html_report_from_combined(report: Dict[str, Any], output_path: str 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-family='Arial,sans-serif' font-size='32' font-weight='700' fill='%23ffffff' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
     <title>ACDSO {acdso_version} Report - {mode.title()}</title>
     <style>
         :root {{
@@ -943,7 +972,7 @@ def generate_html_report_from_combined(report: Dict[str, Any], output_path: str 
         html += """
         <div class="card">
             <h2>📁 Files Generated</h2>
-            <p class="info-text">All files generated during this analysis session. Click to copy paths.</p>
+            <p class="info-text">All files generated during this analysis session. Click a path to open/download it, or use the copy button.</p>
             <table>
                 <tr><th>File Type</th><th>Path</th></tr>
 """
@@ -952,7 +981,7 @@ def generate_html_report_from_combined(report: Dict[str, Any], output_path: str 
                 # Create copyable path with onclick
                 html += f"""                <tr>
                     <td>{file_type}</td>
-                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{file_path}').then(()=>alert('Path copied!'))">{file_path}</code></td>
+                    <td>{_file_link_cell(file_path)}</td>
                 </tr>
 """
         html += "            </table>\n        </div>\n"
@@ -990,6 +1019,7 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-family='Arial,sans-serif' font-size='32' font-weight='700' fill='%23ffffff' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
     <title>ACDSO Multi-Target Report - {base_name}</title>
     <style>
         :root {{
@@ -1604,7 +1634,7 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         
         <div class="section">
             <h2>📁 All Files Generated</h2>
-            <p style="color: var(--text-muted); margin-bottom: 1rem;">Click any path to copy to clipboard.</p>
+            <p style="color: var(--text-muted); margin-bottom: 1rem;">Click a path to open/download it, or use the copy button.</p>
             <table>
                 <tr><th>Type</th><th>Target</th><th>File Path</th></tr>
 """
@@ -1617,10 +1647,10 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         html += f"""                <tr>
                     <td>🤖 Model</td>
                     <td>{target}</td>
-                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_path}').then(()=>alert('Path copied!'))">{abs_path}</code></td>
+                    <td>{_file_link_cell(abs_path)}</td>
                 </tr>
 """
-    
+
     # Add prediction CSV files
     for target in targets:
         pred = predictions.get(target, {})
@@ -1629,10 +1659,10 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         html += f"""                <tr>
                     <td>📊 Predictions CSV</td>
                     <td>{target}</td>
-                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_path}').then(()=>alert('Path copied!'))">{abs_path}</code></td>
+                    <td>{_file_link_cell(abs_path)}</td>
                 </tr>
 """
-    
+
     # Add individual report links
     for target in targets:
         report_path = f"reports/autonomous_{base_name}_{target}_report.html"
@@ -1640,10 +1670,10 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
         html += f"""                <tr>
                     <td>📄 Individual Report</td>
                     <td>{target}</td>
-                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_path}').then(()=>alert('Path copied!'))">{abs_path}</code></td>
+                    <td>{_file_link_cell(abs_path)}</td>
                 </tr>
 """
-    
+
     # Add combined report
     combined_html_path = f"reports/multi_target_{base_name}_combined_report.html"
     abs_combined = os.path.abspath(combined_html_path)
@@ -1653,12 +1683,12 @@ def _generate_multi_target_html_report(results: Dict[str, Any], base_name: str) 
     html += f"""                <tr>
                     <td>📄 Combined HTML Report</td>
                     <td>All Targets</td>
-                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_combined}').then(()=>alert('Path copied!'))">{abs_combined}</code></td>
+                    <td>{_file_link_cell(abs_combined)}</td>
                 </tr>
                 <tr>
                     <td>📋 Combined JSON Data</td>
                     <td>All Targets</td>
-                    <td><code style="cursor:pointer; background: #2d3748; padding: 4px 8px; border-radius: 4px;" onclick="navigator.clipboard.writeText('{abs_json}').then(()=>alert('Path copied!'))">{abs_json}</code></td>
+                    <td>{_file_link_cell(abs_json)}</td>
                 </tr>
             </table>
         </div>
@@ -8148,6 +8178,7 @@ def _generate_autonomous_report(report_data: dict) -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-family='Arial,sans-serif' font-size='32' font-weight='700' fill='%23ffffff' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
     <title>ACDSO v3.0 Autonomous Report</title>
     <style>
         * {{ box-sizing: border-box; }}
@@ -8730,6 +8761,7 @@ def _generate_html_report(summary, output_path: str):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-family='Arial,sans-serif' font-size='32' font-weight='700' fill='%23ffffff' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
     <title>ACDSO Benchmark Report - Complete Analysis</title>
     <style>
         :root {{
