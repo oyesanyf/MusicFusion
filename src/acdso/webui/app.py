@@ -36,6 +36,7 @@ from typing import Any
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
+from .column_validator import validate_columns
 from .forecast import SeriesSpec, run_forecast
 
 # src/acdso/webui/app.py -> src/acdso/webui -> src/acdso -> src -> <repo root>
@@ -468,20 +469,19 @@ def build_argv(payload: dict[str, Any], data_file: Path | None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def artifacts_since(started_at: float) -> list[dict[str, Any]]:
-    """Files under ``reports/`` touched by a run, newest first."""
+def _all_report_files() -> list[dict[str, Any]]:
+    """Every file under ``reports/`` (excluding webui job logs), newest first."""
     if not REPORTS_DIR.is_dir():
         return []
-    cutoff = started_at - 2  # tolerate filesystem timestamp granularity
     found = []
     for path in REPORTS_DIR.rglob("*"):
-        if not path.is_file() or path.suffix == ".log":
+        if not path.is_file() or path.suffix.lower() == ".log":
+            continue
+        if LOG_DIR in path.parents:
             continue
         try:
             stat = path.stat()
         except OSError:
-            continue
-        if stat.st_mtime < cutoff:
             continue
         found.append(
             {
@@ -494,6 +494,12 @@ def artifacts_since(started_at: float) -> list[dict[str, Any]]:
         )
     found.sort(key=lambda a: a["modified"], reverse=True)
     return found
+
+
+def artifacts_since(started_at: float) -> list[dict[str, Any]]:
+    """Files under ``reports/`` touched by a run, newest first."""
+    cutoff = started_at - 2  # tolerate filesystem timestamp granularity
+    return [f for f in _all_report_files() if f["modified"] >= cutoff]
 
 
 def _write_forecast_csv(result: dict[str, Any], upload_name: str) -> str:
@@ -675,6 +681,40 @@ def create_app() -> Flask:
         result["csv_path"] = _write_forecast_csv(result, record.original_name)
         return jsonify(result)
 
+    def _column_roles_from_payload(payload: dict[str, Any]) -> dict[str, list[str]]:
+        return {
+            "predict": _as_list(payload.get("predict")),
+            "target": _as_list(payload.get("target")),
+            "exclude": _as_list(payload.get("exclude")),
+            "datetime_col": _as_list(payload.get("datetime_col")),
+        }
+
+    @app.post("/api/validate-columns")
+    def validate_columns_route():
+        """Advisory check: do the selected column roles make sense?
+
+        Called live from the GUI as selections change, and again as a
+        hard gate right before a run starts (see /api/run) -- a column
+        used for two roles at once is rejected either way; softer LLM
+        judgment calls are shown but don't block on their own here.
+        """
+        payload = request.get_json(silent=True) or {}
+        record = uploads.get(payload.get("upload_id") or "")
+        if record is None:
+            return jsonify(error="Upload a data file first"), 400
+
+        roles = _column_roles_from_payload(payload)
+        if not any(roles.values()):
+            return jsonify(ok=True, source="rules", issues=[])
+
+        try:
+            frame = _read_frame(record.path, nrows=2000)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify(error=f"Could not read the file: {exc}"), 400
+
+        result = validate_columns(frame, roles)
+        return jsonify(result.to_dict())
+
     @app.post("/api/run")
     def run():
         payload = request.get_json(silent=True) or {}
@@ -682,6 +722,7 @@ def create_app() -> Flask:
         run_all_demos = bool(payload.get("all"))
 
         data_file: Path | None = None
+        record = None
         if upload_id:
             record = uploads.get(upload_id)
             if record is None:
@@ -699,6 +740,24 @@ def create_app() -> Flask:
         has_target = bool(_as_list(payload.get("predict")) or _as_list(payload.get("target")))
         if data_file is not None and not run_all_demos and not has_target:
             return jsonify(error="Pick at least one target column to predict."), 400
+
+        if record is not None:
+            roles = _column_roles_from_payload(payload)
+            if any(roles.values()):
+                try:
+                    frame = _read_frame(record.path, nrows=2000)
+                    check = validate_columns(frame, roles)
+                except Exception:
+                    check = None  # don't block a run over a validator-side failure
+                if check is not None and not check.ok:
+                    blocking = [i for i in check.issues if i.severity == "block"]
+                    return (
+                        jsonify(
+                            error="Column selection conflict: " + " ".join(i.message for i in blocking),
+                            column_issues=check.to_dict(),
+                        ),
+                        400,
+                    )
 
         try:
             argv = build_argv(payload, data_file)
@@ -753,6 +812,18 @@ def create_app() -> Flask:
             ]
         )
 
+    @app.get("/api/reports")
+    def reports_list():
+        """All files ever written to reports/ -- past runs, not just the live job."""
+        limit = request.args.get("limit", type=int, default=300)
+        limit = max(1, min(limit, 2000))
+        all_reports = _all_report_files()
+        return jsonify(
+            reports=all_reports[:limit],
+            total=len(all_reports),
+            shown=min(limit, len(all_reports)),
+        )
+
     @app.get("/api/artifact")
     def artifact():
         rel = request.args.get("path", "")
@@ -774,3 +845,9 @@ def create_app() -> Flask:
         )
 
     return app
+
+
+# Module-level instance for `waitress-serve acdso.webui.app:app` / any other
+# WSGI runner that expects to import an app object rather than call a
+# factory. `start.py` uses create_app() directly and does not touch this.
+app = create_app()

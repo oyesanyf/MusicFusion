@@ -76,7 +76,20 @@ can reach the port can upload data and start runs), `--no-browser`, `--debug`.
 The GUI runs the same `run_acdso.py` command line you would type by hand and
 shows it before starting, so there is no separate execution path. One run at
 a time: ACDSO writes artifacts under deterministic dataset-derived names, so
-concurrent runs would overwrite each other.
+concurrent runs would overwrite each other. Served in production by
+[waitress](https://docs.pylonsproject.org/projects/waitress/) by default
+(`--debug` switches to Flask's dev server for editing the GUI itself).
+
+Also included: a **Forecast** card for "how much next period" questions
+(separate from the AutoML predict path — see docs below for why), live
+**column-selection validation** (rule-based plus an optional LLM check) that
+blocks a run before it starts if two roles are assigned the same column, and
+a **Report History** panel listing every file ever written to `reports/`,
+not just the current run's.
+
+For what every single flag and GUI field actually does — including which
+ones are currently no-ops in `run_acdso.py`'s dispatch logic — see
+**[docs/web_gui.md](docs/web_gui.md)**.
 
 ---
 

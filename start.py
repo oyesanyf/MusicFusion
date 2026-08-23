@@ -5,10 +5,17 @@
     python start.py --port 8000         # different port
     python start.py --no-browser        # don't open a browser
     python start.py --host 0.0.0.0      # listen on all interfaces (see warning)
+    python start.py --debug             # Flask's dev server + auto-reload, for editing the GUI itself
 
 The GUI is a front-end over ``run_acdso.py``: upload a data file, choose a
 target column, toggle any CLI flag, run, and collect the reports and
 predictions the pipeline writes to ``reports/``.
+
+Serving: by default this runs under `waitress <https://docs.pylonsproject.org/projects/waitress/>`_,
+a production-grade pure-Python WSGI server (no C build step, works on
+Windows unlike gunicorn). Flask's own dev server is used only for --debug,
+since that's what gives you the auto-reloader and debugger while editing
+the GUI's own code.
 """
 
 from __future__ import annotations
@@ -39,6 +46,28 @@ def _check_dependencies() -> None:
         print("Install them with:\n")
         print(f"    {Path(sys.executable).name} -m pip install " + " ".join(missing))
         sys.exit(1)
+
+
+def _serve(app, host: str, port: int, debug: bool) -> None:
+    """Run the Flask app: waitress (production) by default, Flask's dev
+    server + reloader only under --debug."""
+    if debug:
+        # threaded=True keeps log polling responsive while a run streams output.
+        app.run(host=host, port=port, debug=True, threaded=True, use_reloader=True)
+        return
+
+    try:
+        from waitress import serve
+    except ImportError:
+        print("  [WARN] waitress not installed -- falling back to Flask's development")
+        print("         server, which is NOT recommended outside local use.")
+        print(f"         Install it with: {Path(sys.executable).name} -m pip install waitress\n")
+        app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
+        return
+
+    # threads>1: a run in progress must not block log polling or a second
+    # tab's requests.
+    serve(app, host=host, port=port, threads=8)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -85,9 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
 
-    # threaded=True so log polling stays responsive while a run is streaming.
-    app.run(host=args.host, port=args.port, debug=args.debug,
-            threaded=True, use_reloader=args.debug)
+    _serve(app, args.host, args.port, args.debug)
     return 0
 
 

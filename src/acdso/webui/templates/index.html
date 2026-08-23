@@ -211,6 +211,7 @@
     <div class="card">
       <h2>2 &middot; Command</h2>
       <pre class="cmd" id="cmd">python run_acdso.py</pre>
+      <div id="colCheck"></div>
       <div class="row" style="margin-top:12px">
         <button class="primary" id="runBtn" type="button">Run pipeline</button>
         <button class="danger" id="stopBtn" type="button" disabled>Stop</button>
@@ -234,12 +235,21 @@
       <h2>4 &middot; Artifacts <span class="hint" style="display:inline">(files in reports/ written by this run)</span></h2>
       <div id="artifacts" class="hint" style="margin:0">None yet.</div>
     </div>
+
+    <div class="card">
+      <h2>5 &middot; Report History <span class="hint" style="display:inline">(everything ever written to reports/)</span></h2>
+      <div class="row" style="margin-bottom:10px">
+        <input type="text" id="reportFilter" placeholder="Filter by filename&hellip;" style="flex:1 1 auto">
+        <button type="button" id="reportRefresh">Refresh</button>
+      </div>
+      <div id="reportHistory" class="hint" style="margin:0">Loading&hellip;</div>
+    </div>
   </section>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { uploadId: null, columns: [], jobId: null, cursor: 0, poll: null };
+const state = { uploadId: null, columns: [], jobId: null, cursor: 0, poll: null, columnsBlocked: false };
 
 function flash(text, kind) {
   const el = $('msg');
@@ -467,9 +477,74 @@ function refreshCommand() {
 $('form').addEventListener('input', refreshCommand);
 $('form').addEventListener('change', refreshCommand);
 
+/* ── column-role validation (rules always; LLM on top when configured) ─ */
+const ROLE_FIELDS = ['f_predict', 'f_target', 'f_exclude', 'f_datetime_col'];
+let columnCheckTimer = null;
+
+function renderColumnCheck(result) {
+  state.columnsBlocked = !result.ok;
+  const box = $('colCheck');
+  if (!result.issues || !result.issues.length) {
+    box.innerHTML = '';
+    return;
+  }
+  const rows = result.issues.map((i) =>
+    '<div class="msg ' + (i.severity === 'block' ? 'err' : 'ok') + '" style="display:block; margin-bottom:6px">' +
+    (i.severity === 'block' ? '&#10060; ' : '&#9888; ') + esc(i.message) + '</div>'
+  ).join('');
+  const sourceNote = result.source === 'llm' ? 'rules + LLM check' : 'rule-based check (no LLM configured)';
+  box.innerHTML = rows + '<div class="hint" style="margin:0">' + sourceNote + '</div>';
+}
+
+async function checkColumns() {
+  if (!state.uploadId) { renderColumnCheck({ ok: true, issues: [] }); return; }
+  const roles = {
+    upload_id: state.uploadId,
+    predict: collectColumnValues('f_predict'),
+    target: collectColumnValues('f_target'),
+    exclude: collectColumnValues('f_exclude'),
+    datetime_col: collectColumnValues('f_datetime_col'),
+  };
+  if (!roles.predict.length && !roles.target.length && !roles.exclude.length && !roles.datetime_col.length) {
+    renderColumnCheck({ ok: true, issues: [] });
+    return;
+  }
+  try {
+    const res = await fetch('/api/validate-columns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(roles),
+    });
+    const data = await res.json();
+    if (res.ok) renderColumnCheck(data);
+  } catch (err) {
+    // best-effort live check; the server re-validates on Run regardless
+  }
+}
+
+function collectColumnValues(id) {
+  const el = $(id);
+  if (!el) return [];
+  return el.multiple ? Array.from(el.selectedOptions).map((o) => o.value).filter(Boolean)
+                      : (el.value ? [el.value] : []);
+}
+
+ROLE_FIELDS.forEach((id) => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener('change', () => {
+    clearTimeout(columnCheckTimer);
+    columnCheckTimer = setTimeout(checkColumns, 500);
+  });
+});
+
 /* ── run / poll ─────────────────────────────────────────────────────── */
 $('runBtn').addEventListener('click', async () => {
   flash('');
+  if (state.columnsBlocked) {
+    flash('Resolve the column selection conflict above before running.', 'err');
+    return;
+  }
   let res, data;
   try {
     res = await fetch('/api/run', {
@@ -482,7 +557,11 @@ $('runBtn').addEventListener('click', async () => {
     flash('Could not start the run: ' + err, 'err');
     return;
   }
-  if (!res.ok) { flash(data.error || 'Could not start the run', 'err'); return; }
+  if (!res.ok) {
+    flash(data.error || 'Could not start the run', 'err');
+    if (data.column_issues) renderColumnCheck(data.column_issues);
+    return;
+  }
 
   state.jobId = data.job_id;
   state.cursor = 0;
@@ -525,6 +604,7 @@ async function poll() {
     state.poll = null;
     $('runBtn').disabled = false;
     $('stopBtn').disabled = true;
+    loadReportHistory();
   }
 }
 
@@ -554,6 +634,53 @@ function fmtSize(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
   return (n / 1048576).toFixed(1) + ' MB';
 }
+
+/* ── report history: every file ever written to reports/, not just this run ── */
+const VIEWABLE_KINDS = new Set(['html', 'json', 'csv', 'txt', 'md', 'png', 'svg']);
+let reportCache = [];
+
+function reportRow(a) {
+  const q = encodeURIComponent(a.path);
+  const view = VIEWABLE_KINDS.has(a.kind)
+    ? '<a href="/api/artifact?path=' + q + '&inline=1" target="_blank">view</a>' : '';
+  const when = new Date(a.modified * 1000).toLocaleString();
+  return '<tr><td>' + esc(a.path) + '</td><td class="hint" style="margin:0">' + when + '</td>' +
+         '<td>' + fmtSize(a.size) + '</td>' +
+         '<td>' + view + ' <a href="/api/artifact?path=' + q + '">download</a></td></tr>';
+}
+
+function renderReportHistory() {
+  const box = $('reportHistory');
+  const term = $('reportFilter').value.trim().toLowerCase();
+  const items = term ? reportCache.filter((a) => a.path.toLowerCase().includes(term)) : reportCache;
+  if (!items.length) { box.textContent = term ? 'No files match "' + term + '".' : 'No reports yet.'; return; }
+  box.innerHTML = '<div class="scroll-x" style="max-height:360px; overflow-y:auto">' +
+    '<table><tr><th>file</th><th>modified</th><th>size</th><th></th></tr>' +
+    items.map(reportRow).join('') + '</table></div>';
+}
+
+async function loadReportHistory() {
+  try {
+    const res = await fetch('/api/reports?limit=500');
+    const data = await res.json();
+    if (!res.ok) return;
+    reportCache = data.reports;
+    renderReportHistory();
+    if (data.total > data.shown) {
+      $('reportHistory').insertAdjacentHTML(
+        'beforeend',
+        '<div class="hint" style="margin-top:8px">Showing ' + data.shown + ' of ' + data.total +
+        ' files -- narrow with the filter box to find older ones.</div>'
+      );
+    }
+  } catch (err) {
+    $('reportHistory').textContent = 'Could not load report history.';
+  }
+}
+
+$('reportFilter').addEventListener('input', renderReportHistory);
+$('reportRefresh').addEventListener('click', loadReportHistory);
+loadReportHistory();
 
 refreshCommand();
 </script>
