@@ -388,6 +388,13 @@ def suggest_target_column(df: pd.DataFrame, candidates: list[str] | None = None)
     call fails. Always returns a column from ``candidates`` (never
     suggests a date/period or identifier column) -- returns None only if
     there are no predictable columns at all.
+
+    Deliberately separate from run_acdso.py's own ``_llm_detect_target()``,
+    which does the same job for any CLI invocation that leaves --target
+    blank. This one exists because the GUI needed multi-provider support
+    and pre-filtered candidates for a suggestion shown before the user has
+    picked anything -- see docs/web_gui.md's "Target suggestion" section
+    for the full comparison before assuming this is duplicate/dead code.
     """
     if candidates is None:
         candidates = predictable_columns(df)

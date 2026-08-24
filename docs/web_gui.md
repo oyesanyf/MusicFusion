@@ -191,6 +191,39 @@ above the Run button:
 - With no LLM provider configured, only the rule-based check runs — same
   blocking behavior, just without the softer warnings.
 
+### Target suggestion (right after upload)
+
+As soon as a file finishes uploading, the GUI calls `POST /api/suggest-target`
+and shows a **"Suggested target: `<column>`"** box under Predict target(s),
+with a one-line reason and a **Use this** button that selects it directly.
+Backed by `suggest_target_column()` in `column_validator.py`: LLM-first
+(same OpenAI/Anthropic/Ollama provider chain as column validation above),
+falling back to a dtype + outcome-keyword heuristic (favors float columns
+and names containing words like "total", "amount", "price", "revenue") when
+no provider is configured. Only ever suggests from `predictable_columns()`
+— never a date or identifier column.
+
+**This is deliberately a second implementation, not a bug.** `run_acdso.py`
+already has its own target auto-detection —
+[`_llm_detect_target()`](../run_acdso.py) — used internally whenever
+`--target`/`--predict` is left blank entirely for *any* CLI invocation, not
+just through the GUI. The two differ on purpose:
+
+| | `_llm_detect_target` (CLI, existing) | `suggest_target_column` (GUI, this feature) |
+|---|---|---|
+| Triggers | Only when target/predict is blank | Proactively, right after upload, before you pick anything |
+| Providers | OpenAI only (`OPENAI_API_KEY`) | OpenAI, Anthropic, or Ollama |
+| Pre-filters candidates | No — asks the LLM cold | Yes — excludes dates/IDs first |
+| Surfaced as a UI choice | No — just silently used if you leave the field blank | Yes — shown with a reason and a one-click "Use this" |
+
+Consolidating them was considered and deliberately deferred: the CLI's
+version is a lightweight fallback baked into the main pipeline and used far
+beyond the web GUI, while the GUI's version needed the extra provider
+support and pre-filtering to be useful as a standalone suggestion shown
+*before* you've chosen anything. If you're auditing for duplicate LLM
+prompts, this is the one place it's intentional — see the table above rather
+than assuming one is dead code.
+
 ### Forecast (separate from the Run pipeline / AutoML path)
 
 Aggregates the file to one value per period and projects it forward with a
