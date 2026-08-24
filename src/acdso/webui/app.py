@@ -36,7 +36,7 @@ from typing import Any
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
-from .column_validator import predictable_columns, validate_columns
+from .column_validator import predictable_columns, suggest_target_column, validate_columns
 from .forecast import SeriesSpec, run_forecast
 
 # src/acdso/webui/app.py -> src/acdso/webui -> src/acdso -> src -> <repo root>
@@ -697,6 +697,28 @@ def create_app() -> Flask:
 
         result["csv_path"] = _write_forecast_csv(result, record.original_name)
         return jsonify(result)
+
+    @app.post("/api/suggest-target")
+    def suggest_target_route():
+        """Recommend one predictable column as the most plausible target.
+
+        Separate from validate-columns: that endpoint judges what's
+        already selected, this one runs before anything is selected at
+        all, right after upload.
+        """
+        payload = request.get_json(silent=True) or {}
+        record = uploads.get(payload.get("upload_id") or "")
+        if record is None:
+            return jsonify(error="Upload a data file first"), 400
+
+        try:
+            sample = _read_frame(record.path, nrows=5000)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify(error=f"Could not read the file: {exc}"), 400
+
+        candidates = predictable_columns(sample)
+        suggestion = suggest_target_column(sample, candidates)
+        return jsonify(**suggestion, candidates=candidates)
 
     def _column_roles_from_payload(payload: dict[str, Any]) -> dict[str, list[str]]:
         return {

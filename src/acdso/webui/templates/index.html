@@ -188,7 +188,10 @@
                       {% if flag.dead %}disabled{% endif %}>
                 {% if flag.name not in ('predict', 'target', 'exclude') %}<option value="">(none)</option>{% endif %}
               </select>
-              {% if flag.name == 'predict' %}<div id="predictHiddenNote" class="hint" style="margin:4px 0 0"></div>{% endif %}
+              {% if flag.name == 'predict' %}
+              <div id="predictHiddenNote" class="hint" style="margin:4px 0 0"></div>
+              <div id="targetSuggestion" style="display:none; margin-top:8px"></div>
+              {% endif %}
             </div>
           {% elif flag.kind == 'choice' %}
             <div class="field">
@@ -316,6 +319,37 @@ async function sendFile(file) {
   preselectForecastColumns(data.columns, data.dtypes);
   flash('Loaded ' + data.filename + '. Pick a target below.', 'ok');
   refreshCommand();
+  loadTargetSuggestion();
+}
+
+async function loadTargetSuggestion() {
+  const box = $('targetSuggestion');
+  box.style.display = 'none';
+  if (!state.uploadId) return;
+  try {
+    const res = await fetch('/api/suggest-target', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upload_id: state.uploadId }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.column) return;
+    box.style.display = 'block';
+    box.innerHTML =
+      '<div class="msg ok" style="display:block">' +
+      '<strong>Suggested target: ' + esc(data.column) + '</strong> ' +
+      '<button type="button" id="useSuggestedTarget" style="margin-left:8px">Use this</button>' +
+      '<div class="hint" style="margin:4px 0 0">' + esc(data.reason) + ' (' +
+      (data.source === 'llm' ? 'LLM suggestion' : 'rule-based suggestion, no LLM configured') +
+      ')</div></div>';
+    document.getElementById('useSuggestedTarget').addEventListener('click', () => {
+      const sel = $('f_predict');
+      Array.from(sel.options).forEach((o) => { o.selected = (o.value === data.column); });
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  } catch (err) {
+    // best-effort suggestion; failing silently is fine, selection still works manually
+  }
 }
 
 function renderPreview(columns, rows, dtypes) {

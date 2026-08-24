@@ -298,3 +298,113 @@ def validate_columns(df: pd.DataFrame, roles: dict[str, list]) -> ValidationResu
     combined_issues = result.issues + llm_result.issues
     ok = not any(i.severity == "block" for i in combined_issues)
     return ValidationResult(ok=ok, issues=combined_issues, source="llm")
+
+
+# ---------------------------------------------------------------------------
+# Target suggestion -- which predictable column looks like the outcome
+# ---------------------------------------------------------------------------
+
+_OUTCOME_WORDS = (
+    "total", "amount", "price", "revenue", "cost", "sales", "value", "score",
+    "transfer", "count", "rate", "target", "label", "outcome", "result",
+    "spend", "volume", "churn", "conversion", "profit", "quantity", "qty",
+    "duration", "response",
+)
+
+
+def _rule_based_suggestion(df: pd.DataFrame, candidates: list[str]) -> str:
+    """Score candidates by dtype + name; no LLM available, so keep it simple."""
+    n = max(len(df), 1)
+    best_col, best_score = candidates[0], -1.0
+    for col in candidates:
+        s = df[col]
+        score = 0.0
+        if pd.api.types.is_float_dtype(s):
+            score += 2
+        elif pd.api.types.is_numeric_dtype(s):
+            score += 1
+        if any(w in col.lower() for w in _OUTCOME_WORDS):
+            score += 2
+        score += min(s.nunique() / n, 1.0)  # more variation is mildly favored
+        if score > best_score:
+            best_col, best_score = col, score
+    return best_col
+
+
+SUGGEST_PROMPT = """A user is about to train a model on this dataset and needs to pick ONE \
+column as the prediction target -- the outcome or measurement they actually care about.
+
+CANDIDATE COLUMNS (already filtered to exclude dates and raw identifiers):
+{profiles}
+
+Pick the single column from the candidate list above that most plausibly represents an \
+outcome of interest (a measurement, a result, a value someone would want to predict or \
+forecast) -- not a category/dimension column used to describe or group rows.
+
+Respond in JSON:
+{{"column": "<one of the candidate names, exactly>", "reason": "one sentence, plain language"}}
+
+If nothing looks like a clear outcome, still pick the most plausible one and say so honestly \
+in the reason rather than refusing to answer.
+"""
+
+
+def _llm_suggest(df: pd.DataFrame, candidates: list[str], provider) -> dict[str, Any]:
+    from acdso.advisors import LLMConfig
+
+    profile = _profile_columns(df, candidates)
+    lines = [
+        f"- {col}: dtype={p['dtype']}, unique={p['n_unique']}/{p['n_rows']}, sample={p['sample']}"
+        for col, p in profile.items()
+    ]
+    prompt = SUGGEST_PROMPT.format(profiles="\n".join(lines))
+
+    config = LLMConfig(max_tokens=200, temperature=0.0)
+    response = provider.complete(
+        system_prompt="You are a data analyst helping pick a sensible prediction target. "
+                      "Only ever choose from the given candidate list.",
+        user_prompt=prompt,
+        config=config,
+    )
+
+    text = response if isinstance(response, str) else str(response)
+    start, end = text.find("{"), text.rfind("}") + 1
+    if start < 0 or end <= start:
+        raise ValueError("No JSON in LLM response")
+    data = json.loads(text[start:end])
+
+    column = data.get("column")
+    if column not in candidates:
+        raise ValueError(f"LLM suggested {column!r}, not one of the candidates")
+    return {"column": column, "reason": data.get("reason", ""), "source": "llm"}
+
+
+def suggest_target_column(df: pd.DataFrame, candidates: list[str] | None = None) -> dict[str, Any]:
+    """Recommend one predictable column as the most plausible target.
+
+    Tries the LLM first (same provider chain as validate_columns) for a
+    judgment call informed by column names and content; falls back to a
+    dtype + name-keyword heuristic if no provider is configured or the
+    call fails. Always returns a column from ``candidates`` (never
+    suggests a date/period or identifier column) -- returns None only if
+    there are no predictable columns at all.
+    """
+    if candidates is None:
+        candidates = predictable_columns(df)
+    if not candidates:
+        return {"column": None, "reason": "No predictable columns found in this file.", "source": "rules"}
+
+    provider = _get_provider()
+    if provider is not None:
+        try:
+            return _llm_suggest(df, candidates, provider)
+        except Exception:
+            pass
+
+    column = _rule_based_suggestion(df, candidates)
+    return {
+        "column": column,
+        "reason": f"'{column}' looks like the most measurement-like column among the "
+                  f"predictable ones (numeric type and/or an outcome-sounding name).",
+        "source": "rules",
+    }
