@@ -36,7 +36,7 @@ from typing import Any
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
-from .column_validator import validate_columns
+from .column_validator import predictable_columns, validate_columns
 from .forecast import SeriesSpec, run_forecast
 
 # src/acdso/webui/app.py -> src/acdso/webui -> src/acdso -> src -> <repo root>
@@ -70,6 +70,13 @@ class Flag:
     default: Any = None
     choices: tuple[str, ...] = ()
     group: str = "General"
+    # True for flags run_acdso.py's main() can never reach: --autonomous
+    # defaults True and nothing ever sets it back to False, so the branches
+    # gated on --v3/--policy/--decision/--timeseries/--all/the no-file
+    # --benchmark path never execute. See docs/web_gui.md for the full
+    # trace. Disabled in the GUI rather than removed, so the command
+    # preview stays an honest 1:1 mirror of every flag run_acdso.py accepts.
+    dead: bool = False
 
 
 FLAGS: tuple[Flag, ...] = (
@@ -111,9 +118,9 @@ FLAGS: tuple[Flag, ...] = (
     # --- Pipeline phases -------------------------------------------------
     Flag(
         "autonomous", "--autonomous", "bool", "Autonomous pipeline",
-        "Full pipeline: EDA -> Risk -> AutoML -> Time Series. "
-        "On by default in the CLI whenever a file is given.",
-        default=True, group="Pipeline",
+        "Full pipeline: EDA -> Risk -> AutoML -> Time Series. Always on -- "
+        "run_acdso.py has no way to turn this off, so this box can't be unchecked.",
+        default=True, group="Pipeline", dead=True,
     ),
     Flag(
         "simple", "--simple", "bool", "Quick mode",
@@ -132,28 +139,33 @@ FLAGS: tuple[Flag, ...] = (
     ),
     Flag(
         "timeseries", "--timeseries", "bool", "Time series mode",
-        "Run the Auto Time Series path.",
-        default=False, group="Pipeline",
+        "No-op: Time Series already runs unconditionally inside the "
+        "autonomous pipeline regardless of this box.",
+        default=False, group="Pipeline", dead=True,
     ),
     Flag(
         "decision", "--decision", "bool", "Decision intelligence",
-        "Causal analysis, uplift modelling and action optimization.",
-        default=False, group="Pipeline",
+        "No-op: --autonomous always wins over this in run_acdso.py's "
+        "dispatch, so this branch never runs. See docs/web_gui.md.",
+        default=False, group="Pipeline", dead=True,
     ),
     Flag(
         "policy", "--policy", "bool", "Policy learning (RLlib)",
-        "Reinforcement-learning policy optimization demo.",
-        default=False, group="Pipeline",
+        "No-op: --autonomous always wins over this in run_acdso.py's "
+        "dispatch, so this branch never runs.",
+        default=False, group="Pipeline", dead=True,
     ),
     Flag(
         "v3", "--v3", "bool", "v3 innovations",
-        "Stress testing, successive halving, risk calibration.",
-        default=False, group="Pipeline",
+        "No-op: --autonomous always wins over this in run_acdso.py's "
+        "dispatch, so this branch never runs.",
+        default=False, group="Pipeline", dead=True,
     ),
     Flag(
         "all", "--all", "bool", "Run all built-in demos",
-        "Ignores the uploaded file and runs the bundled demo datasets.",
-        default=False, group="Pipeline",
+        "No-op: --autonomous always wins over this in run_acdso.py's "
+        "dispatch, so this branch never runs -- even with no file uploaded.",
+        default=False, group="Pipeline", dead=True,
     ),
     # --- Time series -----------------------------------------------------
     Flag(
@@ -169,13 +181,14 @@ FLAGS: tuple[Flag, ...] = (
     # --- Decision intelligence -------------------------------------------
     Flag(
         "treatment", "--treatment", "columns", "Treatment column",
-        "The intervention column, e.g. 'offered_incentive'.",
-        group="Decision",
+        "No-op: run_autonomous_demo() has no parameter for this, and "
+        "--decision's own branch never runs. See docs/web_gui.md.",
+        group="Decision", dead=True,
     ),
     Flag(
         "budget", "--budget", "float", "Budget constraint",
-        "Budget ceiling for action optimization.",
-        group="Decision",
+        "No-op, same reason as Treatment column above.",
+        group="Decision", dead=True,
     ),
     # --- Model selection / runtime ---------------------------------------
     Flag(
@@ -186,8 +199,9 @@ FLAGS: tuple[Flag, ...] = (
     ),
     Flag(
         "time_budget", "--time-budget", "int", "Time budget (seconds)",
-        "Per-system budget used during benchmarking. CLI default is 21600 (6 h).",
-        default=21600, group="Runtime",
+        "No-op: only read on the benchmark-without-a-file path, which "
+        "--autonomous always preempts. CLI default is 21600 (6 h) regardless.",
+        default=21600, group="Runtime", dead=True,
     ),
     Flag(
         "force", "--force", "bool", "Fresh run (--force)",
@@ -196,15 +210,13 @@ FLAGS: tuple[Flag, ...] = (
     ),
     Flag(
         "datasets", "--datasets", "text", "Benchmark datasets",
-        "Comma-separated built-in dataset names, or 'all'. Only used for "
-        "benchmark runs without an uploaded file. Leave blank to omit the "
-        "flag entirely (run_acdso.py falls back to its own default, 'tips').",
-        default=None, group="Runtime",
+        "No-op, same reason as Time budget above.",
+        default=None, group="Runtime", dead=True,
     ),
     Flag(
         "output", "--output", "text", "Benchmark output JSON",
-        "Optional path for benchmark results JSON.",
-        group="Runtime",
+        "No-op, same reason as Time budget above.",
+        group="Runtime", dead=True,
     ),
 )
 
@@ -610,6 +622,10 @@ def create_app() -> Flask:
 
         try:
             frame = _read_frame(dest)
+            # A larger sample than the preview needs, so uniqueness-based
+            # classification (predictable_columns) isn't fooled by a
+            # 50-row slice that happens to look all-unique or all-constant.
+            sample = _read_frame(dest, nrows=5000)
         except Exception as exc:  # noqa: BLE001 - surface any parse failure verbatim
             dest.unlink(missing_ok=True)
             return jsonify(error=f"Could not read the file: {exc}"), 400
@@ -632,6 +648,7 @@ def create_app() -> Flask:
             rows=record.rows,
             preview=record.preview,
             dtypes={str(c): str(t) for c, t in frame.dtypes.items()},
+            predictable_columns=predictable_columns(sample),
         )
 
     @app.post("/api/forecast")

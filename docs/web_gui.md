@@ -70,7 +70,7 @@ training run.
 | `--autonomous` / `-a` | flag | **always True** | Runs EDA → Risk → AutoML → Time Series. There is no way to turn this off — see "How a run is actually dispatched" above. |
 | `--simple` / `--quick` | flag | off | Skips the benchmark phase (sets `--skip-benchmark`) for a faster run. Time Series still runs regardless — `--simple` does not skip it, despite what the name suggests. |
 | `--benchmark` / `-b` | flag | off | With `--file`: runs the full pipeline *and* benchmarks ACDSO against FLAML/TPOT/H2O/AutoGluon/etc., producing one combined report. Slow — 10–30 minutes per target. Without `--file`: benchmarks on built-in datasets only (see "Dead in current dispatch" below). |
-| `--skip-benchmark` | flag | off | Skips the benchmark comparison inside the `--predict` path. Recommended for multi-target runs. |
+| `--skip-benchmark` | flag | off | Skips the benchmark comparison, but **only in the multi-target `--predict` path** (comma-separated targets) — that's the only place `run_acdso.py` actually reads it. For a single-column `--predict`, the training call passes `run_benchmark=args.benchmark` directly and never checks this flag, so it's a no-op there (benchmarks already default to off via `--benchmark` being unset). |
 | `--force` / `--fresh` | flag | off | Deletes this dataset's existing models/reports/predictions before training, so nothing stale is reused. |
 | `--v3` | flag | off | **Dead in current dispatch** (see above) — the `--autonomous` branch always wins first, so this never executes. |
 | `--policy` | flag | off | **Dead in current dispatch**, same reason. |
@@ -117,10 +117,17 @@ them.
 ### Target
 
 - **Predict target(s)** → `--predict`. Multi-select; this is the field to
-  use for almost everything.
-- **Train-only target(s)** → `--target`. Leave empty when using Predict —
-  setting both to different columns triggers the mismatch behavior
-  described above.
+  use for almost everything. **Only lists columns that could plausibly be
+  predicted** — filtered server-side by `predictable_columns()` on upload,
+  which excludes date/period-like columns and raw identifiers (a column
+  that's fully unique and either ID-named or non-float — e.g. a sequential
+  integer key or a UUID string). A fully-unique *float* column is not
+  excluded, since that's normal for a continuous measurement and is
+  exactly the kind of column you'd want to predict. If columns are hidden,
+  a note under the field says how many.
+- **Train-only target(s)** → `--target`. Same filtered list as Predict.
+  Leave empty when using Predict — setting both to different columns
+  triggers the mismatch behavior described above.
 - **Multi-output model** → `--multi-output`.
 - **Task type** → `--task`.
 
@@ -131,11 +138,13 @@ them.
 
 ### Pipeline
 
-Maps directly to the Pipeline flags table above, including the ones marked
-dead there (`v3`, `policy`, `decision`, `timeseries` mode, `all`). They're
-still present in the GUI rather than removed, so the command preview stays
-an honest 1:1 mirror of what `run_acdso.py` accepts — but toggling them will
-not change what actually runs.
+Maps directly to the Pipeline flags table above. The dead ones (`autonomous`
+locked on, `v3`, `policy`, `decision`, `timeseries` mode, `all`, and in the
+Decision/Runtime groups: `treatment`, `budget`, `time_budget`, `datasets`,
+`output`) are shown **disabled and marked `NO-OP`**, rather than removed or
+left silently interactive — so the command preview stays an honest 1:1
+mirror of what `run_acdso.py` accepts, but there's no longer a control that
+looks actionable and isn't.
 
 ### Time series
 

@@ -80,6 +80,13 @@
   .msg.ok { display: block; background: rgba(79,209,139,.12); border: 1px solid var(--ok); color: #c9ffe2; }
   a { color: var(--accent); }
   code.inline { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .noop {
+    display: inline-block; background: rgba(255,107,107,.12); color: var(--err);
+    border: 1px solid var(--err); border-radius: 999px; padding: 0 7px;
+    font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    vertical-align: middle;
+  }
+  .check:has(input:disabled), .field:has(select:disabled, input:disabled) { opacity: .55; }
 </style>
 </head>
 <body>
@@ -164,26 +171,31 @@
           {% if flag.kind == 'bool' %}
             <div class="check">
               <input type="checkbox" id="f_{{ flag.name }}" name="{{ flag.name }}"
-                     data-kind="bool" {% if flag.default %}checked{% endif %}>
+                     data-kind="bool" {% if flag.default %}checked{% endif %} {% if flag.dead %}disabled{% endif %}>
               <label for="f_{{ flag.name }}">
                 {{ flag.label }} <code class="inline">{{ flag.cli }}</code>
+                {% if flag.dead %}<span class="noop">no-op</span>{% endif %}
                 <div class="hint">{{ flag.help }}</div>
               </label>
             </div>
           {% elif flag.kind == 'columns' %}
             <div class="field">
-              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code></label>
+              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code>
+                {% if flag.dead %}<span class="noop">no-op</span>{% endif %}</label>
               <div class="hint">{{ flag.help }}</div>
               <select id="f_{{ flag.name }}" name="{{ flag.name }}" data-kind="columns" data-columns="1"
-                      {% if flag.name in ('predict', 'target', 'exclude') %}multiple{% endif %}>
+                      {% if flag.name in ('predict', 'target', 'exclude') %}multiple{% endif %}
+                      {% if flag.dead %}disabled{% endif %}>
                 {% if flag.name not in ('predict', 'target', 'exclude') %}<option value="">(none)</option>{% endif %}
               </select>
+              {% if flag.name == 'predict' %}<div id="predictHiddenNote" class="hint" style="margin:4px 0 0"></div>{% endif %}
             </div>
           {% elif flag.kind == 'choice' %}
             <div class="field">
-              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code></label>
+              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code>
+                {% if flag.dead %}<span class="noop">no-op</span>{% endif %}</label>
               <div class="hint">{{ flag.help }}</div>
-              <select id="f_{{ flag.name }}" name="{{ flag.name }}" data-kind="choice">
+              <select id="f_{{ flag.name }}" name="{{ flag.name }}" data-kind="choice" {% if flag.dead %}disabled{% endif %}>
                 {% for choice in flag.choices %}
                 <option value="{{ choice }}" {% if choice == flag.default %}selected{% endif %}>{{ choice }}</option>
                 {% endfor %}
@@ -191,12 +203,14 @@
             </div>
           {% else %}
             <div class="field">
-              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code></label>
+              <label for="f_{{ flag.name }}">{{ flag.label }} <code class="inline">{{ flag.cli }}</code>
+                {% if flag.dead %}<span class="noop">no-op</span>{% endif %}</label>
               <div class="hint">{{ flag.help }}</div>
               <input id="f_{{ flag.name }}" name="{{ flag.name }}"
                      data-kind="{{ flag.kind }}"
                      type="{{ 'number' if flag.kind in ('int', 'float') else 'text' }}"
                      {% if flag.kind == 'float' %}step="any"{% endif %}
+                     {% if flag.dead %}disabled{% endif %}
                      value="{{ '' if flag.default is none else flag.default }}">
             </div>
           {% endif %}
@@ -298,6 +312,7 @@ async function sendFile(file) {
   renderPreview(data.columns, data.preview, data.dtypes);
   $('fileinfo').style.display = 'block';
   fillColumnSelects(data.columns);
+  restrictPredictTargetOptions(data.predictable_columns || data.columns, data.columns);
   preselectForecastColumns(data.columns, data.dtypes);
   flash('Loaded ' + data.filename + '. Pick a target below.', 'ok');
   refreshCommand();
@@ -319,6 +334,24 @@ function fillColumnSelects(columns) {
     sel.innerHTML = blank +
       columns.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
   });
+}
+
+/* Predict/Target only ever offer columns that could plausibly be
+   predicted -- not a date/period column, not a raw identifier -- rather
+   than listing every column and rejecting the bad ones after the fact. */
+function restrictPredictTargetOptions(predictable, allColumns) {
+  const blockedCount = allColumns.length - predictable.length;
+  ['f_predict', 'f_target'].forEach((id) => {
+    const sel = $(id);
+    if (!sel) return;
+    sel.innerHTML = predictable.map((c) => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('');
+  });
+  const note = document.getElementById('predictHiddenNote');
+  if (note) {
+    note.textContent = blockedCount > 0
+      ? blockedCount + ' column(s) hidden here (date/period or identifier-like -- not predictable).'
+      : '';
+  }
 }
 
 /* ── forecast ───────────────────────────────────────────────────────── */

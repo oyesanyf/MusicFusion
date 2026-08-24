@@ -74,11 +74,56 @@ def _profile_columns(df: pd.DataFrame, columns: list[str]) -> dict[str, dict[str
 def _is_datetime_like(s: pd.Series) -> bool:
     if pd.api.types.is_datetime64_any_dtype(s):
         return True
+    if pd.api.types.is_numeric_dtype(s):
+        # pd.to_datetime happily parses large floats/ints as Unix
+        # timestamps, which misclassifies ordinary numeric measurement
+        # columns (byte counts, prices) as date-like. A real date column
+        # read from CSV comes in as text ("2026-08"), not a raw number.
+        return False
     try:
         parsed = pd.to_datetime(s.dropna().head(20), errors="coerce")
         return len(parsed) > 0 and parsed.notna().mean() > 0.8
     except Exception:
         return False
+
+
+ID_LIKE_WORDS = ("_id", "id_", "uuid", "guid", "index", "rowid")
+
+
+def predictable_columns(df: pd.DataFrame) -> list[str]:
+    """Columns reasonable to offer as a Predict/Target choice at all.
+
+    Filters out what the column-role validator would flag anyway (a
+    date/period column, a raw identifier), so the dropdown only ever shows
+    columns that could plausibly be predicted -- rather than showing every
+    column and warning after the fact.
+
+    A column is excluded if it's:
+    - date/time-like (that's what --datetime-col is for, not a target)
+    - constant (nothing to learn to predict)
+    - a raw identifier: fully unique AND either ID-named, or non-float
+      (a fully-unique float column is normal for a continuous measurement
+      and is NOT excluded -- e.g. a byte-count column with no repeats is
+      still a perfectly good regression target)
+    """
+    n = len(df)
+    keep = []
+    for col in df.columns:
+        s = df[col]
+        if _is_datetime_like(s):
+            continue
+        nunique = s.nunique()
+        if n == 0 or nunique <= 1:
+            continue
+        fully_unique = nunique >= n
+        col_lower = col.lower()
+        is_id_named = any(w in col_lower for w in ID_LIKE_WORDS)
+        if is_id_named and nunique > 0.9 * n:
+            continue
+        if fully_unique and not pd.api.types.is_float_dtype(s):
+            continue
+        keep.append(col)
+    return keep
 
 
 def _rule_based_validate(df: pd.DataFrame, roles: dict[str, list]) -> ValidationResult:
