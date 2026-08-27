@@ -312,10 +312,10 @@ _OUTCOME_WORDS = (
 )
 
 
-def _rule_based_suggestion(df: pd.DataFrame, candidates: list[str]) -> str:
-    """Score candidates by dtype + name; no LLM available, so keep it simple."""
+def _rule_based_scores(df: pd.DataFrame, candidates: list[str]) -> dict[str, float]:
+    """Score candidates by dtype + name -- one independent 'vote' on target-ness."""
     n = max(len(df), 1)
-    best_col, best_score = candidates[0], -1.0
+    scores = {}
     for col in candidates:
         s = df[col]
         score = 0.0
@@ -326,42 +326,141 @@ def _rule_based_suggestion(df: pd.DataFrame, candidates: list[str]) -> str:
         if any(w in col.lower() for w in _OUTCOME_WORDS):
             score += 2
         score += min(s.nunique() / n, 1.0)  # more variation is mildly favored
-        if score > best_score:
-            best_col, best_score = col, score
-    return best_col
+        scores[col] = score
+    return scores
 
 
-SUGGEST_PROMPT = """A user is about to train a model on this dataset and needs to pick ONE \
-column as the prediction target -- the outcome or measurement they actually care about.
+def _learnability_scores(
+    df: pd.DataFrame, candidates: list[str], max_rows: int = 1500
+) -> dict[str, dict[str, Any] | None]:
+    """A second, independent 'vote': can each candidate actually be predicted
+    from the *other* candidate columns? Not feature importance -- just a fast
+    sanity check that a semantically-plausible target isn't pure noise given
+    what else is in the file. Uses the sklearn tools that fit this job
+    (a quick model + cross-validation), aimed at the target-selection
+    question rather than feature selection.
+    """
+    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+    from sklearn.model_selection import cross_val_score
 
-CANDIDATE COLUMNS (already filtered to exclude dates and raw identifiers):
+    scores: dict[str, dict[str, Any] | None] = {}
+    for target_col in candidates:
+        feature_cols = [c for c in candidates if c != target_col]
+        if not feature_cols:
+            scores[target_col] = None
+            continue
+        try:
+            work = df[[target_col] + feature_cols].dropna(subset=[target_col])
+            if len(work) > max_rows:
+                work = work.sample(max_rows, random_state=42)
+            if len(work) < 20:
+                scores[target_col] = None
+                continue
+
+            y = work[target_col]
+            X = pd.get_dummies(work[feature_cols], dummy_na=True)
+            if X.shape[1] == 0:
+                scores[target_col] = None
+                continue
+            X = X.apply(lambda c: c.fillna(c.median()) if pd.api.types.is_numeric_dtype(c) else c)
+            X = X.fillna(0)
+
+            # A high-cardinality int column (a count, e.g.) is continuous in
+            # spirit even though its dtype isn't float -- treating it as
+            # classification would score "predict this exact integer out of
+            # 1000+ classes" and produce a near-zero accuracy that looks
+            # like noise but is really just the wrong metric.
+            is_regression = pd.api.types.is_numeric_dtype(y) and y.nunique() > 20
+            if is_regression:
+                model = RandomForestRegressor(n_estimators=50, max_depth=6, random_state=42, n_jobs=-1)
+                cv_scores = cross_val_score(model, X, y, cv=3, scoring="r2")
+                scores[target_col] = {"metric": "R2", "score": float(cv_scores.mean())}
+            else:
+                model = RandomForestClassifier(n_estimators=50, max_depth=6, random_state=42, n_jobs=-1)
+                cv_scores = cross_val_score(model, X, y, cv=3, scoring="accuracy")
+                scores[target_col] = {"metric": "accuracy", "score": float(cv_scores.mean())}
+        except Exception:
+            scores[target_col] = None
+    return scores
+
+
+SUGGEST_PROMPT = """A user is about to train a model on this dataset and needs to pick a \
+column (or a few) as the prediction target -- the outcome or measurement they actually care \
+about. More than one column can be a reasonable target; rank the best candidates.
+
+Two independent, mechanical methods have already voted on these candidates. Neither \
+understands what the columns *mean* -- weigh their votes as evidence, not as the final answer, \
+and use your own judgment of the column names/samples to decide where they're right and where \
+they're misleading (e.g. a column that happens to be easy to predict from the others isn't \
+automatically a good target if it's clearly a dimension/category column, not an outcome).
+
+CANDIDATE COLUMNS AND VOTES:
 {profiles}
 
-Pick the single column from the candidate list above that most plausibly represents an \
-outcome of interest (a measurement, a result, a value someone would want to predict or \
-forecast) -- not a category/dimension column used to describe or group rows.
+- naming/dtype vote: a rank from a heuristic that favors numeric columns and outcome-sounding \
+names (total, amount, price, revenue, etc). Rank 1 = most target-like by this heuristic alone.
+- learnability vote: how well a quick model predicts this column from the OTHER candidate \
+columns (R2 for continuous columns, accuracy for categorical). Higher = more learnable from \
+the rest of the data. "n/a" means the probe couldn't run (too little data, etc) -- treat as no \
+vote either way, not a negative signal.
+
+Rank up to {top_n} columns by how plausibly each represents a genuine outcome of interest, \
+using both the votes above AND the column names/samples. Best first.
 
 Respond in JSON:
-{{"column": "<one of the candidate names, exactly>", "reason": "one sentence, plain language"}}
+{{"suggestions": [
+    {{"column": "<one of the candidate names, exactly>", "reason": "one sentence, referencing the votes where they influenced your ranking"}}
+]}}
 
-If nothing looks like a clear outcome, still pick the most plausible one and say so honestly \
-in the reason rather than refusing to answer.
+Only include columns that are genuinely plausible targets -- pad with less-likely candidates \
+only if you have fewer than {top_n} good ones, and say so honestly in the reason rather than \
+inventing a strong justification for a weak candidate.
 """
 
 
-def _llm_suggest(df: pd.DataFrame, candidates: list[str], provider) -> dict[str, Any]:
+def _format_votes(
+    candidates: list[str],
+    profile: dict[str, dict[str, Any]],
+    rule_scores: dict[str, float],
+    learn_scores: dict[str, dict[str, Any] | None],
+) -> str:
+    rule_rank = {
+        col: i + 1
+        for i, col in enumerate(sorted(candidates, key=lambda c: rule_scores.get(c, 0), reverse=True))
+    }
+    lines = []
+    for col in candidates:
+        p = profile.get(col, {})
+        learn = learn_scores.get(col)
+        learn_text = f"{learn['metric']}={learn['score']:.2f}" if learn else "n/a"
+        lines.append(
+            f"- {col}: dtype={p.get('dtype')}, unique={p.get('n_unique')}/{p.get('n_rows')}, "
+            f"sample={p.get('sample')} | naming/dtype vote: rank {rule_rank.get(col)} of "
+            f"{len(candidates)} | learnability vote: {learn_text}"
+        )
+    return "\n".join(lines)
+
+
+def _llm_suggest(
+    df: pd.DataFrame,
+    candidates: list[str],
+    provider,
+    top_n: int,
+    rule_scores: dict[str, float],
+    learn_scores: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
     from acdso.advisors import LLMConfig
 
     profile = _profile_columns(df, candidates)
-    lines = [
-        f"- {col}: dtype={p['dtype']}, unique={p['n_unique']}/{p['n_rows']}, sample={p['sample']}"
-        for col, p in profile.items()
-    ]
-    prompt = SUGGEST_PROMPT.format(profiles="\n".join(lines))
+    prompt = SUGGEST_PROMPT.format(
+        profiles=_format_votes(candidates, profile, rule_scores, learn_scores),
+        top_n=top_n,
+    )
 
-    config = LLMConfig(max_tokens=200, temperature=0.0)
+    config = LLMConfig(max_tokens=500, temperature=0.0)
     response = provider.complete(
-        system_prompt="You are a data analyst helping pick a sensible prediction target. "
+        system_prompt="You are a data analyst deciding a prediction target by weighing "
+                      "mechanical votes against your own judgment of what the columns mean. "
                       "Only ever choose from the given candidate list.",
         user_prompt=prompt,
         config=config,
@@ -373,45 +472,97 @@ def _llm_suggest(df: pd.DataFrame, candidates: list[str], provider) -> dict[str,
         raise ValueError("No JSON in LLM response")
     data = json.loads(text[start:end])
 
-    column = data.get("column")
-    if column not in candidates:
-        raise ValueError(f"LLM suggested {column!r}, not one of the candidates")
-    return {"column": column, "reason": data.get("reason", ""), "source": "llm"}
+    suggestions = []
+    seen = set()
+    for item in data.get("suggestions", []):
+        column = item.get("column")
+        if column not in candidates or column in seen:
+            continue
+        seen.add(column)
+        suggestions.append({
+            "column": column,
+            "reason": item.get("reason", ""),
+            "votes": {"rule_based": rule_scores.get(column), "learnability": learn_scores.get(column)},
+        })
+    if not suggestions:
+        raise ValueError("LLM returned no valid candidate columns")
+    return {"suggestions": suggestions[:top_n], "source": "llm"}
 
 
-def suggest_target_column(df: pd.DataFrame, candidates: list[str] | None = None) -> dict[str, Any]:
-    """Recommend one predictable column as the most plausible target.
+def _combined_vote_ranking(
+    candidates: list[str],
+    rule_scores: dict[str, float],
+    learn_scores: dict[str, dict[str, Any] | None],
+    top_n: int,
+) -> dict[str, Any]:
+    """No LLM available: combine the two mechanical votes deterministically."""
+    max_rule = max(rule_scores.values(), default=1.0) or 1.0
+    learn_values = [v["score"] for v in learn_scores.values() if v]
+    lo, hi = (min(learn_values), max(learn_values)) if learn_values else (0.0, 1.0)
+    spread = (hi - lo) or 1.0
 
-    Tries the LLM first (same provider chain as validate_columns) for a
-    judgment call informed by column names and content; falls back to a
-    dtype + name-keyword heuristic if no provider is configured or the
-    call fails. Always returns a column from ``candidates`` (never
-    suggests a date/period or identifier column) -- returns None only if
-    there are no predictable columns at all.
+    def combined(col: str) -> float:
+        rule_norm = rule_scores.get(col, 0) / max_rule
+        learn = learn_scores.get(col)
+        learn_norm = (learn["score"] - lo) / spread if learn else 0.5  # no data -> neutral
+        return 0.5 * rule_norm + 0.5 * learn_norm
+
+    ranked = sorted(candidates, key=combined, reverse=True)[:top_n]
+    suggestions = []
+    for col in ranked:
+        learn = learn_scores.get(col)
+        learn_text = f"{learn['metric']}={learn['score']:.2f}" if learn else "not testable"
+        suggestions.append({
+            "column": col,
+            "reason": f"Combined vote: naming/dtype heuristic and learnability ({learn_text}) "
+                      f"both weighed in -- '{col}' ranked highest of the two combined.",
+            "votes": {"rule_based": rule_scores.get(col), "learnability": learn},
+        })
+    return {"suggestions": suggestions, "source": "rules"}
+
+
+def suggest_target_columns(
+    df: pd.DataFrame, candidates: list[str] | None = None, top_n: int = 3
+) -> dict[str, Any]:
+    """Rank up to ``top_n`` predictable columns as plausible targets.
+
+    More than one column can be a reasonable target -- a user might train
+    on any of several outcome-shaped columns, or pick more than one for a
+    multi-target run (comma-separated --target/--predict). So this returns
+    a ranked list, not a single answer; the caller decides how many to use.
+
+    Two independent, mechanical "votes" are computed for every candidate
+    first: a naming/dtype heuristic rank, and a learnability score (can a
+    quick model predict this column from the *other* candidates -- not
+    feature importance, just a sanity check that a plausible-looking
+    target isn't pure noise). Those votes are then either handed to the
+    LLM as evidence for it to weigh against its own semantic judgment
+    (LLM configured), or combined deterministically (no LLM) -- either way
+    the final ranking is a synthesis of both votes, not just one signal.
+
+    Every returned column comes from ``candidates`` (never a date/period or
+    identifier column) -- returns an empty list only if there are no
+    predictable columns at all.
 
     Deliberately separate from run_acdso.py's own ``_llm_detect_target()``,
-    which does the same job for any CLI invocation that leaves --target
-    blank. This one exists because the GUI needed multi-provider support
-    and pre-filtered candidates for a suggestion shown before the user has
-    picked anything -- see docs/web_gui.md's "Target suggestion" section
-    for the full comparison before assuming this is duplicate/dead code.
+    which does the same job (single column, no voting) for any CLI
+    invocation that leaves --target blank. See docs/web_gui.md's "Target
+    suggestion" section for the full comparison before assuming this is
+    duplicate/dead code.
     """
     if candidates is None:
         candidates = predictable_columns(df)
     if not candidates:
-        return {"column": None, "reason": "No predictable columns found in this file.", "source": "rules"}
+        return {"suggestions": [], "source": "rules"}
+
+    rule_scores = _rule_based_scores(df, candidates)
+    learn_scores = _learnability_scores(df, candidates)
 
     provider = _get_provider()
     if provider is not None:
         try:
-            return _llm_suggest(df, candidates, provider)
+            return _llm_suggest(df, candidates, provider, top_n, rule_scores, learn_scores)
         except Exception:
             pass
 
-    column = _rule_based_suggestion(df, candidates)
-    return {
-        "column": column,
-        "reason": f"'{column}' looks like the most measurement-like column among the "
-                  f"predictable ones (numeric type and/or an outcome-sounding name).",
-        "source": "rules",
-    }
+    return _combined_vote_ranking(candidates, rule_scores, learn_scores, top_n)

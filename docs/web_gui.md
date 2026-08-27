@@ -28,17 +28,34 @@ Two ground rules that shape everything below:
 2. If `--predict` is set, it trains on `--target` (or on `--predict` itself
    if `--target` is empty), then makes predictions and writes
    `predictions_<file>_<target>_full_dataset.csv`. This is the main path.
-3. Otherwise, **`--autonomous` runs unconditionally** — it defaults to
-   `True` and nothing in the script ever sets it back to `False`. Because of
-   that, the flags described as "dead" in the tables below
-   (`--v3`, `--policy`, `--decision`, `--timeseries`, `--all`, and the
-   benchmark-only-without-a-file path that reads `--datasets`/`--output`)
-   can never run — the autonomous branch always wins first. This is a
-   pre-existing property of `run_acdso.py`, not something the GUI does; the
-   GUI simply surfaces it honestly instead of hiding it.
+3. Otherwise, the **first of these that's checked wins**, each one
+   *switching modes* rather than adding to the pipeline: `--v3` →
+   `--policy` → `--decision` → `--timeseries` → `--benchmark` → `--all`.
+   Checking one of these runs *only* that demo, not the full
+   EDA/AutoML/TimeSeries pipeline alongside it.
+4. If none of those are checked, **`--autonomous` is the fallback** — it
+   defaults to `True` and nothing ever sets it back to `False`, so this is
+   what runs whenever you haven't explicitly asked for one of the modes
+   above. This is the normal case for a plain `--file` + `--target` run
+   with no other boxes checked.
 
-If you always upload a file and pick a predict/target column (the normal
-GUI flow), you are always on path 2.
+Until 2026-08-24 this dispatch order was reversed — `--autonomous` was
+checked *before* the mode flags, so `--v3`/`--policy`/`--decision`/
+`--timeseries`/`--all`, and the no-file `--benchmark` path (which reads
+`--datasets`/`--time-budget`/`--output`), could never run for any input, no
+matter what was checked. Reordering the `elif` chain so the explicit,
+default-off mode flags are checked first (and only falling through to
+`--autonomous` if none of them are set) fixes this without changing
+behavior for anyone who wasn't using them — those branches were previously
+unreachable, so enabling them only adds new reachable behavior, it never
+removes anything that used to work. Verified: the main `--predict`/
+`--target`-only paths run identically to before; each of `--v3`, `--policy`,
+`--decision`, `--timeseries`, `--all`, and the no-file `--benchmark` path
+now genuinely executes its corresponding function.
+
+If you always upload a file and pick a predict/target column with no other
+mode box checked (the normal GUI flow), you are always on path 2 or the
+path-4 autonomous fallback — none of this affects you.
 
 ---
 
@@ -67,16 +84,16 @@ training run.
 
 | Flag | Type | Default | What it does |
 |---|---|---|---|
-| `--autonomous` / `-a` | flag | **always True** | Runs EDA → Risk → AutoML → Time Series. There is no way to turn this off — see "How a run is actually dispatched" above. |
+| `--autonomous` / `-a` | flag | **always True** | Runs EDA → Risk → AutoML → Time Series. There is no way to turn this off. It's the fallback when none of the mode flags below are checked — see "How a run is actually dispatched" above. |
 | `--simple` / `--quick` | flag | off | Skips the benchmark phase (sets `--skip-benchmark`) for a faster run. Time Series still runs regardless — `--simple` does not skip it, despite what the name suggests. |
-| `--benchmark` / `-b` | flag | off | With `--file`: runs the full pipeline *and* benchmarks ACDSO against FLAML/TPOT/H2O/AutoGluon/etc., producing one combined report. Slow — 10–30 minutes per target. Without `--file`: benchmarks on built-in datasets only (see "Dead in current dispatch" below). |
+| `--benchmark` / `-b` | flag | off | With `--file`: runs the full pipeline *and* benchmarks ACDSO against FLAML/TPOT/H2O/AutoGluon/etc., producing one combined report. Slow — 10–30 minutes per target. Without `--file`: switches modes to benchmark built-in datasets only, using `--datasets`/`--time-budget`/`--output` below. |
 | `--skip-benchmark` | flag | off | Skips the benchmark comparison, but **only in the multi-target `--predict` path** (comma-separated targets) — that's the only place `run_acdso.py` actually reads it. For a single-column `--predict`, the training call passes `run_benchmark=args.benchmark` directly and never checks this flag, so it's a no-op there (benchmarks already default to off via `--benchmark` being unset). |
 | `--force` / `--fresh` | flag | off | Deletes this dataset's existing models/reports/predictions before training, so nothing stale is reused. |
-| `--v3` | flag | off | **Dead in current dispatch** (see above) — the `--autonomous` branch always wins first, so this never executes. |
-| `--policy` | flag | off | **Dead in current dispatch**, same reason. |
-| `--decision` / `-d` | flag | off | **Dead in current dispatch**, same reason. Also: even if reached, `run_autonomous_demo()` (the function this path calls into) has no parameter for it at all — `--treatment`/`--budget` have nowhere to go. |
-| `--timeseries` / `-ts` | flag | off | **Dead as a standalone flag** — Time Series already runs unconditionally inside the autonomous pipeline. Toggling this does nothing either way. |
-| `--all` | flag | off | **Dead in current dispatch** — intended to run the bundled demo datasets, but the autonomous branch always wins first. |
+| `--v3` | flag | off | **Switches modes** (see dispatch order above): runs only the v3 stress-testing / successive-halving / risk-calibration demo on built-in data, instead of the full pipeline. |
+| `--policy` | flag | off | **Switches modes**: runs only the RLlib policy-learning demo on synthetic data, instead of the full pipeline. |
+| `--decision` / `-d` | flag | off | **Switches modes**: runs only causal analysis, uplift modelling and action optimization (on `--file` if given, else synthetic data), instead of the full pipeline. Reads `--treatment`/`--budget` below. |
+| `--timeseries` / `-ts` | flag | off | **Switches modes**: runs only the Time Series demo (on `--file` if given, else synthetic data), instead of the full pipeline. Time Series still runs as part of the *normal* autonomous pipeline with this box unchecked — only check it if you want the standalone demo and nothing else. |
+| `--all` | flag | off | **Switches modes**: ignores any uploaded file and runs all 25 bundled demo datasets instead. |
 
 ### Time series
 
@@ -85,21 +102,21 @@ training run.
 | `--datetime-col` | column name | none | The date/period column, used by the Time Series phase that always runs inside `--autonomous`/`--predict`. This one is real and matters. |
 | `--horizon` | int | `7` | How many periods ahead to forecast. Also real. |
 
-### Decision intelligence (currently non-functional from the CLI's top-level dispatch)
+### Decision intelligence
 
 | Flag | Type | Default | What it does |
 |---|---|---|---|
-| `--treatment` | column name | none | Would name the intervention column for causal/uplift analysis. **Not read by any reachable code path** — `run_autonomous_demo()` doesn't accept it, and `--decision`'s own branch is unreachable (see above). |
-| `--budget` | float | none | Would cap an optimization's spend. Same caveat as `--treatment`. |
+| `--treatment` | column name | none | The intervention column for causal/uplift analysis, e.g. `offered_incentive`. Only read when `--decision` is also set — passed to `run_decision_intelligence_demo()`. |
+| `--budget` | float | none | Budget ceiling for action optimization. Same condition as `--treatment`. |
 
 ### Model selection &amp; runtime
 
 | Flag | Type | Default | What it does |
 |---|---|---|---|
 | `--best-score` | flag | off | Selects the single highest-CV-score model, ignoring ACDSO's usual multi-objective trade-off (speed / memory / latency / risk / robustness). Can pick a slower or larger model if it scores higher. |
-| `--time-budget` | int (seconds) | `21600` (6h) | Per-system time budget for the built-in-datasets benchmark path. **Only reachable when running `--benchmark` with no `--file`** — which is itself unreachable per the dispatch note above, so this currently has no effect from a normal GUI run. |
-| `--datasets` | names or `all` | `tips` | Which built-in datasets to benchmark. Same reachability caveat as `--time-budget`. |
-| `--output` / `-o` | path | none | Where to write benchmark results JSON. Same reachability caveat. |
+| `--time-budget` | int (seconds) | `21600` (6h) | Per-system time budget for the built-in-datasets benchmark path. Only takes effect with `--benchmark` set and **no** `--file` — with a file, `--benchmark` runs the full pipeline instead (see above). |
+| `--datasets` | names or `all` | `tips` | Which built-in datasets to benchmark. Same condition as `--time-budget`. |
+| `--output` / `-o` | path | none | Where to write benchmark results JSON. Same condition as `--time-budget`. |
 
 ---
 
@@ -138,13 +155,14 @@ them.
 
 ### Pipeline
 
-Maps directly to the Pipeline flags table above. The dead ones (`autonomous`
-locked on, `v3`, `policy`, `decision`, `timeseries` mode, `all`, and in the
-Decision/Runtime groups: `treatment`, `budget`, `time_budget`, `datasets`,
-`output`) are shown **disabled and marked `NO-OP`**, rather than removed or
-left silently interactive — so the command preview stays an honest 1:1
-mirror of what `run_acdso.py` accepts, but there's no longer a control that
-looks actionable and isn't.
+Maps directly to the Pipeline flags table above. Only **Autonomous
+pipeline** is shown disabled, marked `NO-OP` — it's genuinely locked on
+(there's no `--no-autonomous`), and it's the fallback whenever nothing else
+is checked. Everything else in this group (`v3`, `policy`, `decision`,
+`timeseries` mode, `all`) is a real, interactive **mode switch**: checking
+one of them runs *only* that demo instead of the full pipeline, per the
+"How a run is actually dispatched" section above. Read each field's help
+text before checking it — these aren't additive toggles.
 
 ### Time series
 
@@ -154,15 +172,16 @@ looks actionable and isn't.
 ### Decision
 
 - **Treatment column** → `--treatment`, **Budget constraint** → `--budget`.
-  Both currently non-functional from this GUI's run path — see the CLI
-  table above.
+  Both real, but only take effect when **Decision intelligence** in the
+  Pipeline group above is also checked.
 
 ### Runtime
 
 - **Select by best CV score** → `--best-score`.
 - **Time budget (seconds)**, **Benchmark datasets**, **Benchmark output
-  JSON** → `--time-budget` / `--datasets` / `--output`. Currently
-  non-functional from a file-based run — see the CLI table above.
+  JSON** → `--time-budget` / `--datasets` / `--output`. Real, but only take
+  effect with **Run benchmarks** checked and no file uploaded — with a
+  file, `--benchmark` runs the full pipeline instead and these are ignored.
   `--datasets` intentionally has **no default value** in the GUI (it used to
   default to `"tips"`, which looked like it was reading something from your
   uploaded data; it wasn't).

@@ -11590,21 +11590,16 @@ Supported file formats:
     # If we ran --predict (which now implies training), don't run any other demos
     if args.predict:
         return
-    
-    if args.autonomous and not args.predict:
-        # AUTONOMOUS MODE: Run EVERYTHING with optional custom file
-        # Always run benchmarks in autonomous mode
-        run_autonomous_demo(
-            custom_file=args.file,
-            target=args.target,
-            datetime_col=args.datetime_col,
-            horizon=args.horizon,
-            task=args.task,
-            exclude=args.exclude.split(",") if args.exclude else None,
-            run_benchmark=True,  # Always run benchmarks in autonomous mode
-            selection_mode="best_score" if getattr(args, 'best_score', False) else "knee_point",
-        )
-    elif args.v3:
+
+    # Explicit single-purpose mode flags take priority over --autonomous.
+    # --autonomous defaults to True with no way to turn it off (there is no
+    # --no-autonomous), so it used to win this dispatch unconditionally --
+    # v3/policy/decision/timeseries/all/the no-file --benchmark path could
+    # never run for any input. Checking them first, before the
+    # --autonomous fallback, makes each one do what its own help text has
+    # always claimed, without changing the default (still autonomous)
+    # behavior for anyone who isn't explicitly requesting one of these.
+    if args.v3:
         # Run v3 innovations demo only
         demo_v3_innovations()
     elif args.policy:
@@ -11635,7 +11630,7 @@ Supported file formats:
             print("  Running FULL pipeline: EDA → Risk → AutoML → Time Series → Benchmarks")
             print("  Output: ONE combined report with all results")
             print("=" * 80 + "\n")
-            
+
             # Use _run_autonomous_custom_file which handles single file with all phases
             _run_autonomous_custom_file(
                 custom_file=args.file,
@@ -11658,6 +11653,22 @@ Supported file formats:
                 task=args.task,
                 exclude=args.exclude.split(",") if args.exclude else None,
             )
+    elif args.all:
+        # Explicitly requested: ignore any uploaded file, run bundled demos.
+        run_all_demos()
+    elif args.autonomous:
+        # AUTONOMOUS MODE [DEFAULT]: Run EVERYTHING with optional custom file
+        # Always run benchmarks in autonomous mode
+        run_autonomous_demo(
+            custom_file=args.file,
+            target=args.target,
+            datetime_col=args.datetime_col,
+            horizon=args.horizon,
+            task=args.task,
+            exclude=args.exclude.split(",") if args.exclude else None,
+            run_benchmark=True,  # Always run benchmarks in autonomous mode
+            selection_mode="best_score" if getattr(args, 'best_score', False) else "knee_point",
+        )
     elif args.file:
         # Run demo on user file (without benchmark)
         demo_user_file(

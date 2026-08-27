@@ -36,7 +36,7 @@ from typing import Any
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
-from .column_validator import predictable_columns, suggest_target_column, validate_columns
+from .column_validator import predictable_columns, suggest_target_columns, validate_columns
 from .forecast import SeriesSpec, run_forecast
 
 # src/acdso/webui/app.py -> src/acdso/webui -> src/acdso -> src -> <repo root>
@@ -119,7 +119,10 @@ FLAGS: tuple[Flag, ...] = (
     Flag(
         "autonomous", "--autonomous", "bool", "Autonomous pipeline",
         "Full pipeline: EDA -> Risk -> AutoML -> Time Series. Always on -- "
-        "run_acdso.py has no way to turn this off, so this box can't be unchecked.",
+        "run_acdso.py has no way to turn this off, so this box can't be "
+        "unchecked. It's the default/fallback mode: if none of the "
+        "mode-switching boxes below (v3/decision/policy/timeseries/all/"
+        "benchmark) are checked, this is what runs.",
         default=True, group="Pipeline", dead=True,
     ),
     Flag(
@@ -139,33 +142,39 @@ FLAGS: tuple[Flag, ...] = (
     ),
     Flag(
         "timeseries", "--timeseries", "bool", "Time series mode",
-        "No-op: Time Series already runs unconditionally inside the "
-        "autonomous pipeline regardless of this box.",
-        default=False, group="Pipeline", dead=True,
+        "SWITCHES modes rather than adding to the pipeline: runs ONLY the "
+        "Time Series demo instead of the full EDA/AutoML/TimeSeries "
+        "pipeline. Time Series already runs as part of the normal "
+        "autonomous pipeline with no box checked -- only check this if you "
+        "want the standalone Time Series demo and nothing else.",
+        default=False, group="Pipeline",
     ),
     Flag(
         "decision", "--decision", "bool", "Decision intelligence",
-        "No-op: --autonomous always wins over this in run_acdso.py's "
-        "dispatch, so this branch never runs. See docs/web_gui.md.",
-        default=False, group="Pipeline", dead=True,
+        "SWITCHES modes: runs ONLY causal analysis, uplift modelling and "
+        "action optimization on --file (or synthetic data if no file), "
+        "instead of the full pipeline. Set Treatment column / Budget "
+        "constraint below to use them.",
+        default=False, group="Pipeline",
     ),
     Flag(
         "policy", "--policy", "bool", "Policy learning (RLlib)",
-        "No-op: --autonomous always wins over this in run_acdso.py's "
-        "dispatch, so this branch never runs.",
-        default=False, group="Pipeline", dead=True,
+        "SWITCHES modes: runs ONLY the reinforcement-learning policy demo "
+        "on synthetic data, instead of the full pipeline.",
+        default=False, group="Pipeline",
     ),
     Flag(
         "v3", "--v3", "bool", "v3 innovations",
-        "No-op: --autonomous always wins over this in run_acdso.py's "
-        "dispatch, so this branch never runs.",
-        default=False, group="Pipeline", dead=True,
+        "SWITCHES modes: runs ONLY the stress-testing / successive-halving "
+        "/ risk-calibration demo on built-in data, instead of the full "
+        "pipeline.",
+        default=False, group="Pipeline",
     ),
     Flag(
         "all", "--all", "bool", "Run all built-in demos",
-        "No-op: --autonomous always wins over this in run_acdso.py's "
-        "dispatch, so this branch never runs -- even with no file uploaded.",
-        default=False, group="Pipeline", dead=True,
+        "SWITCHES modes: ignores any uploaded file and runs all 25 bundled "
+        "demo datasets instead.",
+        default=False, group="Pipeline",
     ),
     # --- Time series -----------------------------------------------------
     Flag(
@@ -181,14 +190,15 @@ FLAGS: tuple[Flag, ...] = (
     # --- Decision intelligence -------------------------------------------
     Flag(
         "treatment", "--treatment", "columns", "Treatment column",
-        "No-op: run_autonomous_demo() has no parameter for this, and "
-        "--decision's own branch never runs. See docs/web_gui.md.",
-        group="Decision", dead=True,
+        "The intervention column, e.g. 'offered_incentive'. Only used when "
+        "'Decision intelligence' above is also checked.",
+        group="Decision",
     ),
     Flag(
         "budget", "--budget", "float", "Budget constraint",
-        "No-op, same reason as Treatment column above.",
-        group="Decision", dead=True,
+        "Budget ceiling for action optimization. Only used when "
+        "'Decision intelligence' above is also checked.",
+        group="Decision",
     ),
     # --- Model selection / runtime ---------------------------------------
     Flag(
@@ -199,9 +209,10 @@ FLAGS: tuple[Flag, ...] = (
     ),
     Flag(
         "time_budget", "--time-budget", "int", "Time budget (seconds)",
-        "No-op: only read on the benchmark-without-a-file path, which "
-        "--autonomous always preempts. CLI default is 21600 (6 h) regardless.",
-        default=21600, group="Runtime", dead=True,
+        "Per-system budget for the benchmark comparison. Only takes effect "
+        "when 'Run benchmarks' is checked with no file uploaded (benchmarks "
+        "built-in datasets instead). CLI default is 21600 (6 h).",
+        default=21600, group="Runtime",
     ),
     Flag(
         "force", "--force", "bool", "Fresh run (--force)",
@@ -210,13 +221,15 @@ FLAGS: tuple[Flag, ...] = (
     ),
     Flag(
         "datasets", "--datasets", "text", "Benchmark datasets",
-        "No-op, same reason as Time budget above.",
-        default=None, group="Runtime", dead=True,
+        "Comma-separated built-in dataset names, or 'all'. Same condition "
+        "as Time budget above -- only used for a no-file benchmark run.",
+        default=None, group="Runtime",
     ),
     Flag(
         "output", "--output", "text", "Benchmark output JSON",
-        "No-op, same reason as Time budget above.",
-        group="Runtime", dead=True,
+        "Optional path for benchmark results JSON. Same condition as Time "
+        "budget above.",
+        group="Runtime",
     ),
 )
 
@@ -700,11 +713,13 @@ def create_app() -> Flask:
 
     @app.post("/api/suggest-target")
     def suggest_target_route():
-        """Recommend one predictable column as the most plausible target.
+        """Rank predictable columns as plausible targets (top 3 by default).
 
         Separate from validate-columns: that endpoint judges what's
         already selected, this one runs before anything is selected at
-        all, right after upload.
+        all, right after upload. Returns a ranked list, not a single
+        column -- more than one column can be a reasonable target, and a
+        multi-target run can use several at once.
         """
         payload = request.get_json(silent=True) or {}
         record = uploads.get(payload.get("upload_id") or "")
@@ -717,8 +732,8 @@ def create_app() -> Flask:
             return jsonify(error=f"Could not read the file: {exc}"), 400
 
         candidates = predictable_columns(sample)
-        suggestion = suggest_target_column(sample, candidates)
-        return jsonify(**suggestion, candidates=candidates)
+        result = suggest_target_columns(sample, candidates, top_n=3)
+        return jsonify(**result, candidates=candidates)
 
     def _column_roles_from_payload(payload: dict[str, Any]) -> dict[str, list[str]]:
         return {

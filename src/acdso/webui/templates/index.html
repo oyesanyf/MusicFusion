@@ -191,6 +191,8 @@
               {% if flag.name == 'predict' %}
               <div id="predictHiddenNote" class="hint" style="margin:4px 0 0"></div>
               <div id="targetSuggestion" style="display:none; margin-top:8px"></div>
+              {% elif flag.name == 'target' %}
+              <div id="trainTargetSuggestion" style="display:none; margin-top:8px"></div>
               {% endif %}
             </div>
           {% elif flag.kind == 'choice' %}
@@ -323,33 +325,60 @@ async function sendFile(file) {
 }
 
 async function loadTargetSuggestion() {
-  const box = $('targetSuggestion');
-  box.style.display = 'none';
+  const predictBox = $('targetSuggestion');
+  const trainBox = $('trainTargetSuggestion');
+  predictBox.style.display = 'none';
+  trainBox.style.display = 'none';
   if (!state.uploadId) return;
+  let data;
   try {
     const res = await fetch('/api/suggest-target', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ upload_id: state.uploadId }),
     });
-    const data = await res.json();
-    if (!res.ok || !data.column) return;
-    box.style.display = 'block';
-    box.innerHTML =
-      '<div class="msg ok" style="display:block">' +
-      '<strong>Suggested target: ' + esc(data.column) + '</strong> ' +
-      '<button type="button" id="useSuggestedTarget" style="margin-left:8px">Use this</button>' +
-      '<div class="hint" style="margin:4px 0 0">' + esc(data.reason) + ' (' +
-      (data.source === 'llm' ? 'LLM suggestion' : 'rule-based suggestion, no LLM configured') +
-      ')</div></div>';
-    document.getElementById('useSuggestedTarget').addEventListener('click', () => {
-      const sel = $('f_predict');
-      Array.from(sel.options).forEach((o) => { o.selected = (o.value === data.column); });
+    data = await res.json();
+    if (!res.ok || !data.suggestions || !data.suggestions.length) return;
+  } catch (err) {
+    return; // best-effort suggestion; failing silently is fine, selection still works manually
+  }
+  renderSuggestionBox(predictBox, data, 'f_predict');
+  renderSuggestionBox(trainBox, data, 'f_target');
+}
+
+/* Each suggestion gets its own "Use this", which ADDS that column to the
+   (multi-select) field rather than replacing the selection -- more than
+   one column can be a reasonable target, and a multi-target run can use
+   several at once, so clicking two suggestions should combine them. */
+function fmtVotes(votes) {
+  if (!votes) return '';
+  const parts = [];
+  if (votes.rule_based != null) parts.push('naming/dtype: ' + votes.rule_based.toFixed(2));
+  if (votes.learnability) parts.push(votes.learnability.metric + '=' + votes.learnability.score.toFixed(2));
+  else parts.push('learnability: n/a');
+  return parts.length ? ' · votes: ' + parts.join(', ') : '';
+}
+
+function renderSuggestionBox(box, data, targetFieldId) {
+  const sourceNote = data.source === 'llm'
+    ? 'LLM verdict, weighing the votes below against its own judgment'
+    : 'no LLM configured -- votes combined mechanically';
+  box.style.display = 'block';
+  box.innerHTML = data.suggestions.map((s, i) =>
+    '<div class="msg ok" style="display:block; margin-bottom:6px">' +
+    '<strong>Suggested target: ' + esc(s.column) + '</strong> ' +
+    '<button type="button" class="use-suggestion" data-col="' + esc(s.column) + '" style="margin-left:8px">Use this</button>' +
+    '<div class="hint" style="margin:4px 0 0">' + esc(s.reason) + esc(fmtVotes(s.votes)) +
+    (i === 0 ? ' (' + sourceNote + ')' : '') + '</div></div>'
+  ).join('');
+  box.querySelectorAll('.use-suggestion').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const sel = $(targetFieldId);
+      const col = btn.dataset.col;
+      Array.from(sel.options).forEach((o) => { if (o.value === col) o.selected = true; });
       sel.dispatchEvent(new Event('change', { bubbles: true }));
     });
-  } catch (err) {
-    // best-effort suggestion; failing silently is fine, selection still works manually
-  }
+  });
 }
 
 function renderPreview(columns, rows, dtypes) {
