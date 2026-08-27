@@ -217,6 +217,9 @@
                      {% if flag.kind == 'float' %}step="any"{% endif %}
                      {% if flag.dead %}disabled{% endif %}
                      value="{{ '' if flag.default is none else flag.default }}">
+              {% if flag.name == 'horizon' %}
+              <div id="horizonSuggestion" style="display:none; margin-top:8px"></div>
+              {% endif %}
             </div>
           {% endif %}
         {% endfor %}
@@ -631,8 +634,56 @@ ROLE_FIELDS.forEach((id) => {
   el.addEventListener('change', () => {
     clearTimeout(columnCheckTimer);
     columnCheckTimer = setTimeout(checkColumns, 500);
+    clearTimeout(horizonCheckTimer);
+    horizonCheckTimer = setTimeout(loadHorizonSuggestion, 500);
   });
 });
+
+/* ── horizon suggestion: needs a datetime column AND a target picked ─── */
+let horizonCheckTimer = null;
+
+async function loadHorizonSuggestion() {
+  const box = $('horizonSuggestion');
+  box.style.display = 'none';
+  const datetimeCol = collectColumnValues('f_datetime_col')[0];
+  const targetCol = collectColumnValues('f_predict')[0] || collectColumnValues('f_target')[0];
+  if (!state.uploadId || !datetimeCol || !targetCol) return;
+
+  let data;
+  try {
+    const res = await fetch('/api/suggest-horizon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ upload_id: state.uploadId, datetime_col: datetimeCol, target_col: targetCol }),
+    });
+    data = await res.json();
+    if (!res.ok || data.horizon == null) return;
+  } catch (err) {
+    return; // best-effort; manual entry still works
+  }
+
+  const sourceNote = data.source === 'llm'
+    ? 'LLM verdict, weighing detected seasonality against its own judgment'
+    : 'no LLM configured -- data vote used directly';
+  let voteText = '';
+  if (data.votes && data.votes.data) {
+    const dv = data.votes.data;
+    voteText = dv.seasonality_period
+      ? ' · seasonality period ' + dv.seasonality_period + ' (strength ' + dv.seasonality_strength.toFixed(2) + ')'
+      : ' · no strong seasonality detected';
+  }
+  box.style.display = 'block';
+  box.innerHTML =
+    '<div class="msg ok" style="display:block">' +
+    '<strong>Suggested horizon: ' + esc(String(data.horizon)) + '</strong> ' +
+    '<button type="button" id="useSuggestedHorizon" style="margin-left:8px">Use this</button>' +
+    '<div class="hint" style="margin:4px 0 0">' + esc(data.reason) + esc(voteText) +
+    ' (' + sourceNote + ')</div></div>';
+  document.getElementById('useSuggestedHorizon').addEventListener('click', () => {
+    $('f_horizon').value = data.horizon;
+    $('f_horizon').dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
 
 /* ── run / poll ─────────────────────────────────────────────────────── */
 $('runBtn').addEventListener('click', async () => {

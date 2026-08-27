@@ -36,7 +36,12 @@ from typing import Any
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from werkzeug.utils import secure_filename
 
-from .column_validator import predictable_columns, suggest_target_columns, validate_columns
+from .column_validator import (
+    predictable_columns,
+    suggest_horizon,
+    suggest_target_columns,
+    validate_columns,
+)
 from .forecast import SeriesSpec, run_forecast
 
 # src/acdso/webui/app.py -> src/acdso/webui -> src/acdso -> src -> <repo root>
@@ -734,6 +739,32 @@ def create_app() -> Flask:
         candidates = predictable_columns(sample)
         result = suggest_target_columns(sample, candidates, top_n=3)
         return jsonify(**result, candidates=candidates)
+
+    @app.post("/api/suggest-horizon")
+    def suggest_horizon_route():
+        """Recommend --horizon once a datetime column and a target are picked.
+
+        Needs both to mean anything: the horizon is periods-ahead in
+        whatever grain the datetime column aggregates to, forecasting
+        whatever the target column's values are.
+        """
+        payload = request.get_json(silent=True) or {}
+        record = uploads.get(payload.get("upload_id") or "")
+        if record is None:
+            return jsonify(error="Upload a data file first"), 400
+
+        datetime_col = payload.get("datetime_col")
+        target_col = payload.get("target_col")
+        if not datetime_col or not target_col:
+            return jsonify(error="Pick a datetime column and a target column first"), 400
+
+        try:
+            sample = _read_frame(record.path, nrows=None)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify(error=f"Could not read the file: {exc}"), 400
+
+        result = suggest_horizon(sample, datetime_col, target_col)
+        return jsonify(**result)
 
     def _column_roles_from_payload(payload: dict[str, Any]) -> dict[str, list[str]]:
         return {

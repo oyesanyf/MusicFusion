@@ -566,3 +566,163 @@ def suggest_target_columns(
             pass
 
     return _combined_vote_ranking(candidates, rule_scores, learn_scores, top_n)
+
+
+# ---------------------------------------------------------------------------
+# Horizon suggestion -- same two-vote-plus-LLM pattern as target suggestion
+# ---------------------------------------------------------------------------
+
+#: Sensible default when no strong seasonality is detected, by aggregation grain.
+_GRAIN_HORIZON_DEFAULTS = {"D": 7, "W": 4, "M": 3, "Q": 4, "Y": 1}
+
+
+def _data_vote_horizon(series: pd.Series, grain: str) -> dict[str, Any]:
+    """The 'data vote': one seasonal cycle if ACDSO's own autocorrelation
+    detector finds one with reasonable strength, else a grain-typical
+    default -- capped so the horizon never asks to forecast further than
+    roughly a third of the observed history.
+    """
+    from acdso.timeseries.risk import detect_seasonality
+
+    n = len(series)
+    cap = max(1, n // 3)
+    try:
+        period, strength = detect_seasonality(series)
+    except Exception:
+        period, strength = None, 0.0
+
+    if period and strength > 0.3:
+        horizon = period
+    else:
+        horizon = _GRAIN_HORIZON_DEFAULTS.get(grain, 4)
+    return {
+        "horizon": max(1, min(horizon, cap)),
+        "seasonality_period": period,
+        "seasonality_strength": round(float(strength), 3),
+        "series_length": n,
+        "cap": cap,
+    }
+
+
+HORIZON_PROMPT = """A user is forecasting the column '{target_col}', aggregated to {grain} \
+periods ({n} periods of history available after aggregation).
+
+DATA VOTE (from autocorrelation-based seasonality detection on the actual series):
+{data_vote_text}
+
+Recommend a practical forecast horizon (a number of future periods) for this column. Weigh \
+the data vote above against what a sensible planning horizon looks like for a column named \
+'{target_col}' at {grain} grain -- e.g. a short lookout for an operational daily metric, a few \
+quarters for something used in budgeting. The data vote is evidence, not the final answer; \
+use your judgment of what this column represents to adjust it if the name suggests a \
+different practical horizon.
+
+Respond in JSON: {{"horizon": <positive integer>, "reason": "one sentence, plain language"}}
+
+The horizon must not exceed {cap} periods (about a third of the available history) -- forecasts \
+further out than that are unreliable regardless of what seems practical.
+"""
+
+
+def _llm_suggest_horizon(
+    target_col: str, grain: str, data_vote: dict[str, Any], provider
+) -> dict[str, Any]:
+    from acdso.advisors import LLMConfig
+
+    if data_vote["seasonality_period"]:
+        data_vote_text = (
+            f"seasonality period {data_vote['seasonality_period']} detected "
+            f"(strength {data_vote['seasonality_strength']:.2f}); data-driven horizon: "
+            f"{data_vote['horizon']} periods"
+        )
+    else:
+        data_vote_text = (
+            f"no strong seasonality detected in {data_vote['series_length']} periods; "
+            f"data-driven horizon: {data_vote['horizon']} periods ({grain}-grain default)"
+        )
+
+    prompt = HORIZON_PROMPT.format(
+        target_col=target_col, grain=grain, n=data_vote["series_length"],
+        data_vote_text=data_vote_text, cap=data_vote["cap"],
+    )
+    config = LLMConfig(max_tokens=150, temperature=0.0)
+    response = provider.complete(
+        system_prompt="You are a forecasting analyst picking a practical horizon, weighing "
+                      "statistical evidence against your own judgment of the column's meaning.",
+        user_prompt=prompt,
+        config=config,
+    )
+
+    text = response if isinstance(response, str) else str(response)
+    start, end = text.find("{"), text.rfind("}") + 1
+    if start < 0 or end <= start:
+        raise ValueError("No JSON in LLM response")
+    data = json.loads(text[start:end])
+
+    horizon = int(data.get("horizon", 0))
+    if horizon <= 0:
+        raise ValueError(f"LLM returned a non-positive horizon: {horizon!r}")
+    horizon = max(1, min(horizon, data_vote["cap"]))
+
+    return {
+        "horizon": horizon,
+        "reason": data.get("reason", ""),
+        "source": "llm",
+        "grain": grain,
+        "votes": {"data": data_vote},
+    }
+
+
+def suggest_horizon(df: pd.DataFrame, datetime_col: str, target_col: str) -> dict[str, Any]:
+    """Recommend a forecast horizon for --horizon, combining a data vote
+    (ACDSO's own seasonality detector on the aggregated series) with the
+    LLM's judgment of what's a practical planning horizon for a column
+    with this name -- the same two-vote-plus-synthesis pattern used for
+    target suggestion, applied to a numeric parameter instead of a column
+    choice.
+
+    Reuses forecast.py's aggregation (same grain-detection the Forecast
+    card uses) so the horizon lines up with however the data would
+    actually be grouped for time-series work.
+    """
+    from .forecast import SeriesSpec, aggregate_series
+
+    try:
+        series, meta = aggregate_series(
+            df, SeriesSpec(date_col=datetime_col, value_col=target_col, agg="sum")
+        )
+    except Exception as exc:
+        return {"horizon": None, "reason": f"Could not aggregate the series: {exc}", "source": "rules"}
+
+    if len(series) < 4:
+        return {
+            "horizon": None,
+            "reason": f"Only {len(series)} period(s) after aggregation -- too few to suggest a horizon.",
+            "source": "rules",
+            "grain": meta.get("grain"),
+        }
+
+    grain = meta["grain"]
+    data_vote = _data_vote_horizon(series, grain)
+
+    provider = _get_provider()
+    if provider is not None:
+        try:
+            return _llm_suggest_horizon(target_col, grain, data_vote, provider)
+        except Exception:
+            pass
+
+    reason = (
+        f"Seasonality period {data_vote['seasonality_period']} detected "
+        f"(strength {data_vote['seasonality_strength']:.2f}) at {grain} grain."
+        if data_vote["seasonality_period"]
+        else f"No strong seasonality detected at {grain} grain; using a typical default for "
+             f"this grain."
+    )
+    return {
+        "horizon": data_vote["horizon"],
+        "reason": reason,
+        "source": "rules",
+        "grain": grain,
+        "votes": {"data": data_vote},
+    }
