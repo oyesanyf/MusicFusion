@@ -145,28 +145,31 @@ def dominates(a: CandidateResult, b: CandidateResult) -> bool:
     # Handle variable-length objectives (5 or 6)
     n_obj = min(len(obj_a), len(obj_b), len(OBJECTIVE_DIRECTIONS))
     
+    EPS = 1e-9
     better_or_equal = True
     strictly_better = False
-    
+
     for i in range(n_obj):
         maximize = OBJECTIVE_DIRECTIONS[i]
         va, vb = obj_a[i], obj_b[i]
+        diff = va - vb
+        
+        if abs(diff) <= EPS:
+            continue
         
         if maximize:
-            # Higher is better
-            if va < vb:
+            if diff > EPS:
+                strictly_better = True
+            else:
                 better_or_equal = False
                 break
-            if va > vb:
-                strictly_better = True
         else:
-            # Lower is better
-            if va > vb:
+            if diff < -EPS:
+                strictly_better = True
+            else:
                 better_or_equal = False
                 break
-            if va < vb:
-                strictly_better = True
-    
+
     return better_or_equal and strictly_better
 
 
@@ -234,51 +237,56 @@ def knee_point_selection(front: List[CandidateResult]) -> CandidateResult:
     mem = np.array([c.peak_mem_mb for c in front], dtype=float)
     lat = np.array([c.latency_ms_per_row for c in front], dtype=float)
     r = np.array([c.risk_penalty for c in front], dtype=float)
-    
-    # v3: Extract robustness drop (6th objective)
     rob = np.array([c.robustness_drop for c in front], dtype=float)
 
     def normalize(x: np.ndarray, higher_better: bool) -> np.ndarray:
-        """Normalize to [0, 1] where 1 is always better."""
         x_min, x_max = float(np.min(x)), float(np.max(x))
-        if math.isclose(x_min, x_max):
+        if math.isclose(x_min, x_max, abs_tol=1e-12):
             return np.ones_like(x)
         z = (x - x_min) / (x_max - x_min)
         return z if higher_better else (1.0 - z)
 
-    # Normalize all objectives (1 = better)
-    mb = normalize(m, higher_better=True)        # metric: higher is better
-    tb = normalize(t, higher_better=False)       # time: lower is better
-    memb = normalize(mem, higher_better=False)   # memory: lower is better
-    latb = normalize(lat, higher_better=False)   # latency: lower is better
-    rb = normalize(r, higher_better=False)       # risk: lower is better
-    robb = normalize(rob, higher_better=False)   # robustness: lower drop is better
+    mb = normalize(m, higher_better=True)
+    tb = normalize(t, higher_better=False)
+    memb = normalize(mem, higher_better=False)
+    latb = normalize(lat, higher_better=False)
+    rb = normalize(r, higher_better=False)
+    robb = normalize(rob, higher_better=False)
 
-    # v3: Aggregate into benefit vs cost/risk axes (including robustness)
-    # Weights: time=0.25, mem=0.15, latency=0.15, risk=0.20, robustness=0.25
     benefit = mb
     costrisk = 1.0 - (0.25 * tb + 0.15 * memb + 0.15 * latb + 0.20 * rb + 0.25 * robb)
 
     pts = np.vstack([benefit, costrisk]).T
 
-    # Find extreme points
-    a = pts[np.argmax(benefit)]  # Best benefit (highest metric)
-    b = pts[np.argmin(costrisk)]  # Lowest cost/risk
+    idx_a = int(np.argmax(benefit))
+    idx_b = int(np.argmin(costrisk))
 
-    # Line from a to b
+    # If one candidate is both best benefit and lowest cost/risk, it is strictly superior
+    if idx_a == idx_b:
+        return front[idx_a]
+
+    a = pts[idx_a]
+    b = pts[idx_b]
     ab = b - a
-    ab_norm = np.linalg.norm(ab) + 1e-12
+    ab_norm = float(np.linalg.norm(ab))
 
-    # Distance from each point to the line a-b
-    dists = []
-    for p in pts:
-        ap = p - a
-        # Perpendicular distance to line
-        dist = np.linalg.norm(ap - np.dot(ap, ab) / (ab_norm ** 2) * ab)
-        dists.append(dist)
+    if ab_norm < 1e-9:
+        return front[idx_a]
 
-    # Select the point with maximum distance (the knee)
-    return front[int(np.argmax(dists))]
+    # Utopia point is (1.0, 0.0) -> maximum benefit, zero cost/risk
+    utopia_dists = np.sqrt((1.0 - benefit) ** 2 + costrisk ** 2)
+
+    if len(front) == 2:
+        return front[int(np.argmin(utopia_dists))]
+
+    # Signed orthogonal distance towards utopia (1.0, 0.0)
+    # cross product: (b_x - a_x) * (costrisk - a_y) - (b_y - a_y) * (benefit - a_x)
+    signed_dists = ((b[0] - a[0]) * (costrisk - a[1]) - (b[1] - a[1]) * (benefit - a[0])) / ab_norm
+
+    if float(np.max(signed_dists)) > 1e-6:
+        return front[int(np.argmax(signed_dists))]
+    else:
+        return front[int(np.argmin(utopia_dists))]
 
 
 def filter_by_constraints(

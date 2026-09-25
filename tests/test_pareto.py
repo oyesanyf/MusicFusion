@@ -75,6 +75,14 @@ class TestDominance:
         assert not dominates(a, b)
         assert not dominates(b, a)
 
+    def test_dominance_epsilon_tolerance(self):
+        """Test that differences smaller than EPS (1e-9) are treated as equal."""
+        a = make_candidate("A", metric=0.90000000001, train_time=10, peak_mem=100, latency=1, risk=0.1)
+        b = make_candidate("B", metric=0.90000000000, train_time=10, peak_mem=100, latency=1, risk=0.1)
+        # diff is 1e-11 < 1e-9 EPS, so neither should dominate
+        assert not dominates(a, b)
+        assert not dominates(b, a)
+
 
 class TestParetoFront:
     """Tests for Pareto front construction."""
@@ -162,6 +170,32 @@ class TestKneePointSelection:
         selected = knee_point_selection([a, b])
         # Should return one of them
         assert selected.name in ["A", "B"]
+
+    def test_knee_point_single_dominant_both_benefit_and_costrisk(self):
+        """Test candidate with both highest benefit and lowest cost/risk is selected."""
+        a = make_candidate("BestAll", metric=0.95, train_time=5, peak_mem=50, latency=1, risk=0.01)
+        b = make_candidate("WorseAll", metric=0.70, train_time=50, peak_mem=200, latency=5, risk=0.2)
+        selected = knee_point_selection([a, b])
+        assert selected.name == "BestAll"
+
+    def test_knee_point_two_candidates_utopia_distance(self):
+        """Test that two candidates are chosen based on utopia distance."""
+        # HighMetric: benefit=1.0, costrisk=0.75 -> utopia dist = 0.75
+        # LowCost: benefit=0.0, costrisk=0.0 -> utopia dist = 1.0
+        # HighMetric has shorter distance to utopia point (1.0, 0.0)
+        a = make_candidate("HighMetric", metric=0.95, train_time=50, peak_mem=300, latency=5, risk=0.2)
+        b = make_candidate("LowCost", metric=0.80, train_time=5, peak_mem=50, latency=1, risk=0.01)
+        selected = knee_point_selection([a, b])
+        assert selected.name == "HighMetric"
+
+    def test_knee_point_collinear_fallback(self):
+        """Test fallback to utopia distance when candidates are collinear."""
+        a = make_candidate("A", metric=0.9, train_time=100, peak_mem=500, latency=10, risk=0.3)
+        b = make_candidate("B", metric=0.8, train_time=55, peak_mem=275, latency=5.5, risk=0.16)
+        c = make_candidate("C", metric=0.7, train_time=10, peak_mem=50, latency=1, risk=0.02)
+        selected = knee_point_selection([a, b, c])
+        assert selected is not None
+        assert selected.name in ["A", "B", "C"]
 
 
 class TestConstraintFiltering:
