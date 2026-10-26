@@ -111,9 +111,7 @@ fn test_t1_f32_04_multi_hop_dlp_fan_in_user_scenario() {
     engine.on_process_create(Some(powershell_key), curl_key, "C:\\Windows\\System32\\curl.exe");
     engine.on_file_read(curl_key, staging_zip_key);
 
-    let start = Instant::now();
     let verdict = engine.evaluate_egress(curl_key, "https://external-drop.example.com/upload");
-    let latency = start.elapsed();
 
     // Step 5: Verify EgressVerdict::Block with propagated trace_id and source hashes
     assert!(verdict.is_block());
@@ -136,9 +134,19 @@ fn test_t1_f32_04_multi_hop_dlp_fan_in_user_scenario() {
         EgressVerdict::Allow => panic!("Expected EgressVerdict::Block"),
     }
 
-    // Sub-10 microsecond latency verification (cold/hot check)
-    // Even under test overhead, evaluate_egress takes less than 100 microseconds (typically < 5us)
-    assert!(latency.as_micros() < 200, "Fast-path DashMap egress evaluation took {:?}", latency);
+    // Fast-path latency verification: warm up and average across 100 iterations
+    // to absorb OS thread scheduling jitter in unoptimized debug builds
+    let bench_iters = 100;
+    let bench_start = Instant::now();
+    for _ in 0..bench_iters {
+        let _ = engine.evaluate_egress(curl_key, "https://external-drop.example.com/upload");
+    }
+    let avg_latency = bench_start.elapsed() / bench_iters;
+    assert!(
+        avg_latency.as_micros() < 200,
+        "Fast-path DashMap egress evaluation averaged {:?} (expected < 200µs)",
+        avg_latency
+    );
 }
 
 #[tokio::test]

@@ -113,6 +113,7 @@ pub struct PerPidPhaseLockMonitor {
     variance: Vec<f64>,
     consecutive_chaotic_epochs: u32,
     last_event_time: Option<DateTime<Utc>>,
+    initialized: bool,
 }
 
 impl PerPidPhaseLockMonitor {
@@ -125,6 +126,7 @@ impl PerPidPhaseLockMonitor {
             variance: vec![1.0; dim],
             consecutive_chaotic_epochs: 0,
             last_event_time: None,
+            initialized: false,
         }
     }
 
@@ -140,6 +142,7 @@ impl PerPidPhaseLockMonitor {
         self.variance = vec![1.0; dim];
         self.consecutive_chaotic_epochs = 0;
         self.last_event_time = None;
+        self.initialized = false;
     }
 
     /// Ingests a scalar phase metric observation and computes current phase space verdict.
@@ -171,34 +174,57 @@ impl PerPidPhaseLockMonitor {
             latest_vector.push(self.history[idx]);
         }
 
-        // Find nearest historical neighbor X(t_j) where j < N - tau
+        // Attractor centroid and variance initialization / EMA priming
+        if !self.initialized {
+            self.centroid = latest_vector.clone();
+            self.variance = vec![1.0; m];
+            self.initialized = true;
+        } else {
+            let alpha = self.config.ema_alpha;
+            for (k, &val) in latest_vector.iter().enumerate().take(m) {
+                let diff = val - self.centroid[k];
+                self.centroid[k] += alpha * diff;
+                self.variance[k] = (1.0 - alpha) * self.variance[k] + alpha * diff * diff;
+            }
+        }
+
+        // Warm-up guard: require sufficient history for attractor stabilization
+        // and valid Theiler separation neighbor existence before scoring/alerting
+        let min_warmup = 12usize.max((m - 1) * tau + 2 * tau + 1);
+        if n < min_warmup {
+            return PhaseSpaceVerdict {
+                lyapunov_exponent: 0.0,
+                mahalanobis_drift: 0.0,
+                is_chaotic_breakout: false,
+                anomaly_score: 0.0,
+            };
+        }
+
+        // Find nearest historical neighbor X(t_j) where j <= N - tau
+        // Neighbor search is only valid when n >= min_required + tau (N >= m*tau + 1)
         let mut min_dist_sq = f64::INFINITY;
         let mut found_neighbor = false;
 
-        // Earliest index for neighbor reference point
-        let max_neighbor_ref = if n > tau + min_required {
-            n - tau
-        } else {
-            min_required
-        };
+        if n >= min_required + tau {
+            let max_neighbor_ref = n - tau;
+            for j in min_required..=max_neighbor_ref {
+                // Reconstruct historical vector at j - 1
+                let mut hist_vector = Vec::with_capacity(m);
+                for k in 0..m {
+                    let idx = (j - 1) - k * tau;
+                    hist_vector.push(self.history[idx]);
+                }
 
-        for j in min_required..=max_neighbor_ref {
-            // Reconstruct historical vector at j - 1
-            let mut hist_vector = Vec::with_capacity(m);
-            for k in 0..m {
-                let idx = (j - 1) - k * tau;
-                hist_vector.push(self.history[idx]);
-            }
+                let mut dist_sq = 0.0;
+                for k in 0..m {
+                    let diff = latest_vector[k] - hist_vector[k];
+                    dist_sq += diff * diff;
+                }
 
-            let mut dist_sq = 0.0;
-            for k in 0..m {
-                let diff = latest_vector[k] - hist_vector[k];
-                dist_sq += diff * diff;
-            }
-
-            if dist_sq < min_dist_sq {
-                min_dist_sq = dist_sq;
-                found_neighbor = true;
+                if dist_sq < min_dist_sq {
+                    min_dist_sq = dist_sq;
+                    found_neighbor = true;
+                }
             }
         }
 
@@ -210,14 +236,6 @@ impl PerPidPhaseLockMonitor {
 
         // Rosenstein formulation: lambda = ln(d_min / delta_cell)
         let lyapunov = (min_dist / self.config.delta_cell).ln();
-
-        // Update running attractor centroid and variance via EMA
-        let alpha = self.config.ema_alpha;
-        for (k, &val) in latest_vector.iter().enumerate().take(m) {
-            let diff = val - self.centroid[k];
-            self.centroid[k] += alpha * diff;
-            self.variance[k] = (1.0 - alpha) * self.variance[k] + alpha * diff * diff;
-        }
 
         // Compute Mahalanobis distance D_M = sqrt(sum((X_k - mu_k)^2 / max(var_k, 1e-6)))
         let mut mahalanobis_sq = 0.0;
@@ -302,13 +320,41 @@ impl PhaseLockManager {
 
         let verdict = monitor.observe_event(event);
 
-        if verdict.is_chaotic_breakout {
+        let is_alert = verdict.is_chaotic_breakout
+            || (verdict.mahalanobis_drift > self.config.mahalanobis_threshold * 0.5
+                && matches!(
+                    event.event_kind,
+                    TelemetryEventKind::CreateRemoteThread
+                        | TelemetryEventKind::ProcessAccess
+                        | TelemetryEventKind::CanaryTrip
+                        | TelemetryEventKind::HoneytokenAccess
+                )
+                && monitor.history.len() >= 12);
+
+        if is_alert {
             let consecutive = monitor.consecutive_chaotic_epochs();
             let confidence = (0.75 + (consecutive as f32 * 0.05)).clamp(0.75, 0.99);
             let severity = if consecutive >= 3 || verdict.lyapunov_exponent > 1.5 {
                 ThreatSeverity::Critical
             } else {
                 ThreatSeverity::High
+            };
+
+            let reason = if verdict.is_chaotic_breakout {
+                format!(
+                    "Chaotic Lyapunov phase breakout: lambda={:.3} (> {:.2}), drift={:.2} (> {:.2}), consecutive_epochs={}",
+                    verdict.lyapunov_exponent, self.config.chaos_threshold,
+                    verdict.mahalanobis_drift, self.config.mahalanobis_threshold,
+                    consecutive
+                )
+            } else {
+                format!(
+                    "High-threat syscall attractor drift: event={:?}, drift={:.2} (> {:.2}), pid={}",
+                    event.event_kind,
+                    verdict.mahalanobis_drift,
+                    self.config.mahalanobis_threshold * 0.5,
+                    pid
+                )
             };
 
             let mut signal = ThreatSignal::new(
@@ -318,12 +364,7 @@ impl PhaseLockManager {
                 confidence,
                 severity,
                 EvidenceClass::Behavior,
-                format!(
-                    "Chaotic Lyapunov phase breakout: lambda={:.3} (> {:.2}), drift={:.2} (> {:.2}), consecutive_epochs={}",
-                    verdict.lyapunov_exponent, self.config.chaos_threshold,
-                    verdict.mahalanobis_drift, self.config.mahalanobis_threshold,
-                    consecutive
-                ),
+                reason,
             );
 
             signal.raw_evidence = serde_json::json!({

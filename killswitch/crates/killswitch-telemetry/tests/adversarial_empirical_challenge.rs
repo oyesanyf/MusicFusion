@@ -70,7 +70,7 @@ fn test_empirical_phaselock_stable_periodic_signals_non_chaotic() {
     for i in 0..40 {
         let verdict = monitor.observe(42.0);
         assert!(!verdict.is_chaotic_breakout);
-        if i >= 7 {
+        if i >= 12 {
             assert!(
                 verdict.lyapunov_exponent < 0.0,
                 "Constant signal at i={} must have negative lyapunov, got {}",
@@ -102,13 +102,15 @@ fn test_empirical_reproduce_phaselock_warmup_false_positive() {
     // It compares X(8) with X(7), which are separated by only 1 step (violating Theiler window tau=2)
     // and in opposite phases, producing false lyapunov > 0.85 and drift > 2.5!
     println!(
-        "[EMPIRICAL BUG FOUND] Sample 8 on alternating 1.0/2.0: lyapunov={:.3}, drift={:.3}, is_chaotic={}",
+        "[EMPIRICAL REMEDIATION VERIFIED] Sample 8 on alternating 1.0/2.0: lyapunov={:.3}, drift={:.3}, is_chaotic={}",
         v8.lyapunov_exponent, v8.mahalanobis_drift, v8.is_chaotic_breakout
     );
     assert!(
-        v8.is_chaotic_breakout,
-        "Confirms empirical defect: sample 8 falsely declares chaotic breakout on benign alternating signal"
+        !v8.is_chaotic_breakout,
+        "Remediated: sample 8 must NOT declare chaotic breakout on benign alternating signal"
     );
+    assert_eq!(v8.lyapunov_exponent, 0.0);
+    assert_eq!(v8.mahalanobis_drift, 0.0);
 }
 
 #[test]
