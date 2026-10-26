@@ -15,6 +15,7 @@ pub mod orchestrator_bridge;
 pub mod routes;
 pub mod server;
 pub mod types;
+pub mod webui;
 
 // Re-exports
 pub use error::ServerError;

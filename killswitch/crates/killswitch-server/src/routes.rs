@@ -12,6 +12,9 @@ use crate::server::ServerState;
 
 pub fn build_router(state: Arc<ServerState>) -> Router {
     Router::new()
+        // 0. Interactive WebUI Dashboard
+        .route("/", get(crate::webui::get_webui_dashboard))
+        .route("/ui", get(crate::webui::get_webui_dashboard))
         // 1. Containment & Status
         .route("/status", get(handlers::get_status))
         .route("/history", get(handlers::get_history))

@@ -74,7 +74,9 @@ Zero external OS CLI utilities (`netsh`, `iptables`, `nft`, `taskkill`, `kill`, 
 | 30 | macOS Process Freeze & System Whitelist | `libc::kill(SIGSTOP/SIGCONT)`, macOS system whitelist (`launchd`, `WindowServer`, `loginwindow`, etc.) | M2 | ORIGINAL_REQUEST §Follow-up |
 | 31 | Native OS Service Lifecycle & Auto-Disarm | Win32 SCM FFI, systemd unit + sd_notify, launchd plist, zero CLI tools, unconditional shutdown disarm, CLI & HTTP service commands | M2, M5 | ORIGINAL_REQUEST §Follow-up |
 | 32 | OpenTelemetry & OpenLineage DLP Engine | `EndpointLineageEngine`: composite keys, sticky `TaintBaggage` merge, OpenLineage datasets/facets, W3C trace propagation, fast inline `evaluate_egress` DashMap block, LangGraph DLP trigger | M3, M4, M5 | ORIGINAL_REQUEST §Follow-up #2 |
-| 33 | Unified `start.exe` All-In-One Loader | Binary target `start` (`start.exe` on Windows, `start` on Linux/macOS), boots and wires 100% of subsystems into single unified runtime, supports `--verify`/`--check`, copied to `d:\harfile\killswitch\start.exe` | M5, M6 | ORIGINAL_REQUEST §Follow-up #4 |
+| 33 | Unified `killswitch.exe` / `start.exe` All-In-One Loader | Binary targets `killswitch` and `start`, unified executable `killswitch.exe` ("load it all" + CLI) and alias `start.exe`, boots and wires 100% of subsystems into single unified runtime, supports `--verify`/`--check`, copied to `d:\harfile\killswitch\killswitch.exe` and `d:\harfile\killswitch\start.exe` | M5, M6 | ORIGINAL_REQUEST §Follow-up #4 & #6 |
+| 34 | Automatic Port Fallback & Dynamic Allowlist | When port 3030 is in use, automatically fall back to ports 3031..=3050 (or ephemeral 0), log clear message, dynamically allowlist actual port in WFP/Netlink/PF quarantine, persist in active_port.txt for CLI discovery | M5, M6 | ORIGINAL_REQUEST §Follow-up #5 |
+
 
 ---
 

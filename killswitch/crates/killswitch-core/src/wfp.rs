@@ -304,11 +304,16 @@ unsafe impl Send for WfpDynamicSession {}
 unsafe impl Sync for WfpDynamicSession {}
 
 impl WfpDynamicSession {
-    /// Opens a dynamic WFP engine session (`FWPM_SESSION_FLAG_DYNAMIC`).
-    ///
-    /// The dynamic flag ensures that all filters and sublayers installed during this
-    /// session are automatically pruned by the Windows kernel if the process terminates or crashes.
+    /// Opens a WFP engine session.
+    /// Uses `flags = 0` so filters installed by one-shot CLI invocations (`killswitch.exe isolate`)
+    /// remain active in the Windows Base Filtering Engine (BFE) until `killswitch.exe restore`
+    /// or `disarm_windows_network_quarantine()` explicitly deletes them by filter ID.
     pub fn open() -> KillSwitchResult<Self> {
+        Self::open_with_flags(0)
+    }
+
+    /// Opens a WFP engine session with explicit session flags (`0` or `FWPM_SESSION_FLAG_DYNAMIC`).
+    pub fn open_with_flags(session_flags: u32) -> KillSwitchResult<Self> {
         #[cfg(windows)]
         {
             use windows::core::{PCSTR, PCWSTR};
@@ -384,7 +389,7 @@ impl WfpDynamicSession {
                     name: session_name.as_mut_ptr(),
                     description: session_desc.as_mut_ptr(),
                 },
-                flags: FWPM_SESSION_FLAG_DYNAMIC,
+                flags: session_flags,
                 txn_wait_timeout_in_msec: 5000,
                 process_id: std::process::id(),
                 sid: std::ptr::null_mut(),
@@ -408,8 +413,8 @@ impl WfpDynamicSession {
             }
 
             info!(
-                "🟢 [WFP] Opened dynamic WFP engine session (Handle: {:p}, Auto-cleanup enabled)",
-                engine_handle
+                "🟢 [WFP] Opened WFP engine session (Handle: {:p}, flags: 0x{:08X})",
+                engine_handle, session_flags
             );
 
             Ok(Self {
@@ -426,6 +431,7 @@ impl WfpDynamicSession {
 
         #[cfg(not(windows))]
         {
+            let _ = session_flags;
             info!("🟢 [WFP-STUB] Non-Windows platform: initialized stub dynamic session.");
             Ok(Self { _active: true })
         }
@@ -696,7 +702,48 @@ impl WfpDynamicSession {
                 filter_ids.push(id);
             }
 
-            // 2. PERMIT LOOPBACK IPv6 (::1)
+            // 1b. PERMIT ALL LOOPBACK VIA FWP_CONDITION_FLAG_IS_LOOPBACK
+            let mut cond_lb_flag_out_v4 = [FwpmFilterCondition0 {
+                field_key: FWPM_CONDITION_FLAGS,
+                match_type: FWP_MATCH_FLAGS_ALL_SET,
+                _pad: 0,
+                condition_value: FwpValue0 {
+                    type_: FWP_UINT32,
+                    _pad: 0,
+                    value: FWP_CONDITION_FLAG_IS_LOOPBACK as usize,
+                },
+            }];
+            if let Ok(id) = install_filter(
+                "Permit-LoopbackFlag-Out-v4",
+                FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                "ALE_AUTH_CONNECT_V4",
+                FWP_ACTION_PERMIT,
+                15,
+                &mut cond_lb_flag_out_v4,
+            ) {
+                filter_ids.push(id);
+            }
+
+            let mut cond_lb_flag_in_v4 = [FwpmFilterCondition0 {
+                field_key: FWPM_CONDITION_FLAGS,
+                match_type: FWP_MATCH_FLAGS_ALL_SET,
+                _pad: 0,
+                condition_value: FwpValue0 {
+                    type_: FWP_UINT32,
+                    _pad: 0,
+                    value: FWP_CONDITION_FLAG_IS_LOOPBACK as usize,
+                },
+            }];
+            if let Ok(id) = install_filter(
+                "Permit-LoopbackFlag-In-v4",
+                FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+                "ALE_AUTH_RECV_ACCEPT_V4",
+                FWP_ACTION_PERMIT,
+                15,
+                &mut cond_lb_flag_in_v4,
+            ) {
+                filter_ids.push(id);
+            }
             let loopback_v6_bytes = Ipv6Addr::LOCALHOST.octets();
             let mut cond_lb_out_v6 = [FwpmFilterCondition0 {
                 field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
@@ -927,6 +974,70 @@ impl WfpDynamicSession {
                 FWP_ACTION_BLOCK,
                 1,
                 &mut [],
+            ) {
+                filter_ids.push(id);
+            }
+
+            // 7. TRANSPORT LAYER LOOPBACK PERMIT + CATCH-ALL BLOCK (Blocks ICMP `ping 8.8.8.8` as well as raw sockets)
+            let mut cond_lb_trans_v4 = [FwpmFilterCondition0 {
+                field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
+                match_type: FWP_MATCH_EQUAL,
+                _pad: 0,
+                condition_value: FwpValue0 {
+                    type_: FWP_UINT32,
+                    _pad: 0,
+                    value: loopback_v4_u32 as usize,
+                },
+            }];
+            if let Ok(id) = install_filter(
+                "Permit-Loopback-Transport-Out-v4",
+                FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+                "OUTBOUND_TRANSPORT_V4",
+                FWP_ACTION_PERMIT,
+                15,
+                &mut cond_lb_trans_v4,
+            ) {
+                filter_ids.push(id);
+            }
+
+            let mut cond_lb_flag_trans_v4 = [FwpmFilterCondition0 {
+                field_key: FWPM_CONDITION_FLAGS,
+                match_type: FWP_MATCH_FLAGS_ALL_SET,
+                _pad: 0,
+                condition_value: FwpValue0 {
+                    type_: FWP_UINT32,
+                    _pad: 0,
+                    value: FWP_CONDITION_FLAG_IS_LOOPBACK as usize,
+                },
+            }];
+            if let Ok(id) = install_filter(
+                "Permit-LoopbackFlag-Transport-Out-v4",
+                FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+                "OUTBOUND_TRANSPORT_V4",
+                FWP_ACTION_PERMIT,
+                15,
+                &mut cond_lb_flag_trans_v4,
+            ) {
+                filter_ids.push(id);
+            }
+
+            let mut cond_icmp_trans_v4 = [FwpmFilterCondition0 {
+                field_key: FWPM_CONDITION_IP_PROTOCOL,
+                match_type: FWP_MATCH_EQUAL,
+                _pad: 0,
+                condition_value: FwpValue0 {
+                    type_: FWP_UINT8,
+                    _pad: 0,
+                    value: 1, // IPPROTO_ICMP (blocks `ping 8.8.8.8` at transport layer)
+                },
+            }];
+            if let Ok(id) = install_filter(
+                "Block-ICMP-Transport-Out-v4",
+                FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+                "OUTBOUND_TRANSPORT_V4",
+                FWP_ACTION_BLOCK,
+                1,
+                &mut cond_icmp_trans_v4,
             ) {
                 filter_ids.push(id);
             }
@@ -1578,13 +1689,88 @@ pub fn terminate_active_tcp_sockets_for_ips(ips: &[IpAddr]) -> usize {
 // -----------------------------------------------------------------------------
 static GLOBAL_WFP_SESSION: OnceLock<parking_lot::Mutex<Option<WfpDynamicSession>>> =
     OnceLock::new();
+static ACTIVE_WFP_FILTER_IDS: OnceLock<parking_lot::Mutex<Vec<u64>>> = OnceLock::new();
 
 fn get_global_wfp_session() -> &'static parking_lot::Mutex<Option<WfpDynamicSession>> {
     GLOBAL_WFP_SESSION.get_or_init(|| parking_lot::Mutex::new(WfpDynamicSession::open().ok()))
 }
 
+fn get_active_wfp_filter_ids() -> &'static parking_lot::Mutex<Vec<u64>> {
+    ACTIVE_WFP_FILTER_IDS.get_or_init(|| parking_lot::Mutex::new(Vec::new()))
+}
+
+fn wfp_filter_ledger_paths() -> [std::path::PathBuf; 2] {
+    [
+        std::env::temp_dir().join("killswitch_wfp_filters.json"),
+        std::path::PathBuf::from("killswitch_wfp_filters.json"),
+    ]
+}
+
+fn persist_wfp_filter_ids(ids: &[u64]) {
+    if ids.is_empty() {
+        return;
+    }
+    let mut all_ids = load_persisted_wfp_filter_ids();
+    for &id in ids {
+        if !all_ids.contains(&id) {
+            all_ids.push(id);
+        }
+    }
+    if let Ok(json) = serde_json::to_string(&all_ids) {
+        for path in wfp_filter_ledger_paths() {
+            let _ = std::fs::write(path, &json);
+        }
+    }
+    let mut mem = get_active_wfp_filter_ids().lock();
+    for &id in ids {
+        if !mem.contains(&id) {
+            mem.push(id);
+        }
+    }
+}
+
+fn load_persisted_wfp_filter_ids() -> Vec<u64> {
+    let mut all_ids = Vec::new();
+    {
+        let mem = get_active_wfp_filter_ids().lock();
+        for &id in mem.iter() {
+            if !all_ids.contains(&id) {
+                all_ids.push(id);
+            }
+        }
+    }
+    for path in wfp_filter_ledger_paths() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(parsed) = serde_json::from_str::<Vec<u64>>(&content) {
+                for id in parsed {
+                    if !all_ids.contains(&id) {
+                        all_ids.push(id);
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(ledger) = crate::state_ledger::StateLedger::open_or_init(None) {
+        for receipt in &ledger.snapshot().network_receipts {
+            for &id in &receipt.wfp_filter_ids {
+                if !all_ids.contains(&id) {
+                    all_ids.push(id);
+                }
+            }
+        }
+    }
+    all_ids
+}
+
+fn clear_persisted_wfp_filter_ids() {
+    get_active_wfp_filter_ids().lock().clear();
+    for path in wfp_filter_ledger_paths() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Engages Windows Native Hermetic Network Quarantine:
-/// 1. Installs dynamic WFP kernel filters (`fwpuclnt.dll`) with `FWPM_SESSION_FLAG_DYNAMIC`.
+/// 1. Installs WFP kernel filters (`fwpuclnt.dll`) and persists filter IDs across CLI invocations.
 /// 2. Applies Windows BFE Registry rules directly via `winreg`.
 /// 3. Resets active non-loopback TCP connections via `iphlpapi.dll`.
 /// 4. Generates and returns a cryptographically signed `IsolationReceipt`.
@@ -1605,6 +1791,7 @@ pub fn engage_windows_network_quarantine(
         }
         if let Some(ref session) = *guard {
             let ids = session.install_hermetic_quarantine_filters("KillSwitch")?;
+            persist_wfp_filter_ids(&ids);
             #[cfg(windows)]
             let s_id = format!("{:p}", session.engine_handle);
             #[cfg(not(windows))]
@@ -1650,8 +1837,9 @@ pub fn engage_windows_network_quarantine(
 }
 
 /// Disarms Windows Native Network Quarantine:
-/// 1. Purges dynamic WFP filters.
-/// 2. Cleans up all KillSwitch BFE registry firewall rules.
+/// 1. Deletes all persisted and in-memory WFP filter IDs via `FwpmFilterDeleteById0`.
+/// 2. Resets the WFP session handle.
+/// 3. Cleans up all KillSwitch BFE registry firewall rules.
 pub fn disarm_windows_network_quarantine(disarmed_by: &str, reason: &str) -> KillSwitchResult<()> {
     info!(
         disarmed_by = %disarmed_by,
@@ -1659,20 +1847,34 @@ pub fn disarm_windows_network_quarantine(disarmed_by: &str, reason: &str) -> Kil
         "🟢 [DISARM-WINDOWS] Disarming native Windows network quarantine"
     );
 
-    // 1. Purge dynamic WFP filters by deleting them or resetting session
+    let filter_ids_to_delete = load_persisted_wfp_filter_ids();
+
+    // 1. Delete all recorded WFP filter IDs and reset session
     {
         let mut guard = get_global_wfp_session().lock();
-        if let Some(session) = guard.take() {
-            drop(session); // Dropping session automatically triggers FwpmEngineClose0 & kernel purge
+        if guard.is_none() {
+            *guard = WfpDynamicSession::open().ok();
         }
-        // Re-open clean dynamic session for subsequent operations
+        if let Some(ref session) = *guard {
+            let _ = session.begin_transaction();
+            for filter_id in &filter_ids_to_delete {
+                let _ = session.delete_filter_by_id(*filter_id);
+            }
+            let _ = session.commit_transaction();
+        }
+        if let Some(session) = guard.take() {
+            drop(session);
+        }
         *guard = WfpDynamicSession::open().ok();
     }
+
+    clear_persisted_wfp_filter_ids();
 
     // 2. Remove BFE Registry rules
     let removed_count = remove_all_killswitch_bfe_registry_rules();
     info!(
-        "🟢 [DISARM-WINDOWS] Disarm complete. Cleared {} registry rules.",
+        "🟢 [DISARM-WINDOWS] Disarm complete. Deleted {} WFP filters and cleared {} registry rules.",
+        filter_ids_to_delete.len(),
         removed_count
     );
 

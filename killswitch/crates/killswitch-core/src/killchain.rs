@@ -220,11 +220,33 @@ impl KillChainHostManager {
             let mut sys = System::new_all();
             sys.refresh_processes();
 
+            let high_risk_markers = [
+                "wannacry",
+                "mimikatz",
+                "cobaltstrike",
+                "beacon.exe",
+                "c2_rat.exe",
+                "meterpreter",
+                "reverse_shell.elf",
+                "powershell -enc",
+                "test_malware",
+            ];
+
             for (pid_raw, proc) in sys.processes() {
                 let pid = pid_raw.as_u32();
                 let name = proc.name();
 
                 if self.process_freezer.is_immune(pid, name) || is_critical_system_pid(pid, name) {
+                    continue;
+                }
+
+                let name_lc = name.to_ascii_lowercase();
+                let cmd_lc = proc.cmd().join(" ").to_ascii_lowercase();
+                let is_suspicious = high_risk_markers
+                    .iter()
+                    .any(|m| name_lc.contains(m) || cmd_lc.contains(m));
+
+                if !is_suspicious {
                     continue;
                 }
 

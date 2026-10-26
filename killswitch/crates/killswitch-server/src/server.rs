@@ -103,24 +103,99 @@ impl KillSwitchServer {
         Self { state }
     }
 
-    /// Binds to configured IP and port (default 127.0.0.1:3030) and starts the Axum server.
+    /// Binds to configured IP and port (default 127.0.0.1:3030) with automatic port fallback
+    /// if the requested port is already in use, and starts the Axum HTTP & WebUI server.
     pub async fn run_with_shutdown(
         &self,
         shutdown_signal: impl Future<Output = ()> + Send + 'static,
     ) -> Result<(), ServerError> {
-        let addr: SocketAddr = format!("{}:{}", self.state.config.host, self.state.config.port)
-            .parse()
-            .map_err(|e| ServerError::Validation(format!("Invalid socket address: {}", e)))?;
+        let host = self.state.config.host.clone();
+        let requested_port = self.state.config.port;
 
-        let listener = TcpListener::bind(addr).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AddrInUse {
-                ServerError::PortInUse(self.state.config.port)
-            } else {
-                ServerError::Internal(format!("Failed to bind to {}: {}", addr, e))
+        let mut candidate_ports: Vec<u16> = vec![requested_port];
+        for p in (requested_port.saturating_add(1))..=(requested_port.saturating_add(30)) {
+            if !candidate_ports.contains(&p) {
+                candidate_ports.push(p);
             }
-        })?;
+        }
+        for p in 4040..=4050 {
+            if !candidate_ports.contains(&p) {
+                candidate_ports.push(p);
+            }
+        }
+        candidate_ports.push(0); // Final OS-assigned ephemeral fallback
 
-        info!("🛡️ [KILLSWITCH-SERVER] Local Axum HTTP API listening on http://{}", addr);
+        let mut bound_listener: Option<TcpListener> = None;
+        let mut actual_addr: Option<SocketAddr> = None;
+
+        for port in candidate_ports {
+            let addr: SocketAddr = format!("{}:{}", host, port)
+                .parse()
+                .map_err(|e| ServerError::Validation(format!("Invalid socket address: {}", e)))?;
+
+            // On Windows, another process bound to 0.0.0.0:<port> or [::]:<port> may still allow
+            // binding 127.0.0.1:<port> while intercepting traffic. Probe first when port != 0.
+            if port != 0 {
+                let probe_busy = tokio::time::timeout(
+                    std::time::Duration::from_millis(120),
+                    tokio::net::TcpStream::connect(addr),
+                )
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false);
+
+                if probe_busy {
+                    tracing::warn!(
+                        "⚠️ [KILLSWITCH-SERVER] Port {} is already occupied by an active listener; trying next port...",
+                        port
+                    );
+                    continue;
+                }
+            }
+
+            match TcpListener::bind(addr).await {
+                Ok(listener) => {
+                    let local = listener.local_addr().unwrap_or(addr);
+                    bound_listener = Some(listener);
+                    actual_addr = Some(local);
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                    tracing::warn!(
+                        "⚠️ [KILLSWITCH-SERVER] Port {} is in use (AddrInUse); trying next port...",
+                        port
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    return Err(ServerError::Internal(format!("Failed to bind to {}: {}", addr, e)));
+                }
+            }
+        }
+
+        let listener = bound_listener.ok_or(ServerError::PortInUse(requested_port))?;
+        let addr = actual_addr.unwrap();
+        let bound_port = addr.port();
+
+        if bound_port != requested_port {
+            println!(
+                "⚠️  [KILLSWITCH-SERVER] Port {} was in use; automatically bound to fallback port {}",
+                requested_port, bound_port
+            );
+        }
+
+        // Persist the active port so CLI subcommands (`killswitch.exe status/isolate/restore`) can auto-discover it
+        let _ = std::fs::write("active_port.txt", bound_port.to_string());
+        let _ = std::fs::write(
+            std::env::temp_dir().join("killswitch_active_port.txt"),
+            bound_port.to_string(),
+        );
+
+        println!("================================================================================");
+        println!("🌐  KILLSWITCH WEBUI DASHBOARD READY: http://{}", addr);
+        println!("🛡️  REST API Control Endpoint:        http://{}/status", addr);
+        println!("================================================================================");
+        info!("🛡️ [KILLSWITCH-SERVER] Local Axum HTTP API & WebUI listening on http://{}", addr);
 
         let app = build_router(Arc::clone(&self.state));
 
@@ -129,6 +204,8 @@ impl KillSwitchServer {
             .await
             .map_err(|e| ServerError::Internal(format!("Server error: {}", e)))?;
 
+        let _ = std::fs::remove_file("active_port.txt");
+        let _ = std::fs::remove_file(std::env::temp_dir().join("killswitch_active_port.txt"));
         info!("🛡️ [KILLSWITCH-SERVER] Server stopped cleanly.");
         Ok(())
     }

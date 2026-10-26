@@ -346,6 +346,28 @@ impl SubsystemVerifier {
             bail!("Server status indicates unexpected isolation");
         }
 
+        // Verify GET / Interactive WebUI Dashboard
+        let ui_req = Request::builder()
+            .uri("/")
+            .method("GET")
+            .body(Body::empty())?;
+        let ui_resp = build_router(Arc::new(ServerState::with_defaults(
+            Arc::new(HostContainmentManager::new_default(Some(temp_dir.path()))?),
+        )))
+        .oneshot(ui_req)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+        if ui_resp.status() != StatusCode::OK {
+            bail!("GET / WebUI failed with status {}", ui_resp.status());
+        }
+        let ui_bytes = axum::body::to_bytes(ui_resp.into_body(), usize::MAX)
+            .await
+            .map_err(|e| anyhow::anyhow!("WebUI body read failure: {}", e))?;
+        let ui_html = String::from_utf8_lossy(&ui_bytes);
+        if !ui_html.to_ascii_lowercase().contains("killswitch") {
+            bail!("WebUI HTML missing expected dashboard header");
+        }
+
         Ok(())
     }
 
