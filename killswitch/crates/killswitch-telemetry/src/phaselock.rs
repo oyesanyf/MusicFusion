@@ -190,7 +190,7 @@ impl PerPidPhaseLockMonitor {
 
         // Warm-up guard: require sufficient history for attractor stabilization
         // and valid Theiler separation neighbor existence before scoring/alerting
-        let min_warmup = 12usize.max((m - 1) * tau + 2 * tau + 1);
+        let min_warmup = 16usize.max((m - 1) * tau + 2 * tau + 1);
         if n < min_warmup {
             return PhaseSpaceVerdict {
                 lyapunov_exponent: 0.0,
@@ -329,7 +329,7 @@ impl PhaseLockManager {
                         | TelemetryEventKind::CanaryTrip
                         | TelemetryEventKind::HoneytokenAccess
                 )
-                && monitor.history.len() >= 12);
+                && monitor.history.len() >= 16);
 
         if is_alert {
             let consecutive = monitor.consecutive_chaotic_epochs();

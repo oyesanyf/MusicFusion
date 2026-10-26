@@ -70,7 +70,7 @@ fn test_empirical_phaselock_stable_periodic_signals_non_chaotic() {
     for i in 0..40 {
         let verdict = monitor.observe(42.0);
         assert!(!verdict.is_chaotic_breakout);
-        if i >= 12 {
+        if i >= 16 {
             assert!(
                 verdict.lyapunov_exponent < 0.0,
                 "Constant signal at i={} must have negative lyapunov, got {}",
