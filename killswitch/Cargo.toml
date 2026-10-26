@@ -17,6 +17,13 @@ repository = "https://github.com/killswitch/killswitch"
 killswitch-types = { path = "crates/killswitch-types" }
 killswitch-core = { path = "crates/killswitch-core" }
 killswitch-adjudication = { path = "crates/killswitch-adjudication" }
+killswitch-telemetry = { path = "crates/killswitch-telemetry" }
+
+# OpenTelemetry & OpenLineage Integration
+opentelemetry = { version = "0.27", features = ["trace"] }
+opentelemetry_sdk = { version = "0.27", features = ["trace", "rt-tokio"] }
+opentelemetry-stdout = { version = "0.27", features = ["trace"] }
+url = "2.5"
 
 # Async runtime & futures
 tokio = { version = "1.43", features = ["full"] }
