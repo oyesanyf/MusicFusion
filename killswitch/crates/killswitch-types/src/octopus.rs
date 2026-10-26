@@ -265,8 +265,9 @@ impl ArmMessage {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{}:{}:{}:{}:{:?}:{}:{}|prov=[{}]|floor={:?}",
+            "{}:{}:{}:{}:{}:{:?}:{}:{}|prov=[{}]|floor={:?}",
             self.sender_arm_id.to_ascii_lowercase(),
+            self.sender_role,
             self.sender_generation,
             self.target_arm_id.to_ascii_lowercase(),
             self.target_generation,
@@ -437,5 +438,36 @@ mod tests {
             let tier = role.trust_tier();
             assert!(tier.potential() > 0);
         }
+    }
+
+    #[test]
+    fn test_arm_message_sender_role_tamper_fails() {
+        let master_seed = [77u8; 32];
+        let epoch_mgr = ArmEpoch::new("arm-worker-1", ArmRole::AnomalyDetection, master_seed);
+        let key = epoch_mgr.current_key();
+
+        let mut msg = ArmMessage {
+            sender_arm_id: "arm-worker-1".to_string(),
+            sender_role: ArmRole::AnomalyDetection,
+            sender_generation: 1,
+            target_arm_id: "arm-egress-1".to_string(),
+            target_generation: 1,
+            kind: MessageKind::Finding,
+            correlation_id: "corr-102".to_string(),
+            payload: "Entropy report".to_string(),
+            provenance: Vec::new(),
+            taint_floor: TrustTier::Worker,
+            signature_hex: String::new(),
+        };
+
+        assert!(msg.sign(&key).is_ok());
+        assert!(msg.verify_signature(&key));
+
+        // Tamper with sender_role -> verification MUST fail under original key
+        msg.sender_role = ArmRole::KernelLevelSentinel;
+        assert!(
+            !msg.verify_signature(&key),
+            "Tampered sender_role MUST fail HMAC verification because it is bound into canonical_signing_content"
+        );
     }
 }

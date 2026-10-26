@@ -146,21 +146,19 @@ fn test_arm_message_sender_role_binding_challenge() {
         "Key derived with tampered role MUST fail HMAC verification"
     );
 
-    // CRITICAL OBSERVATION ON CANONICAL SIGNING CONTENT:
-    // Notice that `msg.canonical_signing_content()` does NOT include `sender_role`!
-    // Therefore, if a receiver checks `msg.verify_signature(&key_untrusted)` using the
-    // sender's pre-shared or stored key, `verify_signature` does NOT detect the altered sender_role!
+    // POST-FIX VERIFICATION:
+    // With self.sender_role bound into canonical_signing_content():
     let signing_content = msg.canonical_signing_content();
     assert!(
-        !signing_content.contains("AccountingLedgerWrite"),
-        "VULNERABILITY CONFIRMED: ArmMessage::canonical_signing_content() omits self.sender_role! Content is: {}",
+        signing_content.contains("AccountingLedgerWrite"),
+        "REMEDIATION CONFIRMED: ArmMessage::canonical_signing_content() binds self.sender_role! Content is: {}",
         signing_content
     );
-    // Because sender_role is missing from signing content, verify_signature with the original key succeeds:
+    // Because sender_role is bound into signing content, verify_signature with original key fails:
     let verified_under_stored_key = msg.verify_signature(&key_untrusted);
     assert!(
-        verified_under_stored_key,
-        "EMPIRICAL PROOF: verify_signature(&stored_key) returns TRUE even with altered sender_role because sender_role is absent from canonical_signing_content"
+        !verified_under_stored_key,
+        "Mutating sender_role MUST cause verify_signature to fail under stored key"
     );
 }
 
