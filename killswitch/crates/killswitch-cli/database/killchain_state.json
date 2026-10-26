@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "status": {
+    "isolated": false,
+    "containment_level": "disarmed",
+    "isolated_at": null,
+    "isolated_by": null,
+    "reason": "Automatic host disarm on service stop/shutdown signal",
+    "network_isolated": false,
+    "processes_frozen_count": 0,
+    "processes_tarpitted_count": 0,
+    "kernel_lockdown_active": false,
+    "allowlisted_ports": [
+      3030,
+      53,
+      67,
+      68,
+      546,
+      547
+    ],
+    "quarantined_interfaces": [],
+    "frozen_pids": [],
+    "tarpitted_pids": [],
+    "active_network_rules": [],
+    "quarantined_arms": {},
+    "last_action_timestamp": "2026-10-26T20:56:45.988990600Z",
+    "lockout_remaining_secs": 0,
+    "rollback_watchdog_max_secs": 1800,
+    "health_probe_interval_secs": 60,
+    "consecutive_healthy_probes_required": 3,
+    "consecutive_healthy_probes": 0,
+    "last_health_probe_timestamp": "2026-10-26T20:56:45.988990600Z",
+    "last_health_probe_passed": true,
+    "last_health_probe_summary": "Host disarmed unconditionally on service stop/shutdown signal",
+    "state_hash_blake3": "721f8d8abaa33b3e4e4a959ab9949afafac8cc4d42cebd455d46a4dd5549dc78"
+  },
+  "network_receipts": [],
+  "process_records": [],
+  "history": [
+    {
+      "timestamp": "2026-10-26T20:56:45.989015100+00:00",
+      "action": "DISARMED_UNCONDITIONAL",
+      "operator": "SYSTEM_SHUTDOWN",
+      "reason": "Automatic host disarm on service stop/shutdown signal",
+      "prev_event_hash": "475ba7d02d9104b1bef7bf04ee4add9b77eb12f67241da6c40aa660e61d8e1d3",
+      "event_hash": "d1056d342f9c8f8acf2a5fa8748b0d59dfd7ed75ed07b4a56022f70b26015248"
+    },
+    {
+      "timestamp": "2026-10-26T20:51:24.897791600+00:00",
+      "action": "DISARMED_UNCONDITIONAL",
+      "operator": "SYSTEM_SHUTDOWN",
+      "reason": "Automatic host disarm on service stop/shutdown signal",
+      "prev_event_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "event_hash": "475ba7d02d9104b1bef7bf04ee4add9b77eb12f67241da6c40aa660e61d8e1d3"
+    }
+  ],
+  "sequence_number": 2,
+  "prev_hash": "54bd8c407af83c6de9a72ccd76834bd214baf7f3ad5a58229576207cc7b0d8b1",
+  "current_hash": "abe2164c35eecbae6754ee77108ef29a83fe5054b10faa892fed32b9b7c4273f",
+  "committed_at": "2026-10-26T20:56:45.989053100Z"
+}

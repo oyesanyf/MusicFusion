@@ -76,13 +76,18 @@ Every feature from `PROJECT.md § Feature Inventory` (Features 1 through 28) is 
 | **F30** | macOS Process Freeze & System Whitelist | ORIGINAL_REQUEST §Follow-up | 5 | 5 | T3_PAIR_30 | S3 | `never_wrong_veto_suite` |
 | **F31** | Native OS Service Lifecycle & Auto-Disarm | ORIGINAL_REQUEST §Follow-up | 5 | 5 | T3_PAIR_31 | S6 | `zero_os_tool_audit`, `anti_lockout_suite` |
 | **F32** | OpenTelemetry & OpenLineage DLP Engine | ORIGINAL_REQUEST §Follow-up #2 | 5 | 5 | T3_PAIR_32 | S7 | `zero_os_tool_audit`, `anti_lockout_suite` |
+| **F33** | Unified `start.exe` All-In-One Loader | ORIGINAL_REQUEST §Follow-up #4 | 5 | 5 | T3_PAIR_33 | S8 | `zero_os_tool_audit`, `anti_lockout_suite` |
 
 ### Quantitative Summary of Test Inventory:
-- **Tier 1 (Feature Coverage)**: 32 features × 5 tests = **160 test cases**
-- **Tier 2 (Boundary & Corner)**: 32 features × 5 tests = **160 test cases**
-- **Tier 3 (Cross-Feature Combinations)**: **32 pairwise test cases**
-- **Tier 4 (Real-World Application Scenarios)**: **7 end-to-end multi-stage scenarios**
+- **Tier 1 (Feature Coverage)**: 33 features × 5 tests = **165 test cases**
+- **Tier 2 (Boundary & Corner)**: 33 features × 5 tests = **165 test cases**
+- **Tier 3 (Cross-Feature Combinations)**: **33 pairwise test cases**
+- **Tier 4 (Real-World Application Scenarios)**: **8 end-to-end multi-stage scenarios** (including Scenario 8: Unified `start.exe` All-In-One Boot & Verification)
 - **Specialized Acceptance Suites**:
+  - `zero_os_tool_audit`: **5 tests**
+  - `never_wrong_veto_suite`: **5 tests**
+  - `anti_lockout_suite`: **5 tests**
+- **Total Test Suite Volume**: **386 test cases** planned and tracked.
   - `zero_os_tool_audit`: **5 test cases**
   - `never_wrong_veto_suite`: **5 test cases**
   - `anti_lockout_suite`: **5 test cases**
