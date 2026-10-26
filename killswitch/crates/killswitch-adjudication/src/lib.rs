@@ -36,11 +36,13 @@ pub use inventory::{
     register_protected_binary_hash,
 };
 pub use rea::{
-    detect_binary_masquerade_spoof, get_canonical_protected_binary_names,
-    has_active_lotl_or_exploit_indicators, is_canonical_protected_binary_name,
+    detect_binary_masquerade_spoof, extract_printable_strings,
+    get_canonical_protected_binary_names, has_active_lotl_or_exploit_indicators,
+    inspect_binary_format_safe, is_canonical_protected_binary_name,
     is_rea_benign_system_or_dev_process, is_untrusted_writable_or_temp_path,
     scan_and_sanitize_counter_ai_strings, validate_rea_target_path, AutonomousReaEngine,
-    MAX_EXTRACTED_STRINGS,
+    BinaryFormatInfo, BinaryFormatKind, SectionInfo, MAX_EXTRACTED_STRINGS, MAX_PE_SECTIONS,
+    MAX_REA_FILE_BYTES, MAX_SINGLE_STRING_BYTES,
 };
 pub use voters::{
     AdjudicationContext, BehaviorVoter, DataLineageVoter, DlpClassification, DlpPolicy,
@@ -51,5 +53,6 @@ pub use voters::{
 pub use win_trust::{
     clear_authenticode_cache, get_cached_authenticode_status, invalidate_cache_entry,
     is_trusted_vendor, is_untrusted_writable_location, verify_binary_cryptographic_trust,
-    AUTHENTICODE_CACHE, AUTHENTICODE_CACHE_TTL, BINARY_TRUST_CACHE,
+    AuthenticodeChainStatus, AuthenticodeStatus, BinaryTrustVerdict, AUTHENTICODE_CACHE,
+    AUTHENTICODE_CACHE_TTL, BINARY_TRUST_CACHE,
 };

@@ -18,7 +18,9 @@ pub fn extract_printable_strings(bytes: &[u8], min_len: usize, max_count: usize)
 
     for &b in bytes {
         if (0x20..=0x7e).contains(&b) {
-            current.push(b as char);
+            if current.len() < super::MAX_SINGLE_STRING_BYTES {
+                current.push(b as char);
+            }
         } else {
             if current.len() >= min_len {
                 strings.push(current.clone());

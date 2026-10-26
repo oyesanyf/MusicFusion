@@ -294,14 +294,61 @@ pub fn detect_binary_masquerade_spoof(
         }
     }
 
-    // Check payload header integrity
-    if is_protected_name && (base_lower.ends_with(".exe") || base_lower.ends_with(".dll")) {
+    // Check payload header integrity & format validity
+    if is_protected_name && (base_lower.ends_with(".exe") || base_lower.ends_with(".dll") || !base_lower.contains('.')) {
         if let Some(buf) = bytes {
-            if !buf.is_empty() && !buf.starts_with(b"MZ") && !buf.starts_with(b"\x7fELF") {
-                return Some(format!(
-                    "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' has non-executable payload header (expected PE 'MZ' or ELF magic)",
-                    base_lower
-                ));
+            if !buf.is_empty() {
+                if !buf.starts_with(b"MZ") && !buf.starts_with(b"\x7fELF") {
+                    return Some(format!(
+                        "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' has non-executable payload header (expected PE 'MZ' or ELF magic)",
+                        base_lower
+                    ));
+                }
+                match crate::rea::binary_format::inspect_binary_format_safe(buf) {
+                    Ok(info) => {
+                        if info.section_count > crate::rea::MAX_PE_SECTIONS {
+                            return Some(format!(
+                                "REA_MASQUERADE_SPOOF_DETECTED: Binary '{}' declares excessive section count ({} > {})",
+                                base_lower, info.section_count, crate::rea::MAX_PE_SECTIONS
+                            ));
+                        }
+                    }
+                    Err(err) => {
+                        return Some(format!(
+                            "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' failed binary format validation: {}",
+                            base_lower, err
+                        ));
+                    }
+                }
+            }
+        } else {
+            // Path check on disk if bytes not directly supplied
+            let p = Path::new(raw);
+            if p.is_file() {
+                if let Ok(meta) = std::fs::metadata(p) {
+                    if meta.len() > crate::rea::MAX_REA_FILE_BYTES {
+                        return Some(format!(
+                            "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' exceeds maximum allowed size ({} > {})",
+                            base_lower, meta.len(), crate::rea::MAX_REA_FILE_BYTES
+                        ));
+                    }
+                    if let Ok(file_bytes) = std::fs::read(p) {
+                        if !file_bytes.is_empty() {
+                            if !file_bytes.starts_with(b"MZ") && !file_bytes.starts_with(b"\x7fELF") {
+                                return Some(format!(
+                                    "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' has non-executable payload header (expected PE 'MZ' or ELF magic)",
+                                    base_lower
+                                ));
+                            }
+                            if let Err(err) = crate::rea::binary_format::inspect_binary_format_safe(&file_bytes) {
+                                return Some(format!(
+                                    "REA_MASQUERADE_SPOOF_DETECTED: Protected binary '{}' failed binary format validation: {}",
+                                    base_lower, err
+                                ));
+                            }
+                        }
+                    }
+                }
             }
         }
     }

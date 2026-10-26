@@ -9,7 +9,7 @@
 //! - Fail-closed rejection of user-writable locations (`UntrustedWritableLocation`).
 
 use dashmap::DashMap;
-use killswitch_types::adjudication::{
+pub use killswitch_types::adjudication::{
     AuthenticodeChainStatus, AuthenticodeStatus, BinaryTrustVerdict,
 };
 use std::ops::Deref;
@@ -332,6 +332,11 @@ pub fn verify_windows_catalog_signature(path: &str) -> bool {
     }
 
     let normalized = normalize_path_string(path);
+    if let Ok(meta) = std::fs::metadata(&normalized) {
+        if meta.len() > crate::rea::MAX_REA_FILE_BYTES {
+            return false;
+        }
+    }
     let Ok(file) = File::open(&normalized) else {
         return false;
     };
@@ -489,8 +494,37 @@ pub fn verify_binary_cryptographic_trust(path: &Path) -> BinaryTrustVerdict {
 
     let is_writable_loc = is_untrusted_writable_location(&path_str);
 
-    // Compute BLAKE3 digest of file on disk
-    let file_bytes = std::fs::read(path).ok();
+    // Query filesystem metadata to enforce Layer 3 resource bounds (MAX_REA_FILE_BYTES = 256 MiB)
+    let metadata = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => {
+            return BinaryTrustVerdict::UntrustedIoError {
+                error: format!("Failed to read metadata for '{}': {}", path_str, e),
+            };
+        }
+    };
+
+    if metadata.len() > crate::rea::MAX_REA_FILE_BYTES {
+        let err_msg = format!(
+            "File '{}' exceeds maximum allowed size ({} bytes > {} bytes)",
+            path_str,
+            metadata.len(),
+            crate::rea::MAX_REA_FILE_BYTES
+        );
+        return BinaryTrustVerdict::UntrustedIoError {
+            error: err_msg,
+        };
+    }
+
+    // Compute BLAKE3 digest of bounded file on disk
+    let file_bytes = match std::fs::read(path) {
+        Ok(b) => Some(b),
+        Err(e) => {
+            return BinaryTrustVerdict::UntrustedIoError {
+                error: format!("Failed to read file '{}': {}", path_str, e),
+            };
+        }
+    };
     let b3_hex = file_bytes
         .as_ref()
         .map(|b| blake3::hash(b).to_hex().to_string().to_ascii_lowercase());

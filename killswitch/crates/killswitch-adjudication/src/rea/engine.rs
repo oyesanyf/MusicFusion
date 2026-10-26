@@ -92,12 +92,14 @@ impl AutonomousReaEngine {
     }
 
     /// Evaluates a candidate threat detector alert through the 4-layer REA defense.
-    pub fn evaluate_detector_candidate(
+    /// Evaluates candidate threat detector alerts with optional raw binary payload bytes.
+    pub fn evaluate_detector_candidate_with_payload(
         &self,
         detector_name: &str,
         target_proc_or_path: &str,
         candidate_reason: &str,
         raw_score: f64,
+        payload_bytes: Option<&[u8]>,
     ) -> ReaDetectorEvaluation {
         self.detector_alerts_evaluated.fetch_add(1, Ordering::Relaxed);
         {
@@ -142,11 +144,11 @@ impl AutonomousReaEngine {
             };
         }
 
-        // 2. Layer 1 Anti-Masquerade Spoof Detection
+        // 2. Layer 1 Anti-Masquerade Spoof & Binary Format Verification
         if let Some(spoof_reason) = crate::rea::path_security::detect_binary_masquerade_spoof(
             target_proc_or_path,
             Some(Path::new(target_proc_or_path)),
-            None,
+            payload_bytes,
         ) {
             self.masquerade_attempts_blocked.fetch_add(1, Ordering::Relaxed);
             self.malicious_confirmations.fetch_add(1, Ordering::Relaxed);
@@ -229,6 +231,23 @@ impl AutonomousReaEngine {
             rea_seal_blake3: seal,
             auto_yara_synthesized: false,
         }
+    }
+
+    /// Evaluates a candidate threat detector alert through the 4-layer REA defense.
+    pub fn evaluate_detector_candidate(
+        &self,
+        detector_name: &str,
+        target_proc_or_path: &str,
+        candidate_reason: &str,
+        raw_score: f64,
+    ) -> ReaDetectorEvaluation {
+        self.evaluate_detector_candidate_with_payload(
+            detector_name,
+            target_proc_or_path,
+            candidate_reason,
+            raw_score,
+            None,
+        )
     }
 
     /// Casts a structured consensus vote (`[REA-Voter]`) and records it in the engine's vote log.

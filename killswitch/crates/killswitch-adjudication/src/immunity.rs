@@ -58,7 +58,8 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
     }
 
     // 2. Ancestry Traversal using sysinfo
-    let sys = System::new_all();
+    let mut sys = System::new();
+    sys.refresh_processes();
 
     let mut current_pid = target_pid;
     let mut visited = HashSet::new();
@@ -108,7 +109,8 @@ pub fn inspect_process_lineage(target_pid: u32, proc_name: Option<&str>) -> Line
 /// Inspect process ancestry returning the full lineage list of `(PID, process_name)`.
 pub fn get_process_ancestry_chain(target_pid: u32) -> Vec<(u32, String)> {
     let mut chain = Vec::new();
-    let sys = System::new_all();
+    let mut sys = System::new();
+    sys.refresh_processes();
 
     let mut current_pid = target_pid;
     let mut visited = HashSet::new();
