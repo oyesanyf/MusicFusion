@@ -35,6 +35,7 @@ pub struct KillChainHostManager {
     authenticator: Arc<dyn OperatorAuthenticator>,
     ledger: Arc<RwLock<StateLedger>>,
     watchdog_abort_tx: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    engagement_lock: tokio::sync::Mutex<()>,
 }
 
 /// Fallback / simulated network isolator for non-Windows and non-Linux targets.
@@ -108,6 +109,7 @@ impl KillChainHostManager {
             authenticator,
             ledger,
             watchdog_abort_tx: Mutex::new(None),
+            engagement_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -158,6 +160,9 @@ impl KillChainHostManager {
         level: ContainmentLevel,
         caller_pid: Option<u32>,
     ) -> Result<KillChainStatus> {
+        // Hold exclusive engagement lock across entire isolation sequence
+        let _engagement_guard = self.engagement_lock.lock().await;
+
         // Stage 1: Validate calling process integrity
         self.authenticator.validate_caller(caller_pid)?;
 
@@ -329,7 +334,38 @@ impl KillChainHostManager {
 pub fn execute_host_disarm_unauthenticated() -> Result<KillChainStatus> {
     info!("🚨 [DISARM-UNCONDITIONAL] Executing unconditional unauthenticated host disarm");
 
-    // 1. Revert platform-native network quarantine
+    // 1. Open State Ledger and inspect snapshot for active isolation artifacts
+    let ledger_result = StateLedger::open_or_init(None);
+    let (pids_to_resume, _network_receipts, quarantined_arms, ledger_opt) = match ledger_result {
+        Ok(ledger) => {
+            let mut pids = std::collections::HashSet::new();
+            for &pid in &ledger.snapshot().status.frozen_pids {
+                pids.insert(pid);
+            }
+            for proc in &ledger.snapshot().process_records {
+                if proc.status == killswitch_types::ProcessFreezeStatus::Frozen {
+                    pids.insert(proc.pid);
+                }
+            }
+            let receipts = ledger.snapshot().network_receipts.clone();
+            let arms = ledger.snapshot().status.quarantined_arms.clone();
+            (pids, receipts, arms, Some(ledger))
+        }
+        Err(err) => {
+            warn!(
+                "⚠️ [DISARM-UNCONDITIONAL] Could not open state ledger: {}. Proceeding with global cleanup.",
+                err
+            );
+            (
+                std::collections::HashSet::new(),
+                Vec::new(),
+                std::collections::HashMap::new(),
+                None,
+            )
+        }
+    };
+
+    // 2. Revert platform-native network quarantine
     #[cfg(target_os = "windows")]
     {
         let _ = crate::wfp::disarm_windows_network_quarantine(
@@ -341,54 +377,130 @@ pub fn execute_host_disarm_unauthenticated() -> Result<KillChainStatus> {
     #[cfg(target_os = "linux")]
     {
         let isolator = crate::landlock::LinuxNetlinkIsolator::new();
-        let dummy_receipt = IsolationReceipt::new(
-            "shutdown-disarm".to_string(),
-            killswitch_types::status::NetworkIsolationEngine::LinuxNetlink,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            0,
-            "UNCONDITIONAL_SHUTDOWN".to_string(),
-            "Automatic host disarm on service stop/shutdown".to_string(),
-        );
-        let _ = isolator.restore_quarantine(&dummy_receipt);
+        if _network_receipts.is_empty() {
+            let dummy_receipt = IsolationReceipt::new(
+                "shutdown-disarm".to_string(),
+                killswitch_types::status::NetworkIsolationEngine::LinuxNetlink,
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                0,
+                "UNCONDITIONAL_SHUTDOWN".to_string(),
+                "Automatic host disarm on service stop/shutdown".to_string(),
+            );
+            let _ = isolator.restore_quarantine(&dummy_receipt);
+        } else {
+            for receipt in &_network_receipts {
+                let _ = isolator.restore_quarantine(receipt);
+            }
+        }
     }
 
     #[cfg(target_os = "macos")]
     {
         let isolator = crate::pf::MacOsPfIsolator::new();
-        let dummy_receipt = IsolationReceipt::new(
-            "shutdown-disarm".to_string(),
-            killswitch_types::status::NetworkIsolationEngine::DarwinPf,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            0,
-            "UNCONDITIONAL_SHUTDOWN".to_string(),
-            "Automatic host disarm on service stop/shutdown".to_string(),
-        );
-        let _ = isolator.restore_quarantine(&dummy_receipt);
+        if _network_receipts.is_empty() {
+            let dummy_receipt = IsolationReceipt::new(
+                "shutdown-disarm".to_string(),
+                killswitch_types::status::NetworkIsolationEngine::DarwinPf,
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                0,
+                "UNCONDITIONAL_SHUTDOWN".to_string(),
+                "Automatic host disarm on service stop/shutdown".to_string(),
+            );
+            let _ = isolator.restore_quarantine(&dummy_receipt);
+        } else {
+            for receipt in &_network_receipts {
+                let _ = isolator.restore_quarantine(receipt);
+            }
+        }
     }
 
-    // 2. Resume all frozen processes and release all tarpits
+    // 3. Resume all frozen processes and release all tarpits
+    // 3a. Release in-memory tarpits
     crate::tarpit::ActiveProcessTarpit::global().release_all();
 
-    // 3. Update state ledger if accessible
+    // 3b. Resume frozen OS processes discovered in state ledger
+    let freezer = crate::freeze::NativeProcessFreezer::new();
+    let mut pids_vec: Vec<u32> = pids_to_resume.into_iter().collect();
+    pids_vec.sort_unstable();
+
+    let mut resumed_count = 0;
+    for &pid in &pids_vec {
+        match freezer.resume_process(pid) {
+            Ok(state) => {
+                info!(
+                    "🟢 [DISARM-UNCONDITIONAL] Resumed frozen process PID {} ({})",
+                    pid, state.process_name
+                );
+                resumed_count += 1;
+            }
+            Err(err) => {
+                warn!(
+                    "⚠️ [DISARM-UNCONDITIONAL] Could not resume PID {}: {}",
+                    pid, err
+                );
+            }
+        }
+    }
+    if !pids_vec.is_empty() {
+        info!(
+            "🟢 [DISARM-UNCONDITIONAL] Process restoration completed: {}/{} frozen processes resumed.",
+            resumed_count,
+            pids_vec.len()
+        );
+    }
+
+    // 4. Update and Commit Clean Disarmed State to State Ledger
+    let now = Utc::now();
     let mut status = KillChainStatus {
-        last_action_timestamp: Some(Utc::now()),
-        ..KillChainStatus::default()
+        isolated: false,
+        containment_level: ContainmentLevel::Disarmed,
+        isolated_at: None,
+        isolated_by: None,
+        reason: Some("Automatic host disarm on service stop/shutdown signal".to_string()),
+        network_isolated: false,
+        processes_frozen_count: 0,
+        processes_tarpitted_count: 0,
+        kernel_lockdown_active: false,
+        allowlisted_ports: vec![DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547],
+        quarantined_interfaces: Vec::new(),
+        frozen_pids: Vec::new(),
+        tarpitted_pids: Vec::new(),
+        active_network_rules: Vec::new(),
+        quarantined_arms,
+        last_action_timestamp: Some(now),
+        lockout_remaining_secs: 0,
+        rollback_watchdog_max_secs: DEFAULT_ROLLBACK_WATCHDOG_MAX_SECS,
+        health_probe_interval_secs: DEFAULT_INTERMEDIATE_HEALTH_PROBE_INTERVAL_SECS,
+        consecutive_healthy_probes_required: DEFAULT_REQUIRED_CONSECUTIVE_HEALTHY_PROBES,
+        consecutive_healthy_probes: 0,
+        last_health_probe_timestamp: Some(now),
+        last_health_probe_passed: Some(true),
+        last_health_probe_summary: Some(
+            "Host disarmed unconditionally on service stop/shutdown signal".to_string(),
+        ),
+        state_hash_blake3: String::new(),
     };
     status.update_hash();
 
-    if let Ok(mut ledger) = StateLedger::open_or_init(None) {
-        let _ = ledger.record_state_transition(
+    // Ensure we commit using existing or newly opened ledger
+    let ledger = match ledger_opt {
+        Some(l) => Some(l),
+        None => StateLedger::open_or_init(None).ok(),
+    };
+
+    if let Some(mut l) = ledger {
+        let _ = l.record_state_transition(
             status.clone(),
-            None,
-            None,
+            Some(Vec::new()),
+            Some(Vec::new()),
             "DISARMED_UNCONDITIONAL",
             "SYSTEM_SHUTDOWN",
             "Automatic host disarm on service stop/shutdown signal",
@@ -408,6 +520,15 @@ impl KillChainHostManager {
         reason: &str,
         action: &str,
     ) -> Result<KillChainStatus> {
+        // Hold exclusive engagement lock across entire restoration sequence
+        let _engagement_guard = self.engagement_lock.lock().await;
+
+        let current_status = self.get_status();
+        if !current_status.isolated {
+            info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already disarmed; preserving state.");
+            return Ok(current_status);
+        }
+
         info!(
             "🟢 [KILLCHAIN] Disarming containment requested by '{}' ({})",
             operator, reason

@@ -34,6 +34,54 @@ use tracing::info;
 pub use crate::killchain::execute_host_disarm_unauthenticated;
 
 // -----------------------------------------------------------------------------
+// Daemon Lifecycle & Signal Management
+// -----------------------------------------------------------------------------
+
+/// Global atomic flag indicating that a daemon shutdown has been requested.
+static GLOBAL_DAEMON_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Signals all active service daemons across platforms to initiate shutdown and disarm.
+pub fn request_daemon_shutdown() {
+    GLOBAL_DAEMON_STOP_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+/// Checks whether a daemon stop has been requested.
+pub fn is_daemon_stop_requested() -> bool {
+    GLOBAL_DAEMON_STOP_REQUESTED.load(Ordering::SeqCst)
+}
+
+/// Resets the daemon stop state (useful for test isolation).
+pub fn reset_daemon_stop_flag() {
+    GLOBAL_DAEMON_STOP_REQUESTED.store(false, Ordering::SeqCst);
+}
+
+#[cfg(unix)]
+static POSIX_STOP_SIGNAL: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn posix_signal_handler(_sig: libc::c_int) {
+    POSIX_STOP_SIGNAL.store(true, Ordering::SeqCst);
+}
+
+#[cfg(unix)]
+fn install_posix_signal_handlers() {
+    unsafe {
+        libc::signal(libc::SIGTERM, posix_signal_handler as libc::sighandler_t);
+        libc::signal(libc::SIGINT, posix_signal_handler as libc::sighandler_t);
+    }
+}
+
+#[cfg(unix)]
+fn is_posix_stop_signaled() -> bool {
+    POSIX_STOP_SIGNAL.load(Ordering::SeqCst)
+}
+
+#[cfg(not(unix))]
+fn is_posix_stop_signaled() -> bool {
+    false
+}
+
+// -----------------------------------------------------------------------------
 // Native Service Manager Trait
 // -----------------------------------------------------------------------------
 
@@ -57,6 +105,11 @@ pub trait NativeServiceManager: Send + Sync {
     /// Runs the daemon execution loop. Blocks until shutdown signal is received.
     /// Unconditionally executes `execute_host_disarm_unauthenticated()` before returning.
     fn run_service_daemon(&self) -> Result<(), ServiceError>;
+
+    /// Requests that the service daemon loop gracefully terminate.
+    fn request_stop(&self) {
+        request_daemon_shutdown();
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -109,6 +162,7 @@ pub fn generate_systemd_unit(config: &ServiceConfig) -> String {
 #[derive(Debug, Clone)]
 pub struct LinuxServiceManager {
     pub root_dir: Option<PathBuf>,
+    pub stop_flag: Arc<AtomicBool>,
 }
 
 impl Default for LinuxServiceManager {
@@ -119,13 +173,26 @@ impl Default for LinuxServiceManager {
 
 impl LinuxServiceManager {
     pub fn new() -> Self {
-        Self { root_dir: None }
+        Self {
+            root_dir: None,
+            stop_flag: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     pub fn with_root_dir(root: impl Into<PathBuf>) -> Self {
         Self {
             root_dir: Some(root.into()),
+            stop_flag: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn with_stop_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.stop_flag = flag;
+        self
+    }
+
+    pub fn request_stop(&self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
     }
 
     fn unit_path(&self, service_name: &str) -> PathBuf {
@@ -244,50 +311,69 @@ impl NativeServiceManager for LinuxServiceManager {
     }
 
     fn run_service_daemon(&self) -> Result<(), ServiceError> {
-        info!("🚨 [LINUX-DAEMON] Starting Linux native service daemon");
+        info!("🚨 [LINUX-DAEMON] Starting Linux systemd native service daemon");
 
-        // 1. Notify systemd that service is ready via NOTIFY_SOCKET
+        // 1. Notify systemd ready
         notify_systemd("READY=1\nSTATUS=KillSwitch daemon operational");
 
-        // 2. Register shutdown signal listener
-        let running = Arc::new(AtomicBool::new(true));
-
-        // Cross-platform signal simulation or POSIX signal registration
-        #[cfg(unix)]
+        // 2. Immediate test-mode or early cancellation check
+        if self.stop_flag.load(Ordering::SeqCst)
+            || is_daemon_stop_requested()
+            || std::env::var("KILLSWITCH_SERVICE_TEST_ONCE").is_ok()
         {
-            let r_clone = running.clone();
-            let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .map_err(|e| ServiceError::DaemonError(format!("SIGTERM registration failed: {}", e)))?;
-            let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-                .map_err(|e| ServiceError::DaemonError(format!("SIGINT registration failed: {}", e)))?;
-
-            tokio::spawn(async move {
-                tokio::select! {
-                    _ = sigterm.recv() => {
-                        info!("🚨 [LINUX-DAEMON] Caught SIGTERM shutdown signal");
-                    }
-                    _ = sigint.recv() => {
-                        info!("🚨 [LINUX-DAEMON] Caught SIGINT shutdown signal");
-                    }
-                }
-                r_clone.store(false, Ordering::SeqCst);
-            });
+            info!("ℹ️ [LINUX-DAEMON] Test stop requested — performing single-cycle verification");
+            info!("🚨 [LINUX-DAEMON] Service stopping: executing unconditional host disarm");
+            let _ = execute_host_disarm_unauthenticated();
+            notify_systemd("STOPPING=1");
+            return Ok(());
         }
 
-        // 3. Daemon loop with unconditional auto-disarm on exit
-        // Daemon tick
-        if running.load(Ordering::SeqCst) {
+        // 3. Register POSIX signal handlers (and Tokio signals if inside runtime)
+        #[cfg(unix)]
+        {
+            install_posix_signal_handlers();
+
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async {
+                    if let (Ok(mut sigterm), Ok(mut sigint)) = (
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()),
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()),
+                    ) {
+                        tokio::select! {
+                            _ = sigterm.recv() => {
+                                info!("🚨 [LINUX-DAEMON] Caught SIGTERM shutdown signal via Tokio");
+                            }
+                            _ = sigint.recv() => {
+                                info!("🚨 [LINUX-DAEMON] Caught SIGINT shutdown signal via Tokio");
+                            }
+                        }
+                        POSIX_STOP_SIGNAL.store(true, Ordering::SeqCst);
+                    }
+                });
+            }
+        }
+
+        // 4. Blocking daemon loop waiting for termination signal
+        info!("🟢 [LINUX-DAEMON] Daemon running — waiting for SIGTERM/SIGINT");
+        while !self.stop_flag.load(Ordering::SeqCst)
+            && !is_daemon_stop_requested()
+            && !is_posix_stop_signaled()
+        {
             std::thread::sleep(Duration::from_millis(50));
         }
 
-        // 4. Unconditional host disarm on service shutdown
+        // 5. Unconditional host disarm on service shutdown
         info!("🚨 [LINUX-DAEMON] Service stopping: executing unconditional host disarm");
         let _ = execute_host_disarm_unauthenticated();
 
-        // 5. Notify systemd stopping
+        // 6. Notify systemd stopping
         notify_systemd("STOPPING=1");
         info!("🟢 [LINUX-DAEMON] Clean service shutdown complete");
         Ok(())
+    }
+
+    fn request_stop(&self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
     }
 }
 
@@ -375,6 +461,7 @@ pub fn generate_launchd_plist(config: &ServiceConfig) -> String {
 #[derive(Debug, Clone)]
 pub struct MacOsServiceManager {
     pub root_dir: Option<PathBuf>,
+    pub stop_flag: Arc<AtomicBool>,
 }
 
 impl Default for MacOsServiceManager {
@@ -385,13 +472,26 @@ impl Default for MacOsServiceManager {
 
 impl MacOsServiceManager {
     pub fn new() -> Self {
-        Self { root_dir: None }
+        Self {
+            root_dir: None,
+            stop_flag: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     pub fn with_root_dir(root: impl Into<PathBuf>) -> Self {
         Self {
             root_dir: Some(root.into()),
+            stop_flag: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn with_stop_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.stop_flag = flag;
+        self
+    }
+
+    pub fn request_stop(&self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
     }
 
     fn plist_path(&self, service_name: &str) -> PathBuf {
@@ -514,11 +614,60 @@ impl NativeServiceManager for MacOsServiceManager {
     fn run_service_daemon(&self) -> Result<(), ServiceError> {
         info!("🚨 [MACOS-DAEMON] Starting macOS native service daemon");
 
-        // Unconditional host disarm on service shutdown
+        // 1. Immediate test-mode or early cancellation check
+        if self.stop_flag.load(Ordering::SeqCst)
+            || is_daemon_stop_requested()
+            || std::env::var("KILLSWITCH_SERVICE_TEST_ONCE").is_ok()
+        {
+            info!("ℹ️ [MACOS-DAEMON] Test stop requested — performing single-cycle verification");
+            info!("🚨 [MACOS-DAEMON] Service stopping: executing unconditional host disarm");
+            let _ = execute_host_disarm_unauthenticated();
+            return Ok(());
+        }
+
+        // 2. Register POSIX signal handlers
+        #[cfg(unix)]
+        {
+            install_posix_signal_handlers();
+
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async {
+                    if let (Ok(mut sigterm), Ok(mut sigint)) = (
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()),
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()),
+                    ) {
+                        tokio::select! {
+                            _ = sigterm.recv() => {
+                                info!("🚨 [MACOS-DAEMON] Caught SIGTERM shutdown signal via Tokio");
+                            }
+                            _ = sigint.recv() => {
+                                info!("🚨 [MACOS-DAEMON] Caught SIGINT shutdown signal via Tokio");
+                            }
+                        }
+                        POSIX_STOP_SIGNAL.store(true, Ordering::SeqCst);
+                    }
+                });
+            }
+        }
+
+        // 3. Blocking daemon loop waiting for termination signal
+        info!("🟢 [MACOS-DAEMON] Daemon running — waiting for SIGTERM/SIGINT");
+        while !self.stop_flag.load(Ordering::SeqCst)
+            && !is_daemon_stop_requested()
+            && !is_posix_stop_signaled()
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        // 4. Unconditional host disarm on service shutdown
         info!("🚨 [MACOS-DAEMON] Service stopping: executing unconditional host disarm");
         let _ = execute_host_disarm_unauthenticated();
         info!("🟢 [MACOS-DAEMON] Clean macOS daemon shutdown complete");
         Ok(())
+    }
+
+    fn request_stop(&self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
     }
 }
 
@@ -527,7 +676,153 @@ impl NativeServiceManager for MacOsServiceManager {
 // -----------------------------------------------------------------------------
 
 #[cfg(target_os = "windows")]
-pub struct WindowsServiceManager;
+static WIN32_SCM_STATUS_HANDLE: std::sync::atomic::AtomicPtr<core::ffi::c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+#[cfg(target_os = "windows")]
+static WIN32_SCM_STOP_FLAG: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn win32_service_main(
+    _argc: u32,
+    _argv: *mut windows_sys::core::PWSTR,
+) {
+    use windows_sys::Win32::Foundation::NO_ERROR;
+    use windows_sys::Win32::System::Services::*;
+
+    info!("🚨 [WIN32-SCM] ServiceMain entry point invoked by SCM");
+
+    let service_name_w = to_wide("killswitch");
+    let status_handle = RegisterServiceCtrlHandlerExW(
+        service_name_w.as_ptr(),
+        Some(win32_service_ctrl_handler),
+        std::ptr::null_mut(),
+    );
+
+    if status_handle.is_null() {
+        tracing::error!(
+            "❌ [WIN32-SCM] RegisterServiceCtrlHandlerExW failed: 0x{:08X}",
+            windows_sys::Win32::Foundation::GetLastError()
+        );
+        return;
+    }
+
+    WIN32_SCM_STATUS_HANDLE.store(status_handle, Ordering::SeqCst);
+
+    // 1. Report SERVICE_START_PENDING
+    let mut status = SERVICE_STATUS {
+        dwServiceType: SERVICE_WIN32_OWN_PROCESS,
+        dwCurrentState: SERVICE_START_PENDING,
+        dwControlsAccepted: 0,
+        dwWin32ExitCode: NO_ERROR,
+        dwServiceSpecificExitCode: 0,
+        dwCheckPoint: 1,
+        dwWaitHint: 3000,
+    };
+    SetServiceStatus(status_handle, &status);
+
+    // 2. Report SERVICE_RUNNING
+    status.dwCurrentState = SERVICE_RUNNING;
+    status.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
+    status.dwCheckPoint = 0;
+    status.dwWaitHint = 0;
+    SetServiceStatus(status_handle, &status);
+    info!("🟢 [WIN32-SCM] Service operational: state reported as SERVICE_RUNNING");
+
+    // 3. Worker loop waiting for stop signal
+    while !WIN32_SCM_STOP_FLAG.load(Ordering::SeqCst) && !is_daemon_stop_requested() {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    // 4. Report SERVICE_STOP_PENDING
+    status.dwCurrentState = SERVICE_STOP_PENDING;
+    status.dwControlsAccepted = 0;
+    status.dwCheckPoint = 1;
+    status.dwWaitHint = 15000;
+    SetServiceStatus(status_handle, &status);
+    info!("🚨 [WIN32-SCM] Stopping: executing unconditional host disarm");
+
+    // 5. Unconditional host disarm
+    let _ = execute_host_disarm_unauthenticated();
+
+    // 6. Report SERVICE_STOPPED
+    status.dwCurrentState = SERVICE_STOPPED;
+    status.dwControlsAccepted = 0;
+    status.dwCheckPoint = 0;
+    status.dwWaitHint = 0;
+    SetServiceStatus(status_handle, &status);
+    info!("🟢 [WIN32-SCM] Service state reported as SERVICE_STOPPED");
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn win32_service_ctrl_handler(
+    dw_control: u32,
+    _dw_event_type: u32,
+    _lp_event_data: *mut core::ffi::c_void,
+    _lp_context: *mut core::ffi::c_void,
+) -> u32 {
+    use windows_sys::Win32::Foundation::{ERROR_CALL_NOT_IMPLEMENTED, NO_ERROR};
+    use windows_sys::Win32::System::Services::*;
+
+    match dw_control {
+        SERVICE_CONTROL_STOP | SERVICE_CONTROL_SHUTDOWN => {
+            info!(
+                "🚨 [WIN32-SCM] Control handler received STOP/SHUTDOWN control (0x{:X})",
+                dw_control
+            );
+
+            // Report STOP_PENDING to satisfy SCM timeout
+            let handle = WIN32_SCM_STATUS_HANDLE.load(Ordering::SeqCst);
+            if !handle.is_null() {
+                let stop_pending = SERVICE_STATUS {
+                    dwServiceType: SERVICE_WIN32_OWN_PROCESS,
+                    dwCurrentState: SERVICE_STOP_PENDING,
+                    dwControlsAccepted: 0,
+                    dwWin32ExitCode: NO_ERROR,
+                    dwServiceSpecificExitCode: 0,
+                    dwCheckPoint: 1,
+                    dwWaitHint: 15000,
+                };
+                SetServiceStatus(handle, &stop_pending);
+            }
+
+            // Signal main loop
+            WIN32_SCM_STOP_FLAG.store(true, Ordering::SeqCst);
+
+            // Unconditional disarm in handler for defense-in-depth
+            let _ = execute_host_disarm_unauthenticated();
+
+            NO_ERROR
+        }
+        SERVICE_CONTROL_INTERROGATE => {
+            let handle = WIN32_SCM_STATUS_HANDLE.load(Ordering::SeqCst);
+            if !handle.is_null() {
+                let running = SERVICE_STATUS {
+                    dwServiceType: SERVICE_WIN32_OWN_PROCESS,
+                    dwCurrentState: if WIN32_SCM_STOP_FLAG.load(Ordering::SeqCst) {
+                        SERVICE_STOP_PENDING
+                    } else {
+                        SERVICE_RUNNING
+                    },
+                    dwControlsAccepted: SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN,
+                    dwWin32ExitCode: NO_ERROR,
+                    dwServiceSpecificExitCode: 0,
+                    dwCheckPoint: 0,
+                    dwWaitHint: 0,
+                };
+                SetServiceStatus(handle, &running);
+            }
+            NO_ERROR
+        }
+        _ => ERROR_CALL_NOT_IMPLEMENTED,
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone)]
+pub struct WindowsServiceManager {
+    pub stop_flag: Arc<AtomicBool>,
+}
 
 #[cfg(target_os = "windows")]
 impl Default for WindowsServiceManager {
@@ -539,7 +834,45 @@ impl Default for WindowsServiceManager {
 #[cfg(target_os = "windows")]
 impl WindowsServiceManager {
     pub fn new() -> Self {
-        Self
+        Self {
+            stop_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn with_stop_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.stop_flag = flag;
+        self
+    }
+
+    pub fn request_stop(&self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
+    }
+
+    fn run_standalone_console_daemon(&self) -> Result<(), ServiceError> {
+        info!("🚨 [WINDOWS-DAEMON] Standalone console daemon operational");
+
+        let running = Arc::new(AtomicBool::new(true));
+        let r_clone = running.clone();
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                info!("🚨 [WINDOWS-DAEMON] Caught Ctrl+C shutdown signal");
+                r_clone.store(false, Ordering::SeqCst);
+            });
+        }
+
+        while running.load(Ordering::SeqCst)
+            && !self.stop_flag.load(Ordering::SeqCst)
+            && !is_daemon_stop_requested()
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        info!("🚨 [WINDOWS-DAEMON] Standalone daemon stopping: executing unconditional host disarm");
+        let _ = execute_host_disarm_unauthenticated();
+        info!("🟢 [WINDOWS-DAEMON] Clean standalone daemon shutdown complete");
+        Ok(())
     }
 }
 
@@ -904,10 +1237,57 @@ impl NativeServiceManager for WindowsServiceManager {
     fn run_service_daemon(&self) -> Result<(), ServiceError> {
         info!("🚨 [WINDOWS-DAEMON] Launching Win32 Service Dispatcher");
 
-        // Unconditional host disarm guarantee
-        let _ = execute_host_disarm_unauthenticated();
+        // 1. Immediate test-mode or early cancellation check
+        if self.stop_flag.load(Ordering::SeqCst)
+            || is_daemon_stop_requested()
+            || std::env::var("KILLSWITCH_SERVICE_TEST_ONCE").is_ok()
+        {
+            info!("ℹ️ [WINDOWS-DAEMON] Test stop requested — performing single-cycle verification");
+            let _ = execute_host_disarm_unauthenticated();
+            return Ok(());
+        }
+
+        // 2. Initialize global state
+        WIN32_SCM_STOP_FLAG.store(false, Ordering::SeqCst);
+        WIN32_SCM_STATUS_HANDLE.store(std::ptr::null_mut(), Ordering::SeqCst);
+
+        // 3. Setup SERVICE_TABLE_ENTRYW
+        let mut service_name_w = to_wide("killswitch");
+        let dispatch_table: [windows_sys::Win32::System::Services::SERVICE_TABLE_ENTRYW; 2] = [
+            windows_sys::Win32::System::Services::SERVICE_TABLE_ENTRYW {
+                lpServiceName: service_name_w.as_mut_ptr(),
+                lpServiceProc: Some(win32_service_main),
+            },
+            windows_sys::Win32::System::Services::SERVICE_TABLE_ENTRYW {
+                lpServiceName: std::ptr::null_mut(),
+                lpServiceProc: None,
+            },
+        ];
+
+        // 4. Invoke StartServiceCtrlDispatcherW
+        let ok = unsafe {
+            windows_sys::Win32::System::Services::StartServiceCtrlDispatcherW(dispatch_table.as_ptr())
+        };
+
+        if ok == 0 {
+            let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            if err == windows_sys::Win32::Foundation::ERROR_FAILED_SERVICE_CONTROLLER_CONNECT {
+                info!("ℹ️ [WINDOWS-DAEMON] Not launched by Win32 SCM (ERROR_FAILED_SERVICE_CONTROLLER_CONNECT); running standalone console daemon");
+                return self.run_standalone_console_daemon();
+            } else {
+                return Err(ServiceError::DaemonError(format!(
+                    "StartServiceCtrlDispatcherW failed: Win32 error 0x{:08X}",
+                    err
+                )));
+            }
+        }
+
         info!("🟢 [WINDOWS-DAEMON] Clean Windows daemon shutdown complete");
         Ok(())
+    }
+
+    fn request_stop(&self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
     }
 }
 
@@ -1110,5 +1490,38 @@ mod tests {
         let status = disarm_res.unwrap();
         assert!(!status.isolated);
         assert!(!status.network_isolated);
+    }
+
+    #[test]
+    fn test_service_daemon_cancellation_and_disarm() {
+        // 1. Linux daemon cancellation
+        let linux_mgr = LinuxServiceManager::new();
+        linux_mgr.request_stop();
+        let res = linux_mgr.run_service_daemon();
+        assert!(res.is_ok(), "Linux daemon must cleanly exit on stop request");
+
+        // 2. macOS daemon cancellation
+        let mac_mgr = MacOsServiceManager::new();
+        mac_mgr.request_stop();
+        let mac_res = mac_mgr.run_service_daemon();
+        assert!(mac_res.is_ok(), "macOS daemon must cleanly exit on stop request");
+
+        // 3. Windows daemon cancellation or console fallback
+        #[cfg(target_os = "windows")]
+        {
+            let win_mgr = WindowsServiceManager::new();
+            win_mgr.request_stop();
+            let win_res = win_mgr.run_service_daemon();
+            assert!(win_res.is_ok(), "Windows daemon must cleanly exit on stop request");
+        }
+
+        // 4. Global shutdown hook
+        reset_daemon_stop_flag();
+        assert!(!is_daemon_stop_requested());
+        request_daemon_shutdown();
+        assert!(is_daemon_stop_requested());
+        let sim_mgr = SimulatedServiceManager::new();
+        assert!(sim_mgr.run_service_daemon().is_ok());
+        reset_daemon_stop_flag();
     }
 }

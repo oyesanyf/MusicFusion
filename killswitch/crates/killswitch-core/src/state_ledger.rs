@@ -123,6 +123,28 @@ impl StateLedger {
                         file_path.display(),
                         err
                     );
+                    // Preserve corrupted state ledger for forensic audit and recovery
+                    let now_ts = Utc::now().timestamp();
+                    let mut corrupt_path = file_path.with_extension(format!("corrupt.{}", now_ts));
+                    if corrupt_path.exists() {
+                        corrupt_path = file_path.with_extension(format!(
+                            "corrupt.{}.{}",
+                            now_ts,
+                            Utc::now().timestamp_subsec_nanos()
+                        ));
+                    }
+                    if let Err(copy_err) = std::fs::copy(&file_path, &corrupt_path) {
+                        warn!(
+                            "⚠️ [LEDGER] Failed to backup corrupt ledger to '{}': {}",
+                            corrupt_path.display(),
+                            copy_err
+                        );
+                    } else {
+                        warn!(
+                            "💾 [LEDGER] Preserved corrupted state ledger backup at '{}'",
+                            corrupt_path.display()
+                        );
+                    }
                 }
             }
         }
@@ -283,18 +305,38 @@ impl StateLedger {
                 })?;
         }
 
-        // Atomic replace / rename
-        if let Err(_rename_err) = std::fs::rename(&temp_path, &self.file_path) {
-            // Windows fallback when destination exists
-            if self.file_path.exists() {
-                let _ = std::fs::remove_file(&self.file_path);
-            }
-            std::fs::rename(&temp_path, &self.file_path).map_err(|source| {
-                KillSwitchError::LedgerIoError {
+        // Transactional atomic replace / rename with rollback protection
+        if let Err(initial_err) = std::fs::rename(&temp_path, &self.file_path) {
+            if !self.file_path.exists() {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(KillSwitchError::LedgerIoError {
                     path: self.file_path.clone(),
-                    source,
-                }
-            })?;
+                    source: initial_err,
+                });
+            }
+
+            // Two-phase safe replacement with backup:
+            let backup_path = self
+                .file_path
+                .with_extension(format!("bak.{}", uuid::Uuid::new_v4()));
+            if let Err(backup_err) = std::fs::rename(&self.file_path, &backup_path) {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(KillSwitchError::LedgerIoError {
+                    path: self.file_path.clone(),
+                    source: backup_err,
+                });
+            }
+
+            if let Err(rename_err) = std::fs::rename(&temp_path, &self.file_path) {
+                // Rollback: restore original file from backup
+                let _ = std::fs::rename(&backup_path, &self.file_path);
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(KillSwitchError::LedgerIoError {
+                    path: self.file_path.clone(),
+                    source: rename_err,
+                });
+            }
+            let _ = std::fs::remove_file(&backup_path);
         }
 
         Ok(())
@@ -400,5 +442,38 @@ mod tests {
         let reloaded = StateLedger::open_or_init(Some(dir.path())).unwrap();
         assert_eq!(reloaded.snapshot().sequence_number, 2);
         assert!(reloaded.verify_integrity().is_ok());
+    }
+
+    #[test]
+    fn test_state_ledger_preserves_corrupted_file_backup() {
+        let dir = tempdir().unwrap();
+        let state_file = dir.path().join("killchain_state.json");
+
+        // Write a corrupted/tampered file
+        std::fs::write(&state_file, b"{\"schema_version\": 1, \"corrupted_json\": true").unwrap();
+
+        // open_or_init must detect corruption and re-initialize clean state
+        let ledger = StateLedger::open_or_init(Some(dir.path())).unwrap();
+        assert_eq!(ledger.snapshot().sequence_number, 0);
+
+        // Verify that a .corrupt.<timestamp> backup was created
+        let backup_files: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|n| n.starts_with("killchain_state.corrupt."))
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        assert_eq!(
+            backup_files.len(),
+            1,
+            "Expected exactly 1 preserved corrupted ledger backup file"
+        );
+        let content = std::fs::read(backup_files[0].path()).unwrap();
+        assert_eq!(content, b"{\"schema_version\": 1, \"corrupted_json\": true");
     }
 }

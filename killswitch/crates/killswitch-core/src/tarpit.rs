@@ -100,12 +100,12 @@ impl ActiveProcessTarpit {
             self.trap_pid_windows(pid, suspend_interval, burst_interval, max_duration)
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            self.trap_pid_linux(pid, suspend_interval, burst_interval, max_duration)
+            self.trap_pid_unix(pid, suspend_interval, burst_interval, max_duration)
         }
 
-        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
             let run_flag = Arc::new(AtomicBool::new(true));
             self.active_traps.insert(pid, run_flag);
@@ -244,7 +244,8 @@ impl ActiveProcessTarpit {
                 }
             }
 
-            traps.remove(&pid);
+            // Conditional removal checking Arc pointer equality to prevent ABA race on rapid re-trap
+            traps.remove_if(&pid, |_, val| Arc::ptr_eq(val, &run_flag));
             info!(
                 "🟢 [ActiveProcessTarpit] Loop terminated and handles cleaned up for PID {}",
                 pid
@@ -254,8 +255,8 @@ impl ActiveProcessTarpit {
         Ok(())
     }
 
-    #[cfg(target_os = "linux")]
-    fn trap_pid_linux(
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn trap_pid_unix(
         &self,
         pid: u32,
         suspend_interval: Duration,
@@ -268,7 +269,7 @@ impl ActiveProcessTarpit {
 
         tokio::spawn(async move {
             info!(
-                "🚨 [ActiveProcessTarpit] Starting Linux signal duty cycle on PID {}.",
+                "🚨 [ActiveProcessTarpit] Starting Unix signal duty cycle on PID {}.",
                 pid
             );
             let start = tokio::time::Instant::now();
@@ -309,9 +310,10 @@ impl ActiveProcessTarpit {
                 }
             }
 
-            traps.remove(&pid);
+            // Conditional removal checking Arc pointer equality to prevent ABA race on rapid re-trap
+            traps.remove_if(&pid, |_, val| Arc::ptr_eq(val, &run_flag));
             info!(
-                "🟢 [ActiveProcessTarpit] Linux duty cycle ended for PID {}",
+                "🟢 [ActiveProcessTarpit] Unix duty cycle ended for PID {}",
                 pid
             );
         });
@@ -339,5 +341,39 @@ mod tests {
         assert!(!tarpit.is_trapped(999999));
         tarpit.release_pid(999999);
         assert!(!tarpit.is_trapped(999999));
+    }
+
+    #[tokio::test]
+    async fn test_tarpit_dashmap_removal_aba_race_prevention() {
+        let tarpit = ActiveProcessTarpit::new();
+        let test_pid = 49152;
+
+        // Simulate Trap 1
+        let flag1 = Arc::new(AtomicBool::new(true));
+        tarpit.active_traps.insert(test_pid, flag1.clone());
+        assert!(tarpit.is_trapped(test_pid));
+
+        // Release Trap 1 (simulated release_pid)
+        flag1.store(false, Ordering::SeqCst);
+        tarpit.active_traps.remove(&test_pid);
+        assert!(!tarpit.is_trapped(test_pid));
+
+        // Rapid Re-trap (Trap 2 inserted before Task 1 loop terminates)
+        let flag2 = Arc::new(AtomicBool::new(true));
+        tarpit.active_traps.insert(test_pid, flag2.clone());
+        assert!(tarpit.is_trapped(test_pid));
+
+        // Task 1 attempts cleanup using remove_if with Arc::ptr_eq
+        let removed = tarpit.active_traps.remove_if(&test_pid, |_, val| Arc::ptr_eq(val, &flag1));
+        assert!(removed.is_none(), "Old task must NOT remove newly trapped entry!");
+
+        // Trap 2 must still be intact
+        assert!(tarpit.is_trapped(test_pid));
+        assert!(Arc::ptr_eq(&tarpit.active_traps.get(&test_pid).unwrap(), &flag2));
+
+        // Task 2 cleans up with its own flag
+        let removed2 = tarpit.active_traps.remove_if(&test_pid, |_, val| Arc::ptr_eq(val, &flag2));
+        assert!(removed2.is_some(), "Active task must successfully remove its own entry upon termination");
+        assert!(!tarpit.is_trapped(test_pid));
     }
 }

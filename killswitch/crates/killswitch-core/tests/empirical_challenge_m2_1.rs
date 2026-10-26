@@ -871,7 +871,8 @@ fn test_stress_service_manager_daemon_shutdown_hook() {
     let status = linux_mgr.service_status(&config.name).unwrap();
     assert!(status.is_installed);
 
-    // Daemon run invokes execute_host_disarm_unauthenticated on stop
+    // Request stop before synchronous run to verify single-pass lifecycle
+    linux_mgr.request_stop();
     let linux_run = linux_mgr.run_service_daemon();
     assert!(linux_run.is_ok());
 
@@ -884,6 +885,8 @@ fn test_stress_service_manager_daemon_shutdown_hook() {
         ..Default::default()
     };
     mac_mgr.install_service(&mac_config).unwrap();
+
+    mac_mgr.request_stop();
     let mac_run = mac_mgr.run_service_daemon();
     assert!(mac_run.is_ok());
 

@@ -20,6 +20,14 @@ impl NativeProcessFreezer {
         Self
     }
 
+    /// Checks if a PID or process name is immune from freeze/tarpit containment.
+    /// Delegates directly to `crate::killchain::is_critical_system_pid` to guarantee
+    /// a single canonical source of truth across the entire workspace.
+    #[inline]
+    pub fn is_immune(&self, pid: u32, proc_name: &str) -> bool {
+        crate::killchain::is_critical_system_pid(pid, proc_name)
+    }
+
     /// Builds the set of immune PIDs:
     /// - PID 0, 1, 4
     /// - Current process ID
@@ -201,89 +209,7 @@ impl ProcessFreezer for NativeProcessFreezer {
     }
 
     fn is_immune(&self, pid: u32, proc_name: &str) -> bool {
-        if pid <= 4 || pid == std::process::id() {
-            return true;
-        }
-
-        let trimmed = proc_name.trim().trim_matches('"').trim_matches('\'');
-        let base = trimmed.rsplit(['\\', '/']).next().unwrap_or(trimmed);
-        let name_lc = base.to_ascii_lowercase();
-
-        // Agent self-preservation
-        if name_lc.contains("killswitch")
-            || name_lc.contains("osoosi")
-            || name_lc.contains("oshoosi")
-        {
-            return true;
-        }
-
-        matches!(
-            name_lc.as_str(),
-            "system"
-                | "smss.exe"
-                | "csrss.exe"
-                | "wininit.exe"
-                | "winlogon.exe"
-                | "userinit.exe"
-                | "logonui.exe"
-                | "sihost.exe"
-                | "runtimebroker.exe"
-                | "taskmgr.exe"
-                | "securityhealthservice.exe"
-                | "securityhealthsystray.exe"
-                | "smartscreen.exe"
-                | "services.exe"
-                | "lsass.exe"
-                | "dwm.exe"
-                | "svchost.exe"
-                | "explorer.exe"
-                | "conhost.exe"
-                | "windowsterminal.exe"
-                | "openconsole.exe"
-                | "cmd.exe"
-                | "powershell.exe"
-                | "pwsh.exe"
-                | "code.exe"
-                | "antigravity.exe"
-                | "cargo.exe"
-                | "cargo"
-                | "rustc.exe"
-                | "rustc"
-                | "git.exe"
-                | "git"
-                | "node.exe"
-                | "node"
-                | "python.exe"
-                | "python"
-                | "python3"
-                | "python3.exe"
-                | "init"
-                | "systemd"
-                | "systemd-logind"
-                | "systemd-journald"
-                | "systemd-resolved"
-                | "sshd"
-                | "dbus-daemon"
-                | "bash"
-                | "sh"
-                | "zsh"
-                | "fish"
-                | "sudo"
-                | "login"
-                // macOS Critical System Daemons, UI & Developer Tools
-                | "launchd"
-                | "windowserver"
-                | "loginwindow"
-                | "kernel_task"
-                | "usereventagent"
-                | "cfprefsd"
-                | "opendirectoryd"
-                | "mds"
-                | "finder"
-                | "dock"
-                | "terminal"
-                | "iterm2"
-        )
+        self.is_immune(pid, proc_name)
     }
 }
 
