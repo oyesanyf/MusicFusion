@@ -195,6 +195,8 @@ pub enum NetworkIsolationEngine {
     LinuxNetlink,
     /// Linux Landlock LSM syscall confinement.
     LinuxLandlock,
+    /// macOS Darwin BSD /dev/pf Packet Filter ioctl session.
+    DarwinPf,
     /// Mock/Simulated engine for headless testing.
     Simulated,
 }

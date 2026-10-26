@@ -84,7 +84,11 @@ pub fn default_network_isolator() -> Arc<dyn NetworkIsolator> {
     {
         Arc::new(crate::landlock::LinuxNetlinkIsolator::new())
     }
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        Arc::new(crate::pf::MacOsPfIsolator::new())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
         Arc::new(SimulatedNetworkIsolator)
     }
@@ -317,6 +321,85 @@ impl KillChainHostManager {
         self.disarm_internal("SYSTEM_SHUTDOWN", reason, "DISARMED_SHUTDOWN")
             .await
     }
+}
+
+/// Global unconditional unauthenticated host disarm.
+/// Called upon service stop/shutdown signal (`SERVICE_CONTROL_STOP`, `SIGTERM`, `SIGINT`),
+/// daemon termination, panic, or test teardown to guarantee that the endpoint is never left quarantined.
+pub fn execute_host_disarm_unauthenticated() -> Result<KillChainStatus> {
+    info!("🚨 [DISARM-UNCONDITIONAL] Executing unconditional unauthenticated host disarm");
+
+    // 1. Revert platform-native network quarantine
+    #[cfg(target_os = "windows")]
+    {
+        let _ = crate::wfp::disarm_windows_network_quarantine(
+            "UNCONDITIONAL_SHUTDOWN",
+            "Automatic host disarm on service stop/shutdown",
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let isolator = crate::landlock::LinuxNetlinkIsolator::new();
+        let dummy_receipt = IsolationReceipt::new(
+            "shutdown-disarm".to_string(),
+            killswitch_types::status::NetworkIsolationEngine::LinuxNetlink,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            "UNCONDITIONAL_SHUTDOWN".to_string(),
+            "Automatic host disarm on service stop/shutdown".to_string(),
+        );
+        let _ = isolator.restore_quarantine(&dummy_receipt);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let isolator = crate::pf::MacOsPfIsolator::new();
+        let dummy_receipt = IsolationReceipt::new(
+            "shutdown-disarm".to_string(),
+            killswitch_types::status::NetworkIsolationEngine::DarwinPf,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            "UNCONDITIONAL_SHUTDOWN".to_string(),
+            "Automatic host disarm on service stop/shutdown".to_string(),
+        );
+        let _ = isolator.restore_quarantine(&dummy_receipt);
+    }
+
+    // 2. Resume all frozen processes and release all tarpits
+    crate::tarpit::ActiveProcessTarpit::global().release_all();
+
+    // 3. Update state ledger if accessible
+    let mut status = KillChainStatus {
+        last_action_timestamp: Some(Utc::now()),
+        ..KillChainStatus::default()
+    };
+    status.update_hash();
+
+    if let Ok(mut ledger) = StateLedger::open_or_init(None) {
+        let _ = ledger.record_state_transition(
+            status.clone(),
+            None,
+            None,
+            "DISARMED_UNCONDITIONAL",
+            "SYSTEM_SHUTDOWN",
+            "Automatic host disarm on service stop/shutdown signal",
+        );
+    }
+
+    info!("🟢 [DISARM-UNCONDITIONAL] Host disarm completed successfully.");
+    Ok(status)
+}
+
+impl KillChainHostManager {
 
     /// Internal restoration engine reverting all network and process containment.
     async fn disarm_internal(
@@ -799,6 +882,19 @@ pub fn is_critical_system_pid(pid: u32, name: &str) -> bool {
             | "sh"
             | "zsh"
             | "fish"
+            // macOS Critical System Daemons, UI & Developer Tools
+            | "launchd"
+            | "windowserver"
+            | "loginwindow"
+            | "kernel_task"
+            | "usereventagent"
+            | "cfprefsd"
+            | "opendirectoryd"
+            | "mds"
+            | "finder"
+            | "dock"
+            | "terminal"
+            | "iterm2"
     )
 }
 
@@ -891,5 +987,32 @@ mod tests {
             .unwrap();
         assert!(!disarmed.isolated);
         assert!(!disarmed.network_isolated);
+    }
+
+    #[test]
+    fn test_macos_critical_system_pid_immunity() {
+        let macos_daemons = [
+            ("launchd", 1),
+            ("WindowServer", 55),
+            ("loginwindow", 56),
+            ("kernel_task", 0),
+            ("UserEventAgent", 57),
+            ("cfprefsd", 58),
+            ("opendirectoryd", 59),
+            ("mds", 60),
+            ("Finder", 61),
+            ("Dock", 62),
+            ("Terminal", 63),
+            ("iTerm2", 64),
+        ];
+
+        for (name, pid) in macos_daemons {
+            assert!(
+                is_critical_system_pid(pid, name),
+                "Expected is_critical_system_pid to return true for macOS '{}' (PID {})",
+                name,
+                pid
+            );
+        }
     }
 }

@@ -56,6 +56,10 @@ pub use graph::{
     KillSwitchGraphState, OperatorApprovalState, OrchestratorMode, StateCheckpointer,
 };
 
+// Re-export service types
+pub mod service;
+pub use service::{ServiceConfig, ServiceError, ServiceState, ServiceStatus};
+
 #[cfg(test)]
 mod integration_tests {
     use super::*;

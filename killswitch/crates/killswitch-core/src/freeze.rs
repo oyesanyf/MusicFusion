@@ -134,12 +134,12 @@ impl ProcessFreezer for NativeProcessFreezer {
             freeze_process_win32(pid, &proc_name)
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            freeze_process_linux(pid, &proc_name)
+            freeze_process_posix(pid, &proc_name)
         }
 
-        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
             Ok(ProcessIsolationState::new_frozen(
                 pid,
@@ -158,12 +158,12 @@ impl ProcessFreezer for NativeProcessFreezer {
             resume_process_win32(pid, &proc_name)
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            resume_process_linux(pid, &proc_name)
+            resume_process_posix(pid, &proc_name)
         }
 
-        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
             let mut state = ProcessIsolationState::new_frozen(
                 pid,
@@ -270,6 +270,19 @@ impl ProcessFreezer for NativeProcessFreezer {
                 | "fish"
                 | "sudo"
                 | "login"
+                // macOS Critical System Daemons, UI & Developer Tools
+                | "launchd"
+                | "windowserver"
+                | "loginwindow"
+                | "kernel_task"
+                | "usereventagent"
+                | "cfprefsd"
+                | "opendirectoryd"
+                | "mds"
+                | "finder"
+                | "dock"
+                | "terminal"
+                | "iterm2"
         )
     }
 }
@@ -398,11 +411,11 @@ fn resume_process_win32(
 }
 
 // ---------------------------------------------------------------------------
-// Linux Syscall Implementation (SIGSTOP / SIGCONT)
+// POSIX Syscall Implementation (Linux & macOS: SIGSTOP / SIGCONT)
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "linux")]
-fn freeze_process_linux(
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn freeze_process_posix(
     pid: u32,
     proc_name: &str,
 ) -> Result<ProcessIsolationState, KillSwitchError> {
@@ -420,8 +433,8 @@ fn freeze_process_linux(
     ))
 }
 
-#[cfg(target_os = "linux")]
-fn resume_process_linux(
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn resume_process_posix(
     pid: u32,
     proc_name: &str,
 ) -> Result<ProcessIsolationState, KillSwitchError> {
@@ -468,5 +481,40 @@ mod tests {
         assert!(immune.contains(&0));
         assert!(immune.contains(&1));
         assert!(immune.contains(&4));
+    }
+
+    #[test]
+    fn test_macos_critical_system_whitelist() {
+        let freezer = NativeProcessFreezer::new();
+        // The 12 mandatory macOS critical processes with various cases and paths
+        let macos_procs = [
+            ("launchd", 1),
+            ("WindowServer", 100),
+            ("loginwindow", 101),
+            ("kernel_task", 0),
+            ("UserEventAgent", 102),
+            ("cfprefsd", 103),
+            ("opendirectoryd", 104),
+            ("mds", 105),
+            ("Finder", 106),
+            ("Dock", 107),
+            ("Terminal", 108),
+            ("iTerm2", 109),
+            // With paths
+            ("/System/Library/CoreServices/WindowServer", 200),
+            ("/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal", 201),
+            ("/Applications/iTerm.app/Contents/MacOS/iTerm2", 202),
+            ("/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder", 203),
+            ("/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock", 204),
+        ];
+
+        for (name, pid) in macos_procs {
+            assert!(
+                freezer.is_immune(pid, name),
+                "Expected macOS process '{}' (PID {}) to be immune",
+                name,
+                pid
+            );
+        }
     }
 }

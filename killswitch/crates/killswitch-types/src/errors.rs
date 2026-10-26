@@ -75,6 +75,21 @@ pub enum KillSwitchError {
     LandlockUnsupported,
 
     // -------------------------------------------------------------------------
+    // 2b. macOS BSD /dev/pf Packet Filter Kernel Errors
+    // -------------------------------------------------------------------------
+    #[error("macOS PF ioctl failed: command {cmd}: errno {errno}")]
+    PfIoctlFailed { cmd: &'static str, errno: i32 },
+
+    #[error("macOS PF device open failed (/dev/pf): errno {errno}")]
+    PfDeviceOpenFailed { errno: i32 },
+
+    #[error("macOS Darwin sysctl socket inspection failed: errno {errno}")]
+    DarwinSysctlFailed { errno: i32 },
+
+    #[error("macOS Darwin proc_pidinfo failed for PID {pid}: errno {errno}")]
+    DarwinProcPidInfoFailed { pid: u32, errno: i32 },
+
+    // -------------------------------------------------------------------------
     // 3. Process Suspension, Freezing & Tarpit Errors
     // -------------------------------------------------------------------------
     #[error("OpenProcess failed for PID {pid}: Win32 status 0x{win32_code:08X}")]
@@ -225,6 +240,9 @@ pub enum KillSwitchError {
 
     #[error("Native OS containment API error: {0}")]
     NativeOsError(String),
+
+    #[error("Service error: {0}")]
+    Service(#[from] crate::service::ServiceError),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

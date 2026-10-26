@@ -7,6 +7,8 @@ pub mod auth;
 pub mod freeze;
 pub mod killchain;
 pub mod landlock;
+pub mod pf;
+pub mod service;
 pub mod state_ledger;
 pub mod tarpit;
 pub mod wfp;
@@ -14,8 +16,8 @@ pub mod wfp;
 pub use auth::{FrozenPidsProvider, OperatorAuthManager};
 pub use freeze::NativeProcessFreezer;
 pub use killchain::{
-    default_network_isolator, is_critical_system_pid, HostContainmentManager,
-    KillChainHostManager, SimulatedNetworkIsolator,
+    default_network_isolator, execute_host_disarm_unauthenticated, is_critical_system_pid,
+    HostContainmentManager, KillChainHostManager, SimulatedNetworkIsolator,
 };
 pub use landlock::{
     apply_landlock_sandbox, get_active_non_loopback_connections, get_landlock_abi_version,
@@ -23,6 +25,16 @@ pub use landlock::{
     read_and_parse_proc_net_tcp, read_and_parse_proc_net_tcp6, LandlockSandboxConfig,
     LinuxNetlinkIsolator, LinuxSocketEntry, TcpState,
 };
+pub use pf::{
+    generate_quarantine_rules, get_active_darwin_sockets, DarwinSocketEntry, MacOsPfIsolator,
+    PfRuleSpec, DEFAULT_PF_ANCHOR, PF_DEVICE_PATH,
+};
+pub use service::{
+    default_service_manager, generate_launchd_plist, generate_systemd_unit,
+    LinuxServiceManager, MacOsServiceManager, NativeServiceManager,
+};
+#[cfg(target_os = "windows")]
+pub use service::WindowsServiceManager;
 pub use state_ledger::{StateLedger, StateLedgerSnapshot, GENESIS_HASH};
 pub use tarpit::ActiveProcessTarpit;
 pub use wfp::{
