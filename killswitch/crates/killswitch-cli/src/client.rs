@@ -436,6 +436,8 @@ impl KillSwitchClient {
             classification: class.to_string(),
             policy: policy.to_string(),
             inode_or_id: None,
+            pid: None,
+            process_name: None,
         };
 
         if let Ok(resp) = self.client.post(&url).json(&req).send().await {

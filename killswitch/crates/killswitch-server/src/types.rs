@@ -154,16 +154,40 @@ pub struct OctopusArmsResponse {
     pub quarantined_arms: serde_json::Value,
 }
 
+fn default_event_id() -> String {
+    format!("evt-{}", uuid::Uuid::new_v4())
+}
+
+fn default_event_kind() -> String {
+    "ProcessCreate".to_string()
+}
+
+fn default_edr_pid() -> u32 {
+    std::process::id()
+}
+
+fn default_process_name() -> String {
+    "standalone_host_sensor".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdrIngestRequest {
+    #[serde(default = "default_event_id")]
     pub event_id: String,
     pub timestamp: Option<String>,
+    #[serde(default = "default_event_kind")]
     pub event_kind: String,
+    #[serde(default = "default_edr_pid")]
     pub pid: u32,
+    #[serde(default = "default_process_name")]
     pub process_name: String,
+    #[serde(default)]
     pub image_path: String,
+    #[serde(default)]
     pub command_line: String,
     pub parent_pid: Option<u32>,
+    #[serde(default)]
+    pub scan_live_host: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,6 +196,14 @@ pub struct EdrIngestResponse {
     pub event_id: String,
     pub correlator_score: f32,
     pub threat_signal_emitted: bool,
+    #[serde(default)]
+    pub live_processes_scanned: usize,
+    #[serde(default)]
+    pub critical_anchors_verified: usize,
+    #[serde(default)]
+    pub standalone_mode: bool,
+    #[serde(default)]
+    pub summary: String,
 }
 
 // =============================================================================
@@ -223,6 +255,10 @@ pub struct LineageSeedRequest {
     pub classification: String,
     pub policy: String,
     pub inode_or_id: Option<u64>,
+    #[serde(default)]
+    pub pid: Option<u32>,
+    #[serde(default)]
+    pub process_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
