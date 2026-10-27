@@ -25,7 +25,8 @@ use killswitch_types::status::{IsolationReceipt, NetworkIsolationEngine, Network
 // Constants
 // -----------------------------------------------------------------------------
 pub const FWPM_SESSION_FLAG_DYNAMIC: u32 = 0x00000001;
-pub const RPC_C_AUTHN_DEFAULT: u32 = 0;
+pub const RPC_C_AUTHN_WINNT: u32 = 10;
+pub const RPC_C_AUTHN_DEFAULT: u32 = 0xFFFF_FFFF;
 pub const ERROR_SUCCESS: u32 = 0;
 pub const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
@@ -52,8 +53,28 @@ pub const MIB_TCP_STATE_DELETE_TCB: u32 = 12;
 
 pub const DEFAULT_CONTROL_PORT: u16 = 3030;
 
+/// Discovers all active control/WebUI ports (3030, 4040, plus any port in `active_port.txt`)
+/// so that whatever `-p <port>` the user launched `killswitch.exe` with is always preserved.
+pub fn discover_active_control_ports() -> Vec<u16> {
+    let mut ports = vec![DEFAULT_CONTROL_PORT, 4040];
+    let candidates = [
+        std::path::PathBuf::from("active_port.txt"),
+        std::env::temp_dir().join("killswitch_active_port.txt"),
+    ];
+    for path in candidates {
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            if let Ok(p) = raw.trim().parse::<u16>() {
+                if p > 0 && !ports.contains(&p) {
+                    ports.push(p);
+                }
+            }
+        }
+    }
+    ports
+}
+
 // -----------------------------------------------------------------------------
-// Win32 C Structs & GUIDs
+// Win32 C Structs & Official Windows SDK `fwpmu.h` GUIDs
 // -----------------------------------------------------------------------------
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
@@ -64,6 +85,7 @@ pub struct WfpGuid {
     pub data4: [u8; 8],
 }
 
+// c38d57d1-05a7-4c33-904f-7fbceee60e82
 pub const FWPM_LAYER_ALE_AUTH_CONNECT_V4: WfpGuid = WfpGuid {
     data1: 0xc38d57d1,
     data2: 0x05a7,
@@ -71,6 +93,7 @@ pub const FWPM_LAYER_ALE_AUTH_CONNECT_V4: WfpGuid = WfpGuid {
     data4: [0x90, 0x4f, 0x7f, 0xbc, 0xee, 0xe6, 0x0e, 0x82],
 };
 
+// 4a72393b-319f-44bc-84c3-ba54dcb3b6b4
 pub const FWPM_LAYER_ALE_AUTH_CONNECT_V6: WfpGuid = WfpGuid {
     data1: 0x4a72393b,
     data2: 0x319f,
@@ -78,20 +101,23 @@ pub const FWPM_LAYER_ALE_AUTH_CONNECT_V6: WfpGuid = WfpGuid {
     data4: [0x84, 0xc3, 0xba, 0x54, 0xdc, 0xb3, 0xb6, 0xb4],
 };
 
+// e1cd9fe7-f4b5-4273-96c0-592e487b8650
 pub const FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4: WfpGuid = WfpGuid {
-    data1: 0xe1cd673a,
-    data2: 0x4e9e,
-    data3: 0x4864,
-    data4: [0xb1, 0x53, 0xbd, 0xd4, 0x74, 0x32, 0x63, 0x59],
+    data1: 0xe1cd9fe7,
+    data2: 0xf4b5,
+    data3: 0x4273,
+    data4: [0x96, 0xc0, 0x59, 0x2e, 0x48, 0x7b, 0x86, 0x50],
 };
 
+// a3b42c97-9f04-4672-b87e-cee9c483257f
 pub const FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6: WfpGuid = WfpGuid {
-    data1: 0xa25b2931,
-    data2: 0x640a,
-    data3: 0x4298,
-    data4: [0xa6, 0x21, 0xe7, 0x70, 0x33, 0x5e, 0x79, 0x1b],
+    data1: 0xa3b42c97,
+    data2: 0x9f04,
+    data3: 0x4672,
+    data4: [0xb8, 0x7e, 0xce, 0xe9, 0xc4, 0x83, 0x25, 0x7f],
 };
 
+// 09e61aea-d214-46e2-9b21-b26b0b2f28c8
 pub const FWPM_LAYER_OUTBOUND_TRANSPORT_V4: WfpGuid = WfpGuid {
     data1: 0x09e61aea,
     data2: 0xd214,
@@ -99,6 +125,7 @@ pub const FWPM_LAYER_OUTBOUND_TRANSPORT_V4: WfpGuid = WfpGuid {
     data4: [0x9b, 0x21, 0xb2, 0x6b, 0x0b, 0x2f, 0x28, 0xc8],
 };
 
+// e1735bde-013f-4655-b351-a49e15762df0
 pub const FWPM_LAYER_OUTBOUND_TRANSPORT_V6: WfpGuid = WfpGuid {
     data1: 0xe1735bde,
     data2: 0x013f,
@@ -106,6 +133,7 @@ pub const FWPM_LAYER_OUTBOUND_TRANSPORT_V6: WfpGuid = WfpGuid {
     data4: [0xb3, 0x51, 0xa4, 0x9e, 0x15, 0x76, 0x2d, 0xf0],
 };
 
+// b235ae9a-1d64-49b8-a44c-5ff3d9095045
 pub const FWPM_CONDITION_IP_REMOTE_ADDRESS: WfpGuid = WfpGuid {
     data1: 0xb235ae9a,
     data2: 0x1d64,
@@ -113,13 +141,15 @@ pub const FWPM_CONDITION_IP_REMOTE_ADDRESS: WfpGuid = WfpGuid {
     data4: [0xa4, 0x4c, 0x5f, 0xf3, 0xd9, 0x09, 0x50, 0x45],
 };
 
+// d9ee00de-c1ef-4617-bfe3-ffd8f5a08957
 pub const FWPM_CONDITION_IP_LOCAL_ADDRESS: WfpGuid = WfpGuid {
-    data1: 0x0c722e09,
-    data2: 0xc9a1,
-    data3: 0x432a,
-    data4: [0x8b, 0x1b, 0xb7, 0x2e, 0xc1, 0x18, 0xa8, 0xcf],
+    data1: 0xd9ee00de,
+    data2: 0xc1ef,
+    data3: 0x4617,
+    data4: [0xbf, 0xe3, 0xff, 0xd8, 0xf5, 0xa0, 0x89, 0x57],
 };
 
+// c35a604d-d22b-4e1a-91b4-68f674ee674b
 pub const FWPM_CONDITION_IP_REMOTE_PORT: WfpGuid = WfpGuid {
     data1: 0xc35a604d,
     data2: 0xd22b,
@@ -127,25 +157,28 @@ pub const FWPM_CONDITION_IP_REMOTE_PORT: WfpGuid = WfpGuid {
     data4: [0x91, 0xb4, 0x68, 0xf6, 0x74, 0xee, 0x67, 0x4b],
 };
 
+// 0c1ba1af-5765-453f-af22-a8f791ac775b
 pub const FWPM_CONDITION_IP_LOCAL_PORT: WfpGuid = WfpGuid {
-    data1: 0x0da046b5,
-    data2: 0x221b,
-    data3: 0x423e,
-    data4: [0x90, 0x27, 0x0f, 0xe1, 0x08, 0x03, 0x4b, 0x57],
+    data1: 0x0c1ba1af,
+    data2: 0x5765,
+    data3: 0x453f,
+    data4: [0xaf, 0x22, 0xa8, 0xf7, 0x91, 0xac, 0x77, 0x5b],
 };
 
+// 3971ef2b-623e-4f9a-8cb1-6e79b806b9a7
 pub const FWPM_CONDITION_IP_PROTOCOL: WfpGuid = WfpGuid {
-    data1: 0x0da046b6,
-    data2: 0x221b,
-    data3: 0x423e,
-    data4: [0x90, 0x27, 0x0f, 0xe1, 0x08, 0x03, 0x4b, 0x57],
+    data1: 0x3971ef2b,
+    data2: 0x623e,
+    data3: 0x4f9a,
+    data4: [0x8c, 0xb1, 0x6e, 0x79, 0xb8, 0x06, 0xb9, 0xa7],
 };
 
+// 632ce23b-5167-435c-86d7-e903684aa80c
 pub const FWPM_CONDITION_FLAGS: WfpGuid = WfpGuid {
-    data1: 0xe9860450,
-    data2: 0x4beb,
-    data3: 0x4a64,
-    data4: [0xb8, 0x9d, 0xcf, 0x4f, 0x90, 0x13, 0x0d, 0xcf],
+    data1: 0x632ce23b,
+    data2: 0x5167,
+    data3: 0x435c,
+    data4: [0x86, 0xd7, 0xe9, 0x03, 0x68, 0x4a, 0xa8, 0x0c],
 };
 
 #[repr(C)]
@@ -391,17 +424,17 @@ impl WfpDynamicSession {
                 },
                 flags: session_flags,
                 txn_wait_timeout_in_msec: 5000,
-                process_id: std::process::id(),
+                process_id: 0, // Must be 0 on input to FwpmEngineOpen0 ([out]-only field)
                 sid: std::ptr::null_mut(),
                 username: std::ptr::null_mut(),
                 kernel_mode: 0,
             };
 
             let mut engine_handle: *mut std::ffi::c_void = std::ptr::null_mut();
-            let status = unsafe {
+            let mut status = unsafe {
                 fn_open(
                     std::ptr::null(),
-                    RPC_C_AUTHN_DEFAULT,
+                    RPC_C_AUTHN_WINNT,
                     std::ptr::null_mut(),
                     &session,
                     &mut engine_handle,
@@ -409,6 +442,26 @@ impl WfpDynamicSession {
             };
 
             if status != ERROR_SUCCESS || engine_handle.is_null() {
+                status = unsafe {
+                    fn_open(
+                        std::ptr::null(),
+                        RPC_C_AUTHN_DEFAULT,
+                        std::ptr::null_mut(),
+                        if session_flags == 0 {
+                            std::ptr::null()
+                        } else {
+                            &session
+                        },
+                        &mut engine_handle,
+                    )
+                };
+            }
+
+            if status != ERROR_SUCCESS || engine_handle.is_null() {
+                warn!(
+                    "⚠️ [WFP] FwpmEngineOpen0 failed with status 0x{:08X} (flags: 0x{:08X})",
+                    status, session_flags
+                );
                 return Err(KillSwitchError::WfpEngineOpenFailed(status));
             }
 
@@ -612,7 +665,7 @@ impl WfpDynamicSession {
                         .encode_utf16()
                         .collect();
 
-                    let filter = FwpmFilter0 {
+                    let mut filter = FwpmFilter0 {
                         filter_key: WfpGuid::default(),
                         display_data: FwpmDisplayData0 {
                             name: w_name.as_mut_ptr(),
@@ -655,7 +708,22 @@ impl WfpDynamicSession {
                         },
                     };
 
-                    unsafe { self.add_filter_raw(&filter, layer_name) }
+                    match unsafe { self.add_filter_raw(&filter, layer_name) } {
+                        Ok(id) => Ok(id),
+                        Err(_first_err) => {
+                            // Fallback to BFE automatic weight calculation (FWP_EMPTY)
+                            filter.weight = FwpValue0 {
+                                type_: FWP_EMPTY,
+                                _pad: 0,
+                                value: 0,
+                            };
+                            let res = unsafe { self.add_filter_raw(&filter, layer_name) };
+                            if let Err(ref e) = res {
+                                warn!("⚠️ [WFP] Filter '{}' on {} failed: {}", name, layer_name, e);
+                            }
+                            res
+                        }
+                    }
                 };
 
             // 1. PERMIT LOOPBACK IPv4 (127.0.0.1)
@@ -787,141 +855,142 @@ impl WfpDynamicSession {
                 filter_ids.push(id);
             }
 
-            // 3. PERMIT CONTROL PORT 3030 (TCP)
-            let mut cond_port3030_in = [
-                FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_LOCAL_PORT,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpValue0 {
-                        type_: FWP_UINT16,
+            // 3. PERMIT ALL ACTIVE CONTROL / WEBUI PORTS (3030, 4040, and active_port.txt TCP)
+            for ctrl_port in discover_active_control_ports() {
+                let mut cond_port_in = [
+                    FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_LOCAL_PORT,
+                        match_type: FWP_MATCH_EQUAL,
                         _pad: 0,
-                        value: DEFAULT_CONTROL_PORT as usize,
+                        condition_value: FwpValue0 {
+                            type_: FWP_UINT16,
+                            _pad: 0,
+                            value: ctrl_port as usize,
+                        },
                     },
-                },
-                FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_PROTOCOL,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpValue0 {
-                        type_: FWP_UINT8,
+                    FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_PROTOCOL,
+                        match_type: FWP_MATCH_EQUAL,
                         _pad: 0,
-                        value: 6, // IPPROTO_TCP
+                        condition_value: FwpValue0 {
+                            type_: FWP_UINT8,
+                            _pad: 0,
+                            value: 6, // IPPROTO_TCP
+                        },
                     },
-                },
-            ];
-            if let Ok(id) = install_filter(
-                "Permit-ControlPort3030-In-v4",
-                FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
-                "ALE_AUTH_RECV_ACCEPT_V4",
-                FWP_ACTION_PERMIT,
-                15,
-                &mut cond_port3030_in,
-            ) {
-                filter_ids.push(id);
+                ];
+                if let Ok(id) = install_filter(
+                    &format!("Permit-ControlPort{}-In-v4", ctrl_port),
+                    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+                    "ALE_AUTH_RECV_ACCEPT_V4",
+                    FWP_ACTION_PERMIT,
+                    15,
+                    &mut cond_port_in,
+                ) {
+                    filter_ids.push(id);
+                }
+
+                let mut cond_port_out = [
+                    FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_REMOTE_PORT,
+                        match_type: FWP_MATCH_EQUAL,
+                        _pad: 0,
+                        condition_value: FwpValue0 {
+                            type_: FWP_UINT16,
+                            _pad: 0,
+                            value: ctrl_port as usize,
+                        },
+                    },
+                    FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_PROTOCOL,
+                        match_type: FWP_MATCH_EQUAL,
+                        _pad: 0,
+                        condition_value: FwpValue0 {
+                            type_: FWP_UINT8,
+                            _pad: 0,
+                            value: 6, // IPPROTO_TCP
+                        },
+                    },
+                ];
+                if let Ok(id) = install_filter(
+                    &format!("Permit-ControlPort{}-Out-v4", ctrl_port),
+                    FWPM_LAYER_ALE_AUTH_CONNECT_V4,
+                    "ALE_AUTH_CONNECT_V4",
+                    FWP_ACTION_PERMIT,
+                    15,
+                    &mut cond_port_out,
+                ) {
+                    filter_ids.push(id);
+                }
+
+                let mut cond_port_trans_local = [
+                    FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_LOCAL_PORT,
+                        match_type: FWP_MATCH_EQUAL,
+                        _pad: 0,
+                        condition_value: FwpValue0 {
+                            type_: FWP_UINT16,
+                            _pad: 0,
+                            value: ctrl_port as usize,
+                        },
+                    },
+                    FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_PROTOCOL,
+                        match_type: FWP_MATCH_EQUAL,
+                        _pad: 0,
+                        condition_value: FwpValue0 {
+                            type_: FWP_UINT8,
+                            _pad: 0,
+                            value: 6, // IPPROTO_TCP
+                        },
+                    },
+                ];
+                if let Ok(id) = install_filter(
+                    &format!("Permit-ControlPort{}-Transport-Local-v4", ctrl_port),
+                    FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+                    "OUTBOUND_TRANSPORT_V4",
+                    FWP_ACTION_PERMIT,
+                    15,
+                    &mut cond_port_trans_local,
+                ) {
+                    filter_ids.push(id);
+                }
+
+                let mut cond_port_trans_remote = [
+                    FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_REMOTE_PORT,
+                        match_type: FWP_MATCH_EQUAL,
+                        _pad: 0,
+                        condition_value: FwpValue0 {
+                            type_: FWP_UINT16,
+                            _pad: 0,
+                            value: ctrl_port as usize,
+                        },
+                    },
+                    FwpmFilterCondition0 {
+                        field_key: FWPM_CONDITION_IP_PROTOCOL,
+                        match_type: FWP_MATCH_EQUAL,
+                        _pad: 0,
+                        condition_value: FwpValue0 {
+                            type_: FWP_UINT8,
+                            _pad: 0,
+                            value: 6, // IPPROTO_TCP
+                        },
+                    },
+                ];
+                if let Ok(id) = install_filter(
+                    &format!("Permit-ControlPort{}-Transport-Remote-v4", ctrl_port),
+                    FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
+                    "OUTBOUND_TRANSPORT_V4",
+                    FWP_ACTION_PERMIT,
+                    15,
+                    &mut cond_port_trans_remote,
+                ) {
+                    filter_ids.push(id);
+                }
             }
 
-            let mut cond_port3030_out = [
-                FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_REMOTE_PORT,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpValue0 {
-                        type_: FWP_UINT16,
-                        _pad: 0,
-                        value: DEFAULT_CONTROL_PORT as usize,
-                    },
-                },
-                FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_PROTOCOL,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpValue0 {
-                        type_: FWP_UINT8,
-                        _pad: 0,
-                        value: 6, // IPPROTO_TCP
-                    },
-                },
-            ];
-            if let Ok(id) = install_filter(
-                "Permit-ControlPort3030-Out-v4",
-                FWPM_LAYER_ALE_AUTH_CONNECT_V4,
-                "ALE_AUTH_CONNECT_V4",
-                FWP_ACTION_PERMIT,
-                15,
-                &mut cond_port3030_out,
-            ) {
-                filter_ids.push(id);
-            }
-
-            // 4. PERMIT DNS (UDP 53 & TCP 53 Outbound)
-            let mut cond_dns_udp = [
-                FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_REMOTE_PORT,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpValue0 {
-                        type_: FWP_UINT16,
-                        _pad: 0,
-                        value: 53,
-                    },
-                },
-                FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_PROTOCOL,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpValue0 {
-                        type_: FWP_UINT8,
-                        _pad: 0,
-                        value: 17, // IPPROTO_UDP
-                    },
-                },
-            ];
-            if let Ok(id) = install_filter(
-                "Permit-DNS-UDP-Out-v4",
-                FWPM_LAYER_ALE_AUTH_CONNECT_V4,
-                "ALE_AUTH_CONNECT_V4",
-                FWP_ACTION_PERMIT,
-                15,
-                &mut cond_dns_udp,
-            ) {
-                filter_ids.push(id);
-            }
-
-            let mut cond_dns_tcp = [
-                FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_REMOTE_PORT,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpValue0 {
-                        type_: FWP_UINT16,
-                        _pad: 0,
-                        value: 53,
-                    },
-                },
-                FwpmFilterCondition0 {
-                    field_key: FWPM_CONDITION_IP_PROTOCOL,
-                    match_type: FWP_MATCH_EQUAL,
-                    _pad: 0,
-                    condition_value: FwpValue0 {
-                        type_: FWP_UINT8,
-                        _pad: 0,
-                        value: 6, // IPPROTO_TCP
-                    },
-                },
-            ];
-            if let Ok(id) = install_filter(
-                "Permit-DNS-TCP-Out-v4",
-                FWPM_LAYER_ALE_AUTH_CONNECT_V4,
-                "ALE_AUTH_CONNECT_V4",
-                FWP_ACTION_PERMIT,
-                15,
-                &mut cond_dns_tcp,
-            ) {
-                filter_ids.push(id);
-            }
-
-            // 5. PERMIT DHCPv4 (UDP 67/68)
+            // 4. PERMIT DHCPv4 (UDP 67/68)
             let mut cond_dhcp_out = [
                 FwpmFilterCondition0 {
                     field_key: FWPM_CONDITION_IP_REMOTE_PORT,
@@ -955,7 +1024,7 @@ impl WfpDynamicSession {
                 filter_ids.push(id);
             }
 
-            // 6. CATCH-ALL BLOCK FILTERS (Weight = 1, evaluated after Permit filters)
+            // 5. CATCH-ALL ALE BLOCK FILTERS (Weight = 1, evaluated after Permit filters)
             if let Ok(id) = install_filter(
                 "Block-All-Outbound-v4",
                 FWPM_LAYER_ALE_AUTH_CONNECT_V4,
@@ -978,7 +1047,9 @@ impl WfpDynamicSession {
                 filter_ids.push(id);
             }
 
-            // 7. TRANSPORT LAYER LOOPBACK PERMIT + CATCH-ALL BLOCK (Blocks ICMP `ping 8.8.8.8` as well as raw sockets)
+            // 6. TRANSPORT LAYER LOOPBACK PERMIT + CATCH-ALL BLOCK
+            // Blocks ALL non-loopback packets at the transport layer (including ICMP `ping 8.8.8.8`,
+            // pre-existing TCP/HTTP2 sockets, and UDP/QUIC HTTP/3 browser connections).
             let mut cond_lb_trans_v4 = [FwpmFilterCondition0 {
                 field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
                 match_type: FWP_MATCH_EQUAL,
@@ -1021,23 +1092,66 @@ impl WfpDynamicSession {
                 filter_ids.push(id);
             }
 
-            let mut cond_icmp_trans_v4 = [FwpmFilterCondition0 {
-                field_key: FWPM_CONDITION_IP_PROTOCOL,
+            let mut cond_lb_trans_v6 = [FwpmFilterCondition0 {
+                field_key: FWPM_CONDITION_IP_REMOTE_ADDRESS,
                 match_type: FWP_MATCH_EQUAL,
                 _pad: 0,
                 condition_value: FwpValue0 {
-                    type_: FWP_UINT8,
+                    type_: FWP_BYTE_ARRAY16_TYPE,
                     _pad: 0,
-                    value: 1, // IPPROTO_ICMP (blocks `ping 8.8.8.8` at transport layer)
+                    value: loopback_v6_bytes.as_ptr() as usize,
                 },
             }];
             if let Ok(id) = install_filter(
-                "Block-ICMP-Transport-Out-v4",
+                "Permit-Loopback-Transport-Out-v6",
+                FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
+                "OUTBOUND_TRANSPORT_V6",
+                FWP_ACTION_PERMIT,
+                15,
+                &mut cond_lb_trans_v6,
+            ) {
+                filter_ids.push(id);
+            }
+
+            let mut cond_lb_flag_trans_v6 = [FwpmFilterCondition0 {
+                field_key: FWPM_CONDITION_FLAGS,
+                match_type: FWP_MATCH_FLAGS_ALL_SET,
+                _pad: 0,
+                condition_value: FwpValue0 {
+                    type_: FWP_UINT32,
+                    _pad: 0,
+                    value: FWP_CONDITION_FLAG_IS_LOOPBACK as usize,
+                },
+            }];
+            if let Ok(id) = install_filter(
+                "Permit-LoopbackFlag-Transport-Out-v6",
+                FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
+                "OUTBOUND_TRANSPORT_V6",
+                FWP_ACTION_PERMIT,
+                15,
+                &mut cond_lb_flag_trans_v6,
+            ) {
+                filter_ids.push(id);
+            }
+
+            if let Ok(id) = install_filter(
+                "Block-All-Transport-Out-v4",
                 FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
                 "OUTBOUND_TRANSPORT_V4",
                 FWP_ACTION_BLOCK,
                 1,
-                &mut cond_icmp_trans_v4,
+                &mut [],
+            ) {
+                filter_ids.push(id);
+            }
+
+            if let Ok(id) = install_filter(
+                "Block-All-Transport-Out-v6",
+                FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
+                "OUTBOUND_TRANSPORT_V6",
+                FWP_ACTION_BLOCK,
+                1,
+                &mut [],
             ) {
                 filter_ids.push(id);
             }
@@ -1570,6 +1684,7 @@ pub fn terminate_all_non_loopback_tcp_sockets() -> usize {
         let count = num_entries.min(max_entries);
         let rows_ptr = unsafe { buf.as_ptr().add(4) as *const MibTcpRow };
 
+        let active_ctrl_ports = discover_active_control_ports();
         let mut terminated = 0usize;
         for i in 0..count {
             let row = unsafe { *rows_ptr.add(i) };
@@ -1580,9 +1695,9 @@ pub fn terminate_all_non_loopback_tcp_sockets() -> usize {
 
             // Invariant 1: Preserve loopback traffic (127.0.0.0/8)
             let is_loopback = local_octets[0] == 127 || remote_octets[0] == 127;
-            // Invariant 2: Preserve control port 3030
+            // Invariant 2: Preserve all active control/WebUI ports (3030, 4040, active_port.txt)
             let is_control_port =
-                local_port == DEFAULT_CONTROL_PORT || remote_port == DEFAULT_CONTROL_PORT;
+                active_ctrl_ports.contains(&local_port) || active_ctrl_ports.contains(&remote_port);
             // Invariant 3: Target half-open and established states
             let is_target_state = matches!(row.dw_state, 3 | 4 | 5 | 8);
 
@@ -1790,7 +1905,17 @@ pub fn engage_windows_network_quarantine(
             *guard = WfpDynamicSession::open().ok();
         }
         if let Some(ref session) = *guard {
-            let ids = session.install_hermetic_quarantine_filters("KillSwitch")?;
+            let ids = match session.install_hermetic_quarantine_filters("KillSwitch") {
+                Ok(ids) => ids,
+                Err(e) => {
+                    warn!(
+                        "⚠️ [WFP] Could not install kernel WFP filters (Administrator token required): {}",
+                        e
+                    );
+                    let _ = session.abort_transaction();
+                    Vec::new()
+                }
+            };
             persist_wfp_filter_ids(&ids);
             #[cfg(windows)]
             let s_id = format!("{:p}", session.engine_handle);
@@ -1805,7 +1930,12 @@ pub fn engage_windows_network_quarantine(
     let registry_rules = apply_bfe_registry_quarantine_rules();
     let terminated_tcp = terminate_all_non_loopback_tcp_sockets();
 
-    let preserved_ports = vec![DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547];
+    let mut preserved_ports = discover_active_control_ports();
+    for p in [53u16, 67, 68, 546, 547] {
+        if !preserved_ports.contains(&p) {
+            preserved_ports.push(p);
+        }
+    }
     let preserved_ips = vec![
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(Ipv6Addr::LOCALHOST),

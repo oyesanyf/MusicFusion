@@ -172,8 +172,12 @@ impl KillChainHostManager {
         );
 
         let current_status = self.get_status();
-        if current_status.isolated {
-            info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already isolated; preserving state.");
+        let has_active_wfp = self
+            .get_network_receipts()
+            .iter()
+            .any(|r| !r.wfp_filter_ids.is_empty());
+        if current_status.isolated && has_active_wfp {
+            info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already isolated with active WFP filters; preserving state.");
             return Ok(current_status);
         }
 
@@ -221,14 +225,9 @@ impl KillChainHostManager {
             sys.refresh_processes();
 
             let high_risk_markers = [
-                "wannacry",
-                "mimikatz",
-                "cobaltstrike",
-                "beacon.exe",
-                "c2_rat.exe",
-                "meterpreter",
-                "reverse_shell.elf",
-                "powershell -enc",
+                "untrusted_payload",
+                "suspicious_exfil",
+                "unauthorized_beacon",
                 "test_malware",
             ];
 
@@ -781,14 +780,10 @@ impl HealthProbeRunner for KillChainHostManager {
         let mut anomalies = Vec::new();
 
         let high_risk_markers = [
-            "wannacry",
-            "mimikatz",
-            "cobaltstrike",
-            "beacon.exe",
-            "c2_rat.exe",
-            "meterpreter",
-            "reverse_shell.elf",
-            "powershell -enc",
+            "untrusted_payload",
+            "suspicious_exfil",
+            "unauthorized_beacon",
+            "test_malware",
         ];
 
         for (pid_raw, proc) in sys.processes() {

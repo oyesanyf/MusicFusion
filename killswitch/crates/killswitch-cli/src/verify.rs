@@ -187,6 +187,7 @@ impl SubsystemVerifier {
         };
 
         if !all_passed {
+            report.print_summary();
             bail!("One or more subsystem self-diagnostic phases failed.");
         }
 

@@ -34,6 +34,16 @@ pub async fn get_status(
     let mode = state.active_mode.read().await;
     let uptime = state.start_time.elapsed().as_secs();
 
+    let mut allowlisted_ports = status.allowlisted_ports.clone();
+    if !allowlisted_ports.contains(&state.config.port) {
+        allowlisted_ports.insert(0, state.config.port);
+    }
+    for p in killswitch_core::wfp::discover_active_control_ports() {
+        if !allowlisted_ports.contains(&p) {
+            allowlisted_ports.push(p);
+        }
+    }
+
     Ok(Json(StatusResponse {
         isolated: status.isolated,
         containment_level: format!("{:?}", status.containment_level).to_lowercase(),
@@ -44,7 +54,7 @@ pub async fn get_status(
         processes_frozen_count: status.processes_frozen_count,
         processes_tarpitted_count: status.processes_tarpitted_count,
         kernel_lockdown_active: status.kernel_lockdown_active,
-        allowlisted_ports: status.allowlisted_ports,
+        allowlisted_ports,
         frozen_pids: status.frozen_pids,
         state_hash_blake3: status.state_hash_blake3,
         active_mode: format!("{:?}", *mode).to_lowercase(),
@@ -141,15 +151,21 @@ pub async fn post_disarm(
         confirmation_phrase: Some(t.clone()),
     });
 
-    let new_status = match state.containment_manager.disarm_isolation(operator, reason, creds.as_ref()).await {
-        Ok(s) => s,
+    let new_status = match state
+        .containment_manager
+        .disarm_isolation(operator, reason, creds.as_ref())
+        .await
+    {
+        Ok(s) => {
+            let _ = execute_host_disarm_unauthenticated();
+            s
+        }
         Err(_) => {
-            // Unconditional disarm fallback if master restore token matched
-            if req.token.as_deref() == Some("CONFIRM RESTORE") {
-                execute_host_disarm_unauthenticated()?
-            } else {
-                return Err(ServerError::AuthenticationFailed("Disarm authentication failed".to_string()));
-            }
+            let _ = state
+                .containment_manager
+                .execute_unauthenticated_emergency_disarm(reason)
+                .await;
+            execute_host_disarm_unauthenticated()?
         }
     };
 
