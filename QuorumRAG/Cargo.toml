@@ -6,6 +6,8 @@ members = [
     "crates/quorum-contract",
     "crates/quorum-storage",
     "crates/quorum-ingest",
+    "crates/quorum-network",
+    "crates/quorum-coordinator",
 ]
 
 [workspace.package]
@@ -22,6 +24,8 @@ quorum-classifier = { path = "crates/quorum-classifier" }
 quorum-contract = { path = "crates/quorum-contract" }
 quorum-storage = { path = "crates/quorum-storage" }
 quorum-ingest = { path = "crates/quorum-ingest" }
+quorum-network = { path = "crates/quorum-network" }
+quorum-coordinator = { path = "crates/quorum-coordinator" }
 
 # Ingestion & Traversal
 ignore = "0.4.22"
@@ -44,6 +48,8 @@ ed25519-dalek = { version = "2.1", features = ["serde", "rand_core"] }
 # Async & Networking
 tokio = { version = "1.40", features = ["full"] }
 futures = "0.3"
+async-trait = "0.1"
+sysinfo = "0.30"
 
 # Error Handling & Tracing
 thiserror = "2.0"

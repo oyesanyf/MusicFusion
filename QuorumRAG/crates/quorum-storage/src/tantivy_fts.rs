@@ -146,11 +146,8 @@ impl TantivyFtsIndex {
             return Ok(Vec::new());
         }
 
-        let mut searcher = self.reader.searcher();
-        if searcher.num_docs() == 0 {
-            let _ = self.reader.reload();
-            searcher = self.reader.searcher();
-        }
+        let _ = self.reader.reload();
+        let searcher = self.reader.searcher();
         if searcher.num_docs() == 0 {
             return Ok(Vec::new());
         }
