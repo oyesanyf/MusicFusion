@@ -1,0 +1,379 @@
+//! StorageEngine providing unified vector storage, Tantivy BM25, and hybrid RRF search.
+//!
+//! # Invariant: Absolute Arrow Isolation
+//! All Apache Arrow, LanceDB, and Tantivy types are strictly private.
+//! Callers interact solely with pure domain types (`DocumentChunk`, `ScoredChunk`, `StorageError`).
+
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use quorum_types::{DocumentChunk, ScoredChunk};
+use serde::{Deserialize, Serialize};
+
+use crate::config::StorageConfig;
+use crate::error::StorageError;
+use crate::tantivy_fts::TantivyFtsIndex;
+use crate::vector_store::VectorStore;
+
+/// Search execution mode for storage queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchMode {
+    /// Tantivy BM25 lexical / keyword search.
+    Keyword,
+    /// LanceDB dense vector similarity search.
+    Vector,
+    /// Combined BM25 + Vector with Reciprocal Rank Fusion.
+    Hybrid,
+}
+
+/// Unified query descriptor for `StorageEngine::search`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StorageSearchQuery {
+    /// Execution mode.
+    pub mode: SearchMode,
+    /// Text query string for Keyword or Hybrid search.
+    pub text: Option<String>,
+    /// Dense query vector for Vector or Hybrid search.
+    pub vector: Option<Vec<f32>>,
+    /// Upper bound on authorized access tier (0=Public..3=Restricted).
+    pub max_tier: u8,
+    /// Maximum number of top candidate chunks to return.
+    pub top_k: usize,
+}
+
+impl StorageSearchQuery {
+    /// Creates a vector similarity search query.
+    pub fn vector(vector: Vec<f32>, max_tier: u8, top_k: usize) -> Self {
+        Self {
+            mode: SearchMode::Vector,
+            text: None,
+            vector: Some(vector),
+            max_tier,
+            top_k,
+        }
+    }
+
+    /// Creates a Tantivy BM25 keyword search query.
+    pub fn keyword(text: impl Into<String>, max_tier: u8, top_k: usize) -> Self {
+        Self {
+            mode: SearchMode::Keyword,
+            text: Some(text.into()),
+            vector: None,
+            max_tier,
+            top_k,
+        }
+    }
+
+    /// Creates a hybrid (Vector + BM25 + RRF) search query.
+    pub fn hybrid(text: impl Into<String>, vector: Vec<f32>, max_tier: u8, top_k: usize) -> Self {
+        Self {
+            mode: SearchMode::Hybrid,
+            text: Some(text.into()),
+            vector: Some(vector),
+            max_tier,
+            top_k,
+        }
+    }
+}
+
+/// Results and metrics from storage compaction.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactionStats {
+    /// Number of small Lance parquet fragments consolidated.
+    pub fragments_removed: usize,
+    /// Number of consolidated fragments generated.
+    pub fragments_added: usize,
+    /// Number of obsolete version snapshots cleaned up.
+    pub old_versions_pruned: usize,
+    /// Whether Tantivy segments were merged.
+    pub tantivy_segments_merged: bool,
+}
+
+/// Production-grade embedded storage engine for QuorumRAG.
+pub struct StorageEngine {
+    config: StorageConfig,
+    vector_store: Arc<VectorStore>,
+    fts_index: Arc<TantivyFtsIndex>,
+}
+
+impl StorageEngine {
+    /// Opens or creates the embedded LanceDB vector table and co-located Tantivy FTS index.
+    pub async fn open(config: impl Into<StorageConfig>) -> Result<Self, StorageError> {
+        let cfg = config.into();
+        let vector_store = Arc::new(VectorStore::open(&cfg).await?);
+        let fts_index = Arc::new(TantivyFtsIndex::open(&cfg.tantivy_path())?);
+
+        Ok(Self {
+            config: cfg,
+            vector_store,
+            fts_index,
+        })
+    }
+
+    /// Inserts document chunks with automatic Level-2 BLAKE3 deduplication.
+    pub async fn insert_chunks(&self, chunks: &[DocumentChunk]) -> Result<usize, StorageError> {
+        if chunks.is_empty() {
+            return Ok(0);
+        }
+
+        let mut unique_chunks: Vec<DocumentChunk> = Vec::with_capacity(chunks.len());
+        let mut seen_hashes: HashSet<String> = HashSet::with_capacity(chunks.len());
+
+        for chunk in chunks {
+            if seen_hashes.contains(&chunk.blake3_hash) {
+                continue;
+            }
+            if self.has_chunk_hash(&chunk.blake3_hash).await.unwrap_or(false) {
+                continue;
+            }
+            seen_hashes.insert(chunk.blake3_hash.clone());
+            unique_chunks.push(chunk.clone());
+        }
+
+        if unique_chunks.is_empty() {
+            return Ok(0);
+        }
+
+        let count = self.vector_store.insert_chunks(&unique_chunks).await?;
+        let _ = self.fts_index.index_chunks(&unique_chunks)?;
+
+        Ok(count)
+    }
+
+    /// Dense vector ANN search with access-tier SQL pre-filtering.
+    pub async fn search_vector(
+        &self,
+        vector: &[f32],
+        max_tier: u8,
+        top_k: usize,
+    ) -> Result<Vec<ScoredChunk>, StorageError> {
+        self.vector_store.search_vector(vector, max_tier, top_k).await
+    }
+
+    /// Tantivy BM25 keyword search with access-tier filtering.
+    pub async fn search_text(
+        &self,
+        query: &str,
+        max_tier: u8,
+        top_k: usize,
+    ) -> Result<Vec<ScoredChunk>, StorageError> {
+        self.fts_index.search(query, max_tier, top_k)
+    }
+
+    /// Hybrid search combining vector search and BM25 full-text search via Reciprocal Rank Fusion (RRF).
+    pub async fn search_hybrid(
+        &self,
+        text: &str,
+        vector: &[f32],
+        max_tier: u8,
+        top_k: usize,
+    ) -> Result<Vec<ScoredChunk>, StorageError> {
+        if top_k == 0 {
+            return Ok(Vec::new());
+        }
+
+        let candidate_limit = top_k.saturating_mul(2).clamp(10, 50_000);
+        let vector_hits = self.search_vector(vector, max_tier, candidate_limit).await?;
+        let text_hits = self.search_text(text, max_tier, candidate_limit).await?;
+
+        let mut rrf_map: HashMap<String, (f32, DocumentChunk)> = HashMap::new();
+
+        // Only include vector hits that have positive cosine similarity
+        let relevant_vector_hits: Vec<ScoredChunk> = vector_hits
+            .into_iter()
+            .filter(|s| s.score > 0.0)
+            .collect();
+
+        let mut current_rank = 1;
+        for (i, scored) in relevant_vector_hits.iter().enumerate() {
+            if i > 0 && (scored.score - relevant_vector_hits[i - 1].score).abs() > 1e-6 {
+                current_rank = i + 1;
+            }
+            let rrf = 1.0 / (60.0 + current_rank as f32);
+            let entry = rrf_map
+                .entry(scored.chunk.chunk_id.clone())
+                .or_insert((0.0, scored.chunk.clone()));
+            entry.0 += rrf;
+        }
+
+        // Only include text hits with positive scores
+        let relevant_text_hits: Vec<ScoredChunk> = text_hits
+            .into_iter()
+            .filter(|s| s.score > 0.0)
+            .collect();
+
+        let mut current_rank = 1;
+        for (i, scored) in relevant_text_hits.iter().enumerate() {
+            if i > 0 && (scored.score - relevant_text_hits[i - 1].score).abs() > 1e-6 {
+                current_rank = i + 1;
+            }
+            let rrf = 1.0 / (60.0 + current_rank as f32);
+            let entry = rrf_map
+                .entry(scored.chunk.chunk_id.clone())
+                .or_insert((0.0, scored.chunk.clone()));
+            entry.0 += rrf;
+        }
+
+        let mut combined: Vec<ScoredChunk> = rrf_map
+            .into_iter()
+            .map(|(_id, (score, chunk))| ScoredChunk::new(chunk, score, "local", false))
+            .collect();
+
+        combined.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.chunk.chunk_id.cmp(&b.chunk.chunk_id))
+        });
+        combined.truncate(top_k);
+
+        Ok(combined)
+    }
+
+    /// Unified search dispatcher switching on `SearchMode`.
+    pub async fn search(&self, query: &StorageSearchQuery) -> Result<Vec<ScoredChunk>, StorageError> {
+        match query.mode {
+            SearchMode::Vector => {
+                let vec = query.vector.as_deref().ok_or_else(|| {
+                    StorageError::InvalidQuery("Vector search mode requires query.vector".into())
+                })?;
+                self.search_vector(vec, query.max_tier, query.top_k).await
+            }
+            SearchMode::Keyword => {
+                let text = query.text.as_deref().ok_or_else(|| {
+                    StorageError::InvalidQuery("Keyword search mode requires query.text".into())
+                })?;
+                self.search_text(text, query.max_tier, query.top_k).await
+            }
+            SearchMode::Hybrid => {
+                let text = query.text.as_deref().unwrap_or("");
+                let empty_vec = vec![0.0; self.config.vector_dimension];
+                let vec = query.vector.as_deref().unwrap_or(&empty_vec);
+                self.search_hybrid(text, vec, query.max_tier, query.top_k).await
+            }
+        }
+    }
+
+    /// Checks if a chunk's BLAKE3 hash already exists in storage.
+    pub async fn has_chunk_hash(&self, blake3_hash: &str) -> Result<bool, StorageError> {
+        if self.fts_index.has_chunk_hash(blake3_hash)? {
+            return Ok(true);
+        }
+        self.vector_store.has_chunk_hash(blake3_hash).await
+    }
+
+    /// Deletes all chunks matching the specified source `file_path`.
+    pub async fn delete_by_file_path(&self, file_path: &str) -> Result<usize, StorageError> {
+        let lance_deleted = self.vector_store.delete_by_file_path(file_path).await?;
+        let tantivy_deleted = self.fts_index.delete_by_file_path(file_path)?;
+        Ok(lance_deleted.max(tantivy_deleted))
+    }
+
+    /// Performs maintenance: compacts small Lance files, cleans up older snapshots, and merges Tantivy segments.
+    pub async fn compact(&self) -> Result<CompactionStats, StorageError> {
+        let (frags_rem, frags_add, versions_pruned) = self
+            .vector_store
+            .optimize()
+            .await
+            .unwrap_or((0, 0, 0));
+
+        let fts_res = self.fts_index.compact();
+
+        Ok(CompactionStats {
+            fragments_removed: frags_rem,
+            fragments_added: frags_add,
+            old_versions_pruned: versions_pruned,
+            tantivy_segments_merged: fts_res.is_ok(),
+        })
+    }
+
+    /// Total number of stored chunks.
+    pub async fn count(&self) -> Result<usize, StorageError> {
+        self.vector_store.count().await
+    }
+
+    /// Whether storage is currently empty.
+    pub async fn is_empty(&self) -> Result<bool, StorageError> {
+        Ok(self.count().await? == 0)
+    }
+
+    /// Clones configuration options.
+    pub fn config(&self) -> &StorageConfig {
+        &self.config
+    }
+
+    /// Returns all chunks stored in LanceDB.
+    pub async fn scan_all_chunks(&self) -> Result<Vec<DocumentChunk>, StorageError> {
+        self.vector_store.scan_all_chunks().await
+    }
+
+    /// Returns a map of `chunk_id -> blake3_hash` for all chunks in LanceDB.
+    pub async fn get_lance_chunk_catalog(&self) -> Result<HashMap<String, String>, StorageError> {
+        let chunks = self.vector_store.scan_all_chunks().await?;
+        let mut map = HashMap::with_capacity(chunks.len());
+        for chunk in chunks {
+            map.insert(chunk.chunk_id, chunk.blake3_hash);
+        }
+        Ok(map)
+    }
+
+    /// Returns a map of `chunk_id -> blake3_hash` for all chunks in Tantivy.
+    pub fn get_tantivy_chunk_catalog(&self) -> Result<HashMap<String, String>, StorageError> {
+        let chunks = self.fts_index.scan_all_chunks()?;
+        let mut map = HashMap::with_capacity(chunks.len());
+        for chunk in chunks {
+            map.insert(chunk.chunk_id, chunk.blake3_hash);
+        }
+        Ok(map)
+    }
+
+    /// Retrieves specific chunks from LanceDB by their IDs.
+    pub async fn get_chunks_by_ids(&self, chunk_ids: &[String]) -> Result<Vec<DocumentChunk>, StorageError> {
+        let id_set: HashSet<&str> = chunk_ids.iter().map(|s| s.as_str()).collect();
+        let all_chunks = self.vector_store.scan_all_chunks().await?;
+        Ok(all_chunks.into_iter().filter(|c| id_set.contains(c.chunk_id.as_str())).collect())
+    }
+
+    /// Retrieves specific chunks from Tantivy by their IDs.
+    pub fn get_chunks_from_tantivy(&self, chunk_ids: &[String]) -> Result<Vec<DocumentChunk>, StorageError> {
+        let id_set: HashSet<&str> = chunk_ids.iter().map(|s| s.as_str()).collect();
+        let all_chunks = self.fts_index.scan_all_chunks()?;
+        Ok(all_chunks.into_iter().filter(|c| id_set.contains(c.chunk_id.as_str())).collect())
+    }
+
+    /// Inserts chunks exclusively into LanceDB (used during Tantivy -> LanceDB drift repair).
+    pub async fn insert_into_lance_only(&self, chunks: &[DocumentChunk]) -> Result<usize, StorageError> {
+        self.vector_store.insert_chunks(chunks).await
+    }
+
+    /// Inserts chunks exclusively into Tantivy (used during LanceDB -> Tantivy drift repair).
+    pub fn insert_into_tantivy_only(&self, chunks: &[DocumentChunk]) -> Result<usize, StorageError> {
+        self.fts_index.index_chunks(chunks)
+    }
+
+    /// Updates or replaces a single chunk record across both LanceDB and Tantivy.
+    pub async fn update_chunk_record(&self, chunk: &DocumentChunk) -> Result<(), StorageError> {
+        let _ = self.vector_store.delete_by_chunk_id(&chunk.chunk_id).await?;
+        let _ = self.fts_index.delete_by_chunk_id(&chunk.chunk_id)?;
+        self.vector_store.insert_chunks(std::slice::from_ref(chunk)).await?;
+        self.fts_index.index_chunks(std::slice::from_ref(chunk))?;
+        Ok(())
+    }
+
+    /// Updates the access_tier of an existing chunk atomically across both stores.
+    pub async fn update_chunk_access_tier(&self, chunk_id: &str, new_tier: u8) -> Result<(), StorageError> {
+        let all_chunks = self.vector_store.scan_all_chunks().await?;
+        if let Some(mut chunk) = all_chunks.into_iter().find(|c| c.chunk_id == chunk_id) {
+            chunk.access_tier = new_tier;
+            self.update_chunk_record(&chunk).await?;
+        }
+        Ok(())
+    }
+
+    /// Deletes a chunk by its chunk_id across both stores.
+    pub async fn delete_by_chunk_id(&self, chunk_id: &str) -> Result<usize, StorageError> {
+        let l = self.vector_store.delete_by_chunk_id(chunk_id).await?;
+        let t = self.fts_index.delete_by_chunk_id(chunk_id)?;
+        Ok(l.max(t))
+    }
+}
