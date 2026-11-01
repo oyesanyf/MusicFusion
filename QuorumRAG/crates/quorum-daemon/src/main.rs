@@ -198,7 +198,12 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
 
     // 5. Auto-launch browser if not disabled
     if !cli.no_browser {
-        let url = format!("http://{}:{}", cli.host, bound_http_port);
+        let browser_host = if cli.host == "0.0.0.0" {
+            "127.0.0.1"
+        } else {
+            cli.host.as_str()
+        };
+        let url = format!("http://{}:{}", browser_host, bound_http_port);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             browser::launch_browser(&url);

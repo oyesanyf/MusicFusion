@@ -15,8 +15,8 @@ pub struct Cli {
     #[arg(short, long, default_value_t = 3030)]
     pub port: u16,
 
-    /// Host interface to bind on
-    #[arg(long, default_value = "127.0.0.1")]
+    /// Host interface to bind on (defaults to 0.0.0.0 so both localhost and remote LAN peers can connect)
+    #[arg(long, default_value = "0.0.0.0")]
     pub host: String,
 
     /// Root directory for LanceDB and Tantivy persistent data

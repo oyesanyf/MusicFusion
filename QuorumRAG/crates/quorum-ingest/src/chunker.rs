@@ -88,7 +88,10 @@ impl TextChunker {
 
             // 2. Natural boundary snapping if not at the end of content
             if end_idx < total_len {
-                let snap_window_start = end_idx.saturating_sub(self.config.target_chunk_size / 4).max(start_idx);
+                let mut snap_window_start = end_idx.saturating_sub(self.config.target_chunk_size / 4).max(start_idx);
+                while !content.is_char_boundary(snap_window_start) && snap_window_start < end_idx {
+                    snap_window_start += 1;
+                }
                 let window = &content[snap_window_start..end_idx];
 
                 // Check for paragraph break (\n\n)
