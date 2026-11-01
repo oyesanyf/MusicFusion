@@ -104,3 +104,14 @@ Gate Result: **FAIL** (challenger_m6_1 REJECT)
 | auditor_m7 | teamwork_auditor | CLEAN | handoff.md | Verified 100% genuine physical modeling, zero mocks, real UvBridge, 88 WAV files verified |
 
 Gate Result: **FAIL** (challenger_m7_2 REJECT: "ALL INSTRUMENTS MUST BE USED" invariant breached on `song_afrobeats_002` `drums.wav` RMS < -60 dBFS)
+
+## Milestone 7 — Iteration 2 (Remediation Recheck & Melodic Singing Upgrade)
+| Agent | Role | Verdict | Source | Notes |
+|-------|------|---------|--------|-------|
+| worker_m7_remed | teamwork_worker | DONE | handoff.md | Commit `7b3b79c`: 3-band percussion filter in `node4_stem_inpainting.rs`, `drums.wav` RMS restored to -15.03 dBFS / -14.42 dBFS; `workers/generate_song.py` catches `Exception` with exit code 2 |
+| worker_m7_vocal | teamwork_worker | DONE | handoff.md | Commit `f48b7e0`: `MelodicSingingSynthesizer` in `crates/music_dsp/src/melodic_singing.rs` (scale locking, 5.5 Hz vibrato, glottal pulse, 3-part choir harmony, Schroeder reverb); top 7 open HF model catalog integrated; all 8 sample songs regenerated |
+| reviewer_m7_recheck | teamwork_reviewer | APPROVE | handoff.md | Approved. Verified Afrobeats drum fix, Python DLL exception handling, melodic singing synthesis, model discovery & WebUI, 56 stems pass non-silence (> -50 dBFS), 88 WAVs valid, 191 E2E tests pass |
+| challenger_m7_recheck | teamwork_challenger | APPROVE | handoff.md | Approved. Empirically ran `audit_stems_non_silence.py` (56/56 stems pass > -50 dBFS), `validate_disk_songs.py` (88/88 pass, peak <= 0.89124 / -1.0 dBFS), workspace tests and 191 E2E tests pass 100% |
+| auditor_m7_recheck | teamwork_auditor | CLEAN | handoff.md | Verified 100% genuine DSP, zero mocks, zero fake data, genuine melodic singing synthesis, zero registry/PATH mutations, 191/191 E2E tests pass |
+
+Gate Result: **PASS** (Milestone 7 Physical Modeling Synthesis, Stem Headroom & Tape Mastering, uv Python Neural Bridge, Melodic Singing Upgrade & Sample Regeneration is DONE)
