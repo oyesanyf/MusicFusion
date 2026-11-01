@@ -214,13 +214,33 @@ impl VirtuosoStemInpaintingNode {
         let memory = SystemMemory::detect_live();
         let use_dsp = memory.should_use_dsp(PipelineStageKind::Stage4Inpainting, &state.engine_mode);
 
-        let (mut drums_buf, bass_buf, guitar_buf, other_buf) = if !use_dsp && state.is_hf_hybrid() {
+        let (mut drums_buf, mut bass_buf, mut guitar_buf, mut other_buf) = if !use_dsp && state.is_hf_hybrid() {
             // HF Demucs subprocess path (with fallback to pure-Rust DSP)
             info!("Attempting external Demucs subprocess separation...");
             self.separate_stems_pure_rust(&base_inst)
         } else {
             self.separate_stems_pure_rust(&base_inst)
         };
+
+        let dur_secs = base_inst.duration_secs();
+        let sr = base_inst.sample_rate;
+        let root_hz = crate::nodes::node2_groove_yue::GrooveAndYueSynthesisNode::parse_key_signature_root_hz(&state.key_signature);
+
+        // Reinforce discrete physical-model stems (DubSubBass, Skank Guitar, Hammond Organ + Brass)
+        // so every stem has full studio presence from 0:00 to the end of the track
+        let discrete_bass = music_dsp::groove_synth::DubSubBass::new(sr).synthesize(dur_secs, state.bpm);
+        let discrete_guitar = music_dsp::guitar_wah::synthesize_reggae_skank_track(dur_secs, sr, state.bpm);
+        let discrete_organ = music_dsp::groove_synth::HammondOrganBubble::new(sr).synthesize(dur_secs, state.bpm, root_hz);
+
+        for i in 0..bass_buf.samples.len().min(discrete_bass.samples.len()) {
+            bass_buf.samples[i] = (bass_buf.samples[i] * 0.30 + discrete_bass.samples[i] * 0.80).clamp(-0.95, 0.95);
+        }
+        for i in 0..guitar_buf.samples.len().min(discrete_guitar.samples.len()) {
+            guitar_buf.samples[i] = (guitar_buf.samples[i] * 0.30 + discrete_guitar.samples[i] * 0.80).clamp(-0.95, 0.95);
+        }
+        for i in 0..other_buf.samples.len().min(discrete_organ.samples.len()) {
+            other_buf.samples[i] = (other_buf.samples[i] * 0.30 + discrete_organ.samples[i] * 0.80).clamp(-0.95, 0.95);
+        }
 
         // Blend active groove buffer draft_groove (e.g. 0.85 * draft_groove)
         // to preserve authentic percussion transients (Amapiano log drum, clave, shakers, one-drop kick)
@@ -256,9 +276,23 @@ impl VirtuosoStemInpaintingNode {
             4
         };
 
-        // 3. Synthesize soaring wah guitar solo
+        // 3. Synthesize soaring wah guitar solo layered over the rhythm guitar skank
         info!("Synthesizing {}-bar virtuoso guitar solo in {} at {} BPM", solo_bars, state.key_signature, state.bpm);
-        let solo_lead = synthesize_lead_solo(solo_bars, state.bpm, &state.key_signature);
+        let mut solo_lead = synthesize_lead_solo(solo_bars, state.bpm, &state.key_signature);
+        let samples_per_bar = ((60.0 / state.bpm.max(40) as f32) * 4.0 * sr as f32).round() as usize;
+        let solo_start_frame = (start_bar as usize) * samples_per_bar;
+        let g_chans = guitar_buf.channels as usize;
+        for f in 0..solo_lead.frame_count() {
+            let base_f = solo_start_frame + f;
+            if base_f < guitar_buf.frame_count() {
+                for c in 0..solo_lead.channels as usize {
+                    let gc = c.min(g_chans - 1);
+                    let rhythm_val = guitar_buf.samples[base_f * g_chans + gc];
+                    let lead_val = solo_lead.samples[f * solo_lead.channels as usize + c];
+                    solo_lead.samples[f * solo_lead.channels as usize + c] = (lead_val * 0.78 + rhythm_val * 0.65).clamp(-0.95, 0.95);
+                }
+            }
+        }
 
         // 4. Synthesize Nyabinghi polyrhythmic drum fills
         info!("Synthesizing Nyabinghi drum fills at {} BPM", state.bpm);

@@ -572,6 +572,7 @@ impl ReindexWorker {
                 continue;
             };
 
+            let mut top_priority_slices = Vec::new();
             let mut priority_slices = Vec::new();
             let mut normal_slices = Vec::new();
 
@@ -585,8 +586,8 @@ impl ReindexWorker {
                     continue;
                 }
 
-                // Expand large workspace containers (`harfile`, `users`) one level further
-                if path.is_dir() && matches!(name_lower.as_str(), "harfile" | "users") {
+                // Expand large workspace containers (`femi`, `harfile`, `users`) one level further
+                if path.is_dir() && matches!(name_lower.as_str(), "femi" | "harfile" | "users") {
                     if let Ok(sub_entries) = std::fs::read_dir(&path) {
                         for sub in sub_entries.flatten() {
                             let sub_path = sub.path();
@@ -594,11 +595,19 @@ impl ReindexWorker {
                             if SKIP_DIRS.contains(&sub_name.as_str()) || sub_name.starts_with('.') {
                                 continue;
                             }
-                            if sub_name.contains("mechanistic_interpretability")
-                                || sub_name.contains("quorumrag")
-                                || sub_name.contains("femi")
-                            {
-                                priority_slices.insert(0, sub_path);
+                            if matches!(
+                                sub_name.as_str(),
+                                "resume" | "transctipts" | "transcripts" | "school" | "wow" | "tax"
+                            ) {
+                                top_priority_slices.insert(0, sub_path);
+                            } else if sub_name.contains("mechanistic_interpretability") {
+                                let probe_dir = sub_path.join("probe_and_tools");
+                                if probe_dir.is_dir() {
+                                    top_priority_slices.push(probe_dir);
+                                }
+                                priority_slices.push(sub_path);
+                            } else if sub_name.contains("quorumrag") {
+                                priority_slices.push(sub_path);
                             } else {
                                 normal_slices.push(sub_path);
                             }
@@ -609,15 +618,16 @@ impl ReindexWorker {
 
                 if matches!(
                     name_lower.as_str(),
-                    "femi" | "school" | "articles" | "rules" | "documents"
+                    "school" | "articles" | "rules" | "documents"
                 ) || path.is_file()
                 {
-                    priority_slices.push(path);
+                    top_priority_slices.push(path);
                 } else {
                     normal_slices.push(path);
                 }
             }
 
+            expanded.extend(top_priority_slices);
             expanded.extend(priority_slices);
             expanded.extend(normal_slices);
         }

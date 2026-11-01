@@ -232,9 +232,9 @@
 
   function handleTelemetryEvent(event, bodyEl, citationsEl, headerEl) {
     const type = event.type || event.event;
+    const data = event.data || event;
 
     if (type === 'cache_telemetry' || type === 'CacheTelemetry') {
-      const data = event.data || event;
       if (data.cache_hit) {
         if (headerEl && !headerEl.querySelector('.cache-hit-pill')) {
           const cachePill = document.createElement('span');
@@ -244,34 +244,34 @@
         }
       }
       refreshCacheStats();
-    } else if (type === 'StateTransition') {
-      const fromState = event.from_state;
-      const toState = event.to_state;
+    } else if (type === 'StateTransition' || type === 'state_transition') {
+      const toState = data.to_state;
       updateTelemetryStep(toState);
-    } else if (type === 'HardwareProbed') {
-      if (telemetryModelInfo) {
-        telemetryModelInfo.textContent = `HW: ${event.data.free_ram_gb}GB free RAM | ${event.data.selected_tier}`;
+    } else if (type === 'HardwareProbed' || type === 'hardware_probed') {
+      if (telemetryModelInfo && data.free_ram_gb !== undefined) {
+        telemetryModelInfo.textContent = `HW: ${Number(data.free_ram_gb).toFixed(1)}GB free RAM | ${data.selected_tier || ''}`;
       }
-    } else if (type === 'IntentClassified') {
+    } else if (type === 'IntentClassified' || type === 'intent_classified') {
       if (telemetryModelInfo) {
-        telemetryModelInfo.textContent = `Model: ${event.model_name || event.data.model_name} | Mode: ${event.search_mode || event.data.search_mode}`;
+        telemetryModelInfo.textContent = `Model: ${data.model_name || ''} | Mode: ${data.search_mode || ''}`;
       }
-    } else if (type === 'TokenDelta' || type === 'token') {
-      const delta = event.delta || event.content || '';
+    } else if (type === 'TokenDelta' || type === 'token_delta' || type === 'token') {
+      const delta = data.delta || data.content || '';
       appendToken(bodyEl, delta);
     } else if (type === 'CitationEmitted' || type === 'citation') {
-      const cit = event.citation || event.data.citation;
+      const cit = data.citation || event.citation;
       if (cit) {
         appendCitation(citationsEl, cit);
       }
-    } else if (type === 'ExecutionFinished' || type === 'done') {
+    } else if (type === 'ExecutionFinished' || type === 'execution_finished' || type === 'done') {
       markTelemetryComplete();
-    } else if (type === 'ExecutionError') {
-      bodyEl.innerHTML += `<div style="color:var(--danger); margin-top:8px;">[Error: ${event.error_message || 'Execution error'}]</div>`;
+    } else if (type === 'ExecutionError' || type === 'execution_error') {
+      bodyEl.innerHTML += `<div style="color:var(--danger); margin-top:8px;">[Error: ${data.error_message || 'Execution error'}]</div>`;
     }
   }
 
   function appendToken(bodyEl, token) {
+    bodyEl.style.whiteSpace = 'pre-wrap';
     let cursor = bodyEl.querySelector('.typing-cursor');
     if (!cursor) {
       cursor = document.createElement('span');

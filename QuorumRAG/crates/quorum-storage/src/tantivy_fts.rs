@@ -319,8 +319,37 @@ impl TantivyFtsIndex {
             vec![self.field_text_content, self.field_file_path_text],
         );
 
+        let has_explicit_syntax = trimmed.contains(':')
+            || trimmed.contains('"')
+            || trimmed.contains('+')
+            || trimmed.contains('*');
+
+        let effective_query_str: String = if !has_explicit_syntax {
+            const QUESTION_STOPWORDS: &[&str] = &[
+                "what", "does", "do", "did", "where", "when", "who", "how", "why",
+                "is", "are", "was", "were", "the", "a", "an", "to", "for", "of",
+                "in", "on", "at", "with", "from", "by", "about", "go", "went",
+                "tell", "me", "can", "you", "please", "his", "her", "their",
+            ];
+            let sanitized: String = trimmed
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '_' { c } else { ' ' })
+                .collect();
+            let content_terms: Vec<&str> = sanitized
+                .split_whitespace()
+                .filter(|w| !QUESTION_STOPWORDS.contains(&w.to_ascii_lowercase().as_str()))
+                .collect();
+            if content_terms.is_empty() {
+                trimmed.to_string()
+            } else {
+                content_terms.join(" ")
+            }
+        } else {
+            trimmed.to_string()
+        };
+
         // Parse query with fallback if query has syntax chars
-        let parsed_query = query_parser.parse_query(trimmed).or_else(|_| {
+        let parsed_query = query_parser.parse_query(&effective_query_str).or_else(|_| {
             let sanitized: String = trimmed
                 .chars()
                 .map(|c| if c.is_alphanumeric() { c } else { ' ' })

@@ -475,38 +475,67 @@ pub fn synthesize_reggae_skank_chord(
     Some(strings)
 }
 
-/// Synthesizes complete reggae offbeat skank guitar track across duration_secs at bpm.
-/// Hits chords on beats 2 and 4 using Karplus-Strong string physical models on A Major pentatonic frequencies.
+/// Synthesizes complete reggae offbeat skank + melodic counter-pick guitar track across duration_secs at bpm.
+/// Strums chords across a 4-bar I-IV-vi-V progression using Karplus-Strong string physical models
+/// paired with warm pentatonic plucked fills.
 pub fn synthesize_reggae_skank_track(duration_secs: f32, sample_rate: u32, bpm: u32) -> AudioBuffer {
     let mut buf = AudioBuffer::new_stereo(duration_secs);
     let frames = buf.frame_count();
     let beat_sec = 60.0 / (bpm.clamp(40, 220) as f32);
+    let eighth_sec = beat_sec * 0.5;
     let bar_sec = beat_sec * 4.0;
     let sr = sample_rate as f32;
 
-    let mut current_strings: Option<[KarplusStrongString; 4]> = None;
-    let mut last_beat = usize::MAX;
+    // 4-Bar Chord Voicings (I: A Maj, IV: D Maj, vi: F#m, V: E Maj)
+    let chord_voicings: [[f32; 4]; 4] = [
+        [220.00, 277.18, 329.63, 440.00], // A Major
+        [293.66, 369.99, 440.00, 587.33], // D Major
+        [185.00, 220.00, 277.18, 369.99], // F# Minor
+        [164.81, 207.65, 246.94, 329.63], // E Major
+    ];
+
+    // Plucked pentatonic rhythm-pick notes on downbeats to keep guitar groove continuous
+    let pick_notes: [f32; 8] = [220.00, 277.18, 329.63, 246.94, 220.00, 369.99, 329.63, 277.18];
+
+    let mut current_strings: [KarplusStrongString; 4] = [
+        KarplusStrongString::new(sample_rate),
+        KarplusStrongString::new(sample_rate),
+        KarplusStrongString::new(sample_rate),
+        KarplusStrongString::new(sample_rate),
+    ];
+    let mut pick_string = KarplusStrongString::new(sample_rate);
+    let mut last_eighth = usize::MAX;
 
     for i in 0..frames {
         let t = i as f32 / sr;
-        let beat_in_bar = ((t % bar_sec) / beat_sec).floor() as usize;
+        let bar_idx = ((t / bar_sec).floor() as usize) % 4;
+        let eighth_idx = (t / eighth_sec).floor() as usize;
 
-        if beat_in_bar != last_beat {
-            last_beat = beat_in_bar;
-            if let Some(new_chords) = synthesize_reggae_skank_chord(beat_in_bar, sample_rate, 0.75) {
-                current_strings = Some(new_chords);
+        if eighth_idx != last_eighth {
+            last_eighth = eighth_idx;
+            let chord = chord_voicings[bar_idx];
+            if eighth_idx % 2 == 1 {
+                // Offbeat skank chop ("1-and", "2-and", "3-and", "4-and")
+                let vel = if (eighth_idx % 8 == 3) || (eighth_idx % 8 == 7) { 0.92 } else { 0.72 };
+                for (s_idx, pitch) in chord.iter().enumerate() {
+                    current_strings[s_idx].pluck(*pitch, vel);
+                }
+            } else {
+                // Subtle muted palm-pick on the downbeat (Ernest Ranglin / Bob Andy style)
+                let note = pick_notes[(eighth_idx / 2) % pick_notes.len()];
+                pick_string.pluck(note, 0.58);
             }
         }
 
-        if let Some(ref mut strings) = current_strings {
-            let mut s_sum = 0.0f32;
-            for strg in strings.iter_mut() {
-                s_sum += strg.tick();
-            }
-            let s_out = s_sum * 0.25;
-            buf.samples[i * 2] = s_out;
-            buf.samples[i * 2 + 1] = s_out * 0.95;
+        let mut s_sum = 0.0f32;
+        for strg in current_strings.iter_mut() {
+            s_sum += strg.tick();
         }
+        let p_val = pick_string.tick();
+        let l_out = (s_sum * 0.48 + p_val * 0.55).clamp(-0.92, 0.92);
+        let r_out = (s_sum * 0.44 + p_val * 0.60).clamp(-0.92, 0.92);
+        buf.samples[i * 2] = l_out;
+        buf.samples[i * 2 + 1] = r_out;
     }
 
     buf

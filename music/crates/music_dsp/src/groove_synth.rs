@@ -641,8 +641,8 @@ impl UniversalDrumSynthesizer {
 }
 
 /// Dub Sub-Bass synthesizer: warm, low-pass filtered (cutoff = 180 Hz) sine + triangle bassline
-/// walking on roots and fifths (A1 = 55.0 Hz, D2 = 73.42 Hz, E2 = 82.41 Hz)
-/// with a smooth 15 ms linear attack and 120 ms exponential release.
+/// walking across a 4-bar I-IV-vi-V progression (A1 = 55.0 Hz, D2 = 73.42 Hz, F#1 = 46.25 Hz, E2 = 82.41 Hz)
+/// with syncopated eighth-note pocket, 15 ms linear attack, and 120 ms exponential release.
 #[derive(Debug, Clone)]
 pub struct DubSubBass {
     pub sample_rate: f32,
@@ -664,7 +664,7 @@ impl DubSubBass {
         let mut buf = AudioBuffer::new_stereo(duration_secs);
         let frames = buf.frame_count();
         let beat_sec = 60.0 / (bpm.clamp(40, 220) as f32);
-        let bar_sec = beat_sec * 4.0;
+        let eighth_sec = beat_sec * 0.5;
         let sr = self.sample_rate;
 
         // 1-pole lowpass filter for 180 Hz cutoff:
@@ -673,25 +673,42 @@ impl DubSubBass {
         let rc = 1.0 / (2.0 * PI * fc);
         let alpha = dt / (rc + dt);
 
-        // Notes walking on roots and fifths: A1 = 55.0 Hz, D2 = 73.42 Hz, E2 = 82.41 Hz
-        let notes = [55.00f32, 73.42, 82.41, 55.00];
+        // 4-Bar (32 eighth-note) syncopated roots/fifths bassline (0.0 = rest for dub space):
+        // Bar 1 (A Maj): A1, rest, E2, C#2, A1, A1, E2, F#2
+        // Bar 2 (D Maj): D2, rest, A2, F#2, D2, D2, A1, B1
+        // Bar 3 (F#m/A): F#1, rest, C#2, A1, F#1, A1, C#2, D2
+        // Bar 4 (E Maj): E2, rest, B1, G#1, E2, D2, C#2, B1
+        let pattern_hz: [f32; 32] = [
+            55.00, 55.00, 82.41, 69.30, 55.00, 55.00, 82.41, 92.50,
+            73.42, 73.42, 110.00, 92.50, 73.42, 73.42, 55.00, 61.74,
+            55.00, 55.00, 69.30, 82.41, 55.00, 69.30, 82.41, 73.42,
+            82.41, 82.41, 61.74, 55.00, 82.41, 73.42, 69.30, 61.74,
+        ];
+        // Velocity accents per eighth-note step to create authentic dub bounce
+        let pattern_vel: [f32; 32] = [
+            1.00, 0.45, 0.85, 0.75, 0.95, 0.70, 0.85, 0.80,
+            1.00, 0.45, 0.85, 0.75, 0.95, 0.70, 0.80, 0.85,
+            0.95, 0.45, 0.85, 0.80, 0.95, 0.75, 0.85, 0.80,
+            1.00, 0.50, 0.85, 0.75, 0.95, 0.85, 0.80, 0.90,
+        ];
 
         for i in 0..frames {
             let t = i as f32 / sr;
-            let beat_in_bar = ((t % bar_sec) / beat_sec).floor() as usize;
-            let note_freq = notes[beat_in_bar % 4];
+            let step_idx = ((t / eighth_sec).floor() as usize) % 32;
+            let note_freq = pattern_hz[step_idx];
+            let step_vel = pattern_vel[step_idx];
 
-            let time_in_beat = t % beat_sec;
-            let gate_dur = beat_sec * 0.85;
+            let time_in_step = t % eighth_sec;
+            let gate_dur = eighth_sec * 0.82;
 
             // 15 ms linear attack, continuous sustain, 120 ms exponential release
-            let env = if time_in_beat < 0.015 {
-                time_in_beat / 0.015
-            } else if time_in_beat < gate_dur {
-                1.0
+            let env = if time_in_step < 0.015 {
+                (time_in_step / 0.015) * step_vel
+            } else if time_in_step < gate_dur {
+                step_vel
             } else {
-                let rel_t = time_in_beat - gate_dur;
-                (-rel_t / 0.120).exp()
+                let rel_t = time_in_step - gate_dur;
+                (-rel_t / 0.120).exp() * step_vel
             };
 
             // Continuous phase accumulation
@@ -700,15 +717,16 @@ impl DubSubBass {
                 self.phase -= 2.0 * PI;
             }
 
-            // Sine + Triangle blend
+            // Sine + Triangle + 2nd harmonic warmth
             let sine = self.phase.sin();
+            let second_harm = (2.0 * self.phase).sin() * 0.22;
             let norm_p = self.phase / (2.0 * PI);
             let tri = 2.0 * (2.0 * (norm_p - (norm_p + 0.5).floor()).abs()) - 1.0;
-            let raw_bass = (sine * 0.70 + tri * 0.30) * env;
+            let raw_bass = (sine * 0.65 + tri * 0.25 + second_harm) * env;
 
             // 180 Hz Low-Pass Filter
             self.lp_state += alpha * (raw_bass - self.lp_state);
-            let out_bass = self.lp_state * 0.85;
+            let out_bass = (self.lp_state * 1.15).tanh() * 0.88;
 
             buf.samples[i * 2] = out_bass;
             buf.samples[i * 2 + 1] = out_bass;
@@ -718,13 +736,15 @@ impl DubSubBass {
     }
 }
 
-/// Hammond Organ Bubble synthesizer: additive drawbar sine harmonics
-/// (1.0x, 2.0x, 3.0x, 4.0x fundamental) with a gentle 6 Hz rotary speaker
-/// tremolo LFO, enveloped smoothly with ADSR.
+/// Hammond Organ Bubble & Warm Brass Horn Section synthesizer:
+/// Additive drawbar sine harmonics (1.0x, 2.0x, 3.0x, 4.0x) across a 4-bar chord progression
+/// with a 6 Hz rotary speaker tremolo LFO, plus warm 3-piece Brass Horn stabs/swells on turnarounds.
 #[derive(Debug, Clone)]
 pub struct HammondOrganBubble {
     pub sample_rate: f32,
     pub phases: [f32; 4],
+    pub chord_phases: [f32; 3],
+    pub horn_phases: [f32; 3],
     pub lfo_phase: f32,
 }
 
@@ -733,41 +753,56 @@ impl HammondOrganBubble {
         Self {
             sample_rate: sample_rate as f32,
             phases: [0.0; 4],
+            chord_phases: [0.0; 3],
+            horn_phases: [0.0; 3],
             lfo_phase: 0.0,
         }
     }
 
-    /// Synthesizes complete Hammond organ bubble buffer across duration_secs at bpm (default 76 BPM)
-    /// locked to fundamental root_hz (default 220.0 Hz).
+    /// Synthesizes complete Hammond organ bubble + brass horn section across duration_secs at bpm
+    /// locked to fundamental root_hz (normalized to ~220.0 Hz).
     pub fn synthesize(&mut self, duration_secs: f32, bpm: u32, root_hz: f32) -> AudioBuffer {
         let mut buf = AudioBuffer::new_stereo(duration_secs);
         let frames = buf.frame_count();
         let beat_sec = 60.0 / (bpm.clamp(40, 220) as f32);
+        let bar_sec = beat_sec * 4.0;
         let sr = self.sample_rate;
-        let base_freq = if root_hz > 0.0 { root_hz } else { 220.0 };
+        let mut base_freq = if root_hz > 20.0 { root_hz } else { 220.0 };
+        while base_freq > 280.0 { base_freq *= 0.5; }
+        while base_freq < 140.0 { base_freq *= 2.0; }
+
+        // 4-Bar Chord Progression triad ratios (I: A Maj, IV: D Maj, vi: F#m, V: E Maj)
+        let chords: [[f32; 3]; 4] = [
+            [1.0,       1.259_921, 1.498_307], // I:  A3, C#4, E4
+            [1.334_840, 1.681_793, 2.0      ], // IV: D4, F#4, A4
+            [0.840_896, 1.0,       1.259_921], // vi: F#3, A3, C#4
+            [0.749_154, 0.943_874, 1.122_462], // V:  E3, G#3, B3
+        ];
 
         for i in 0..frames {
             let t = i as f32 / sr;
+            let bar_idx = ((t / bar_sec).floor() as usize) % 4;
+            let beat_in_bar = (t % bar_sec) / beat_sec;
             let beat_phase = (t % beat_sec) / beat_sec;
+            let chord = chords[bar_idx];
 
-            let (is_active, note_t) = if beat_phase >= 0.5 {
-                (true, (beat_phase - 0.5) * beat_sec)
+            // Reggae organ bubble hits on the offbeat (0.50..0.88) and quick pre-chop (0.25..0.38)
+            let (is_active, note_t) = if (0.50..0.88).contains(&beat_phase) {
+                (true, (beat_phase - 0.50) * beat_sec)
+            } else if (0.25..0.38).contains(&beat_phase) {
+                (true, (beat_phase - 0.25) * beat_sec)
             } else {
                 (false, 0.0)
             };
 
-            // ADSR: Attack 10ms, Decay 45ms, Sustain 0.70, Release 35ms
             let env = if !is_active {
-                0.06
+                0.08
             } else if note_t < 0.010 {
-                0.06 + 0.94 * (note_t / 0.010)
+                0.08 + 0.92 * (note_t / 0.010)
             } else if note_t < 0.055 {
                 1.0 - 0.30 * ((note_t - 0.010) / 0.045)
-            } else if note_t < (beat_sec * 0.40) {
-                0.70
             } else {
-                let rel_t = note_t - (beat_sec * 0.40);
-                (0.70 * (-rel_t / 0.035).exp()).max(0.06)
+                0.70
             };
 
             // 6 Hz rotary speaker tremolo LFO
@@ -775,19 +810,41 @@ impl HammondOrganBubble {
             if self.lfo_phase >= 2.0 * PI { self.lfo_phase -= 2.0 * PI; }
             let tremolo = 1.0 + 0.18 * self.lfo_phase.sin();
 
-            // Additive drawbar harmonics: 1.0x, 2.0x, 3.0x, 4.0x fundamental
+            // Additive drawbar harmonics on root + triad voicing
             let mults = [1.0f32, 2.0, 3.0, 4.0];
-            let gains = [0.45f32, 0.30, 0.15, 0.10];
+            let gains = [0.40f32, 0.25, 0.12, 0.08];
             let mut organ_sample = 0.0f32;
             for d in 0..4 {
-                self.phases[d] += 2.0 * PI * (base_freq * mults[d]) / sr;
+                self.phases[d] += 2.0 * PI * (base_freq * chord[0] * mults[d]) / sr;
                 if self.phases[d] >= 2.0 * PI { self.phases[d] -= 2.0 * PI; }
                 organ_sample += self.phases[d].sin() * gains[d];
             }
+            for c_idx in 0..3 {
+                self.chord_phases[c_idx] += 2.0 * PI * (base_freq * chord[c_idx]) / sr;
+                if self.chord_phases[c_idx] >= 2.0 * PI { self.chord_phases[c_idx] -= 2.0 * PI; }
+                organ_sample += self.chord_phases[c_idx].sin() * 0.16;
+            }
 
-            let final_val = organ_sample * env * tremolo * 0.35;
-            buf.samples[i * 2] = final_val;
-            buf.samples[i * 2 + 1] = final_val * 0.92;
+            // Warm Jamaican Brass Horn Section swell on beats 2.5..3.8 of every bar
+            let mut horn_sample = 0.0f32;
+            if (2.5..3.85).contains(&beat_in_bar) {
+                let h_prog = (beat_in_bar - 2.5) / 1.35;
+                let h_env = (h_prog * PI).sin();
+                for h_idx in 0..3 {
+                    let h_freq = base_freq * chord[h_idx] * 2.0;
+                    self.horn_phases[h_idx] += 2.0 * PI * h_freq / sr;
+                    if self.horn_phases[h_idx] >= 2.0 * PI { self.horn_phases[h_idx] -= 2.0 * PI; }
+                    let p = self.horn_phases[h_idx];
+                    // Warm brass odd+even harmonic blend
+                    let brass = p.sin() * 0.55 + (2.0 * p).sin() * 0.28 + (3.0 * p).sin() * 0.14;
+                    horn_sample += brass * h_env * 0.18;
+                }
+            }
+
+            let l_out = (organ_sample * env * tremolo * 0.48 + horn_sample * 0.65).clamp(-0.92, 0.92);
+            let r_out = (organ_sample * env * tremolo * 0.44 + horn_sample * 0.72).clamp(-0.92, 0.92);
+            buf.samples[i * 2] = l_out;
+            buf.samples[i * 2 + 1] = r_out;
         }
 
         buf

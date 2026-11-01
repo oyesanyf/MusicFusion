@@ -207,9 +207,9 @@ impl FilesystemCrawler {
             if entry.depth() == 0 {
                 return true;
             }
-            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                if let Some(name) = entry.file_name().to_str() {
-                    let lower = name.to_ascii_lowercase();
+            if let Some(name) = entry.file_name().to_str() {
+                let lower = name.to_ascii_lowercase();
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
                     if matches!(
                         lower.as_str(),
                         "$recycle.bin"
@@ -243,6 +243,20 @@ impl FilesystemCrawler {
                     ) {
                         return false;
                     }
+                } else if lower.starts_with("~$")
+                    || lower.starts_with(".~lock")
+                    || matches!(
+                        lower.as_str(),
+                        "cargo.lock"
+                            | "package-lock.json"
+                            | "pnpm-lock.yaml"
+                            | "yarn.lock"
+                            | "poetry.lock"
+                            | "composer.lock"
+                            | "gemfile.lock"
+                    )
+                {
+                    return false;
                 }
             }
             true
