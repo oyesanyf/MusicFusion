@@ -301,6 +301,8 @@ fn test_web_boundary_query_result_to_citations_empty() {
         synthesis_prompt: "No context".to_string(),
         execution_time_ms: 1,
         sources_cited: Vec::new(),
+        cache_hit: false,
+        cache_epoch: 0,
     };
 
     assert!(empty_qr.chunks.is_empty());

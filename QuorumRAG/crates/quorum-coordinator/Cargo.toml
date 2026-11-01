@@ -32,3 +32,7 @@ sysinfo = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+quorum-ui = { workspace = true }
+axum = { version = "0.7", features = ["macros", "tokio"] }
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }

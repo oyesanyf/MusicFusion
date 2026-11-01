@@ -6706,6 +6706,7 @@ name = "quorum-coordinator"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "blake3",
  "chrono",
  "ed25519-dalek 2.2.0",
@@ -6714,6 +6715,7 @@ dependencies = [
  "quorum-network",
  "quorum-storage",
  "quorum-types",
+ "quorum-ui",
  "serde",
  "serde_json",
  "subtle",
@@ -6721,6 +6723,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tower",
+ "tower-http 0.5.2",
  "tracing",
  "uuid",
  "zeroize",

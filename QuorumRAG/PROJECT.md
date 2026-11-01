@@ -83,8 +83,8 @@ QuorumRAG is a production-grade, local-first, peer-to-peer retrieval-augmented g
 | M3 | Filesystem Ingestion, OS Watcher, Image & Reindex Engine | `ignore` crawler, real-time `notify` watcher, Magika routing, Image indexing, Level-1/Level-2 dedup, `reindex` & `fix-drift` worker subsystems | M1, M2 | DONE |
 | M4 | rust-libp2p Swarm, Coordinator, Fusion & GLM Selection | libp2p Swarm, 400ms scatter-gather, LangGraph state graph, `fusion` adoption with GLM selection, Fusion-powered LangExtract core engine with `char_interval` grounding | M1, M2, M3 | DONE |
 | M5 | ChatGPT Web Interface, Synthesis & Single Executable | Axum web server, embedded UI, search mode toggle, SSE streaming with agentic & GLM telemetry, single `.exe`, reindex/drift triggers, LangExtract UI action, interactive HTML visualizer & `/api/langextract` endpoints, Live IDE Execution & Production Code Generation Verification Gate | M1, M2, M3, M4 | DONE |
-| M5.5 | Multi-Layer Caching & Re-Cache Subsystem (`recache`) | BLAKE3 QueryCache & EmbeddingCache, cache hit telemetry, `quorumrag recache [--clear] [--warm]`, `/api/cache/recache` & `/api/cache/stats`, auto-invalidation on reindex/fix-drift/watcher, and Web UI Re-Cache button & live stats | M1, M2, M3, M4, M5 | IN_PROGRESS |
-| M6 | Final Acceptance: 100% E2E Test Pass & Adversarial Hardening | Pass 100% of E2E test suite (Tiers 1-4) published by E2E Test Track, Live IDE run & production code generation verification, followed by Tier 5 adversarial audit | M5, M5.5, TEST_READY | PLANNED |
+| M5.5 | Multi-Layer Caching & Re-Cache Subsystem (`recache`) | BLAKE3 QueryCache & EmbeddingCache, cache hit telemetry, `quorumrag recache [--clear] [--warm]`, `/api/cache/recache` & `/api/cache/stats`, auto-invalidation on reindex/fix-drift/watcher, and Web UI Re-Cache button & live stats | M1, M2, M3, M4, M5 | DONE |
+| M6 | Final Acceptance: 100% E2E Test Pass & Adversarial Hardening | Pass 100% of E2E test suite (Tiers 1-4) published by E2E Test Track, Live IDE run & production code generation verification, followed by Tier 5 adversarial audit | M5, M5.5, TEST_READY | DONE |
 
 ## Interface Contracts
 
