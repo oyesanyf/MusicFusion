@@ -102,21 +102,6 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         Arc::clone(&dedup),
     ));
 
-    // Automatically start background Magika crawl & ingestion across configured watch_paths on startup
-    if !ingest_config.watch_paths.is_empty() {
-        let initial_options = quorum_ingest::ReindexOptions {
-            target_paths: ingest_config.watch_paths.clone(),
-            full_rebuild: false,
-            force_reembed: false,
-            batch_size: 64,
-            num_threads: 0,
-            dry_run: false,
-        };
-        if let Err(e) = reindex_worker.start_reindex(initial_options).await {
-            error!("Failed to start initial background watch_dir crawl: {}", e);
-        }
-    }
-
     // 3. Dynamically bind HTTP Listener on `cli.port` (or next open port)
     let (listener, bound_http_port) = bind_next_open_http_port(&cli.host, cli.port).await?;
     let chosen_p2p_port = find_next_open_p2p_port(&cli.host, cli.p2p_port, bound_http_port);
@@ -172,13 +157,13 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         start_time: Instant::now(),
         storage,
         coordinator,
-        reindex_worker,
+        reindex_worker: Arc::clone(&reindex_worker),
         drift_healer,
         classifier,
         embedder,
         dedup,
         swarm_handle,
-        ingest_config,
+        ingest_config: ingest_config.clone(),
         default_model_family,
         port: bound_http_port,
         host: cli.host.clone(),
@@ -190,6 +175,26 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
 
     let bind_addr = format!("{}:{}", cli.host, bound_http_port);
     info!("QuorumRAG Web UI listening on http://{}", bind_addr);
+
+    // Automatically start background Magika crawl & ingestion across configured watch_paths once server is ready
+    if !ingest_config.watch_paths.is_empty() {
+        let bg_worker = Arc::clone(&reindex_worker);
+        let bg_paths = ingest_config.watch_paths.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let initial_options = quorum_ingest::ReindexOptions {
+                target_paths: bg_paths,
+                full_rebuild: false,
+                force_reembed: false,
+                batch_size: 64,
+                num_threads: 0,
+                dry_run: false,
+            };
+            if let Err(e) = bg_worker.start_reindex(initial_options).await {
+                error!("Failed to start initial background watch_dir crawl: {}", e);
+            }
+        });
+    }
 
     // 5. Auto-launch browser if not disabled
     if !cli.no_browser {
@@ -211,6 +216,21 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Checks if any service is already listening on `port` (on `127.0.0.1` or `0.0.0.0`).
+fn is_port_in_use(host: &str, port: u16) -> bool {
+    let loopback = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    if std::net::TcpStream::connect_timeout(&loopback, std::time::Duration::from_millis(60)).is_ok() {
+        return true;
+    }
+    if std::net::TcpListener::bind(("0.0.0.0", port)).is_err() {
+        return true;
+    }
+    if std::net::TcpListener::bind((host, port)).is_err() {
+        return true;
+    }
+    false
+}
+
 /// Dynamically binds the HTTP server to `start_port`, advancing to the next open TCP port if in use.
 async fn bind_next_open_http_port(
     host: &str,
@@ -219,6 +239,9 @@ async fn bind_next_open_http_port(
     let mut last_err = None;
     for offset in 0..=200u16 {
         let candidate = start_port.saturating_add(offset);
+        if is_port_in_use(host, candidate) {
+            continue;
+        }
         let addr = format!("{}:{}", host, candidate);
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
@@ -245,13 +268,13 @@ async fn bind_next_open_http_port(
 fn find_next_open_p2p_port(host: &str, start_port: u16, exclude_port: u16) -> u16 {
     for offset in 0..=200u16 {
         let candidate = start_port.saturating_add(offset);
-        if candidate == exclude_port {
+        if candidate == exclude_port || is_port_in_use(host, candidate) {
             continue;
         }
         let addr = format!("{}:{}", host, candidate);
-        let tcp_free = std::net::TcpListener::bind(&addr).is_ok();
-        let udp_free = std::net::UdpSocket::bind(&addr).is_ok();
-        if tcp_free && udp_free {
+        let udp_free = std::net::UdpSocket::bind(&addr).is_ok()
+            && std::net::UdpSocket::bind(("0.0.0.0", candidate)).is_ok();
+        if udp_free {
             if candidate != start_port {
                 info!(
                     requested_p2p_port = start_port,

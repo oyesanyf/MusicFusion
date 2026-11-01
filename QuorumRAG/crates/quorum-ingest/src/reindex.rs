@@ -280,8 +280,14 @@ impl ReindexWorker {
                 continue;
             }
 
-            let crawler = FilesystemCrawler::new(config.clone());
-            let candidates = crawler.crawl_path_sync(target)?;
+            let cfg_clone = config.clone();
+            let target_clone = target.clone();
+            let candidates = tokio::task::spawn_blocking(move || {
+                let crawler = FilesystemCrawler::new(cfg_clone);
+                crawler.crawl_path_sync(&target_clone)
+            })
+            .await
+            .map_err(|e| IngestError::Io(std::io::Error::other(format!("Crawl task panicked: {}", e))))??;
 
             {
                 let mut lock = progress.write().await;
