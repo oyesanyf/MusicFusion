@@ -26,6 +26,8 @@ pub(crate) struct TantivyFtsIndex {
     reader: IndexReader,
     writer: Mutex<IndexWriter<TantivyDocument>>,
     last_commit_opstamp: AtomicU64,
+    commit_generation: AtomicU64,
+    synced_generation: AtomicU64,
     field_chunk_id: Field,
     field_document_id: Field,
     field_file_path: Field,
@@ -85,12 +87,16 @@ impl TantivyFtsIndex {
         let last_commit_opstamp = AtomicU64::new(
             index.load_metas().map(|m| m.opstamp).unwrap_or(0),
         );
+        let commit_generation = AtomicU64::new(0);
+        let synced_generation = AtomicU64::new(0);
 
         Ok(Self {
             index,
             reader,
             writer: Mutex::new(writer),
             last_commit_opstamp,
+            commit_generation,
+            synced_generation,
             field_chunk_id,
             field_document_id,
             field_file_path,
@@ -179,6 +185,7 @@ impl TantivyFtsIndex {
 
             match commit_with_retry(&mut writer) {
                 Ok(op) => {
+                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
                     self.last_commit_opstamp.store(op, Ordering::Release);
                 }
                 Err(e) => {
@@ -320,6 +327,7 @@ impl TantivyFtsIndex {
         let _ = writer.delete_term(term.clone());
         match commit_with_retry(&mut writer) {
             Ok(op) => {
+                self.commit_generation.fetch_add(1, Ordering::SeqCst);
                 self.last_commit_opstamp.store(op, Ordering::Release);
             }
             Err(e) => {
@@ -329,6 +337,7 @@ impl TantivyFtsIndex {
                     *writer = Self::create_writer_inner(&self.index)?;
                     let _ = writer.delete_term(term);
                     let op = commit_with_retry(&mut writer)?;
+                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
                     self.last_commit_opstamp.store(op, Ordering::Release);
                 } else {
                     return Err(e);
@@ -352,6 +361,7 @@ impl TantivyFtsIndex {
         // 1. Commit any pending uncommitted additions/deletions before merging
         match commit_with_retry(&mut writer) {
             Ok(op) => {
+                self.commit_generation.fetch_add(1, Ordering::SeqCst);
                 self.last_commit_opstamp.store(op, Ordering::Release);
             }
             Err(e) => {
@@ -360,6 +370,7 @@ impl TantivyFtsIndex {
                     tracing::warn!("Tantivy writer killed during compact pre-commit; recreating: {}", msg);
                     *writer = Self::create_writer_inner(&self.index)?;
                     let op = commit_with_retry(&mut writer)?;
+                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
                     self.last_commit_opstamp.store(op, Ordering::Release);
                 } else {
                     return Err(e);
@@ -367,38 +378,44 @@ impl TantivyFtsIndex {
             }
         }
 
-        // 2. Reload reader so searcher reflects the latest commit state
-        self.reload_with_retry()?;
+        // 2. Enumerate all active segment IDs currently in the committed index metadata
+        let segment_ids = self
+            .index
+            .searchable_segment_ids()
+            .map_err(|e| StorageError::Tantivy(format!("Failed to list searchable segment IDs: {}", e)))?;
 
-        // 3. Enumerate all active segment IDs currently in the index
-        let segment_ids: Vec<SegmentId> = self
-            .reader
-            .searcher()
-            .segment_readers()
-            .iter()
-            .map(|r| r.segment_id())
-            .collect();
-
-        // 4. Consolidate segments if multiple segments exist
+        // 3. Consolidate segments if multiple segments exist
         if segment_ids.len() >= 2 {
             tracing::info!(
                 segment_count = segment_ids.len(),
                 "Consolidating Tantivy segments during compaction"
             );
-            match writer.merge(&segment_ids).wait() {
-                Ok(_merged) => {
-                    let op = commit_with_retry(&mut writer)?;
-                    self.last_commit_opstamp.store(op, Ordering::Release);
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    if msg.contains("index writer was killed") || msg.contains("panicked") {
-                        tracing::warn!("Tantivy writer killed during merge; recreating: {}", msg);
-                        *writer = Self::create_writer_inner(&self.index)?;
+            let mut merge_attempts = 0;
+            loop {
+                match writer.merge(&segment_ids).wait() {
+                    Ok(_merged) => {
                         let op = commit_with_retry(&mut writer)?;
+                        self.commit_generation.fetch_add(1, Ordering::SeqCst);
                         self.last_commit_opstamp.store(op, Ordering::Release);
-                    } else {
-                        return Err(StorageError::Tantivy(format!("Segment merge error: {}", e)));
+                        break;
+                    }
+                    Err(e) => {
+                        merge_attempts += 1;
+                        let msg = e.to_string();
+                        if msg.contains("index writer was killed") || msg.contains("panicked") {
+                            tracing::warn!("Tantivy writer killed during merge; recreating: {}", msg);
+                            *writer = Self::create_writer_inner(&self.index)?;
+                            let op = commit_with_retry(&mut writer)?;
+                            self.commit_generation.fetch_add(1, Ordering::SeqCst);
+                            self.last_commit_opstamp.store(op, Ordering::Release);
+                            break;
+                        } else if merge_attempts < 5 {
+                            tracing::warn!(attempt = merge_attempts, "Retrying segment merge after transient error: {}", e);
+                            std::thread::yield_now();
+                            std::thread::sleep(std::time::Duration::from_millis(20 * merge_attempts as u64));
+                        } else {
+                            return Err(StorageError::Tantivy(format!("Segment merge error: {}", e)));
+                        }
                     }
                 }
             }
@@ -406,7 +423,7 @@ impl TantivyFtsIndex {
 
         drop(writer);
 
-        // 5. Final reader reload so searchers immediately pick up consolidated state
+        // 4. Final reader reload so searchers immediately pick up consolidated state
         self.reload_with_retry()?;
 
         Ok(())
@@ -491,8 +508,9 @@ impl TantivyFtsIndex {
         if num_docs == 0 {
             return Ok(Vec::new());
         }
+        let fetch_limit = num_docs.clamp(10_000, 500_000);
         let top_docs = searcher
-            .search(&query, &TopDocs::with_limit(num_docs.max(1)).order_by_score())
+            .search(&query, &TopDocs::with_limit(fetch_limit).order_by_score())
             .map_err(|e| StorageError::Tantivy(format!("Scan search failed: {}", e)))?;
 
         let mut chunks = Vec::with_capacity(top_docs.len());
@@ -527,6 +545,7 @@ impl TantivyFtsIndex {
         let _ = writer.delete_term(term.clone());
         match commit_with_retry(&mut writer) {
             Ok(op) => {
+                self.commit_generation.fetch_add(1, Ordering::SeqCst);
                 self.last_commit_opstamp.store(op, Ordering::Release);
             }
             Err(e) => {
@@ -536,6 +555,7 @@ impl TantivyFtsIndex {
                     *writer = Self::create_writer_inner(&self.index)?;
                     let _ = writer.delete_term(term);
                     let op = commit_with_retry(&mut writer)?;
+                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
                     self.last_commit_opstamp.store(op, Ordering::Release);
                 } else {
                     return Err(e);
@@ -567,6 +587,7 @@ impl TantivyFtsIndex {
         }
         match commit_with_retry(&mut writer) {
             Ok(op) => {
+                self.commit_generation.fetch_add(1, Ordering::SeqCst);
                 self.last_commit_opstamp.store(op, Ordering::Release);
             }
             Err(e) => {
@@ -576,6 +597,7 @@ impl TantivyFtsIndex {
                     *writer = Self::create_writer_inner(&self.index)?;
                     let _ = writer.delete_all_documents();
                     let op = commit_with_retry(&mut writer)?;
+                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
                     self.last_commit_opstamp.store(op, Ordering::Release);
                 } else {
                     return Err(e);
@@ -590,21 +612,35 @@ impl TantivyFtsIndex {
     }
 
     /// Reloads the Tantivy reader, retrying on transient Windows file lock errors
-    /// and ensuring the reader is synchronized to at least the last committed opstamp.
+    /// and ensuring the reader is synchronized to at least the last committed generation and opstamp.
     fn reload_with_retry(&self) -> Result<(), StorageError> {
+        let target_gen = self.commit_generation.load(Ordering::Acquire);
         let min_opstamp = self.last_commit_opstamp.load(Ordering::Acquire);
-        for attempt in 1..=200 {
+
+        // Fast path: if reader is already synchronized to at least target_gen, no reload needed!
+        if self.synced_generation.load(Ordering::Acquire) >= target_gen && target_gen > 0 {
+            return Ok(());
+        }
+
+        const MAX_ATTEMPTS: usize = 200;
+        let mut last_err = String::new();
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            // Step 1: Reload reader
             if let Err(e) = self.reader.reload() {
-                if attempt >= 200 {
-                    return Err(StorageError::Tantivy(format!("Tantivy reload error: {}", e)));
+                last_err = format!("Reader reload failed: {}", e);
+                std::thread::yield_now();
+                if attempt > 10 {
+                    std::thread::sleep(std::time::Duration::from_micros(100));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
                 continue;
             }
 
-            if min_opstamp > 0 {
-                if let Ok(meta) = self.index.load_metas() {
-                    if meta.opstamp >= min_opstamp {
+            // Step 2: Verify against on-disk metadata
+            match self.index.load_metas() {
+                Ok(meta) => {
+                    // If target_gen > 0, disk metadata must reflect at least min_opstamp
+                    if target_gen == 0 || meta.opstamp >= min_opstamp {
                         let disk_segments: BTreeSet<(SegmentId, Option<u64>)> = meta
                             .segments
                             .iter()
@@ -616,32 +652,50 @@ impl TantivyFtsIndex {
                             .iter()
                             .map(|r| (r.segment_id(), r.delete_opstamp()))
                             .collect();
+
                         if disk_segments == searcher_segments {
+                            // Successfully synchronized to target_gen!
+                            self.synced_generation.store(target_gen, Ordering::Release);
                             return Ok(());
+                        } else {
+                            last_err = format!(
+                                "Segment mismatch between disk ({:?}) and searcher ({:?})",
+                                disk_segments, searcher_segments
+                            );
                         }
+                    } else {
+                        last_err = format!(
+                            "Disk opstamp {} is less than required min_opstamp {}",
+                            meta.opstamp, min_opstamp
+                        );
                     }
                 }
-                if attempt >= 200 {
-                    return Err(StorageError::Tantivy(format!(
-                        "Tantivy reader reload failed to synchronize with commit opstamp {} after {} attempts",
-                        min_opstamp, attempt
-                    )));
+                Err(e) => {
+                    last_err = format!("Failed to load metas: {}", e);
                 }
-                let backoff_ms = if attempt <= 20 {
-                    2
+            }
+
+            // Yield CPU back to async executor/Tokio runtime
+            std::thread::yield_now();
+            if attempt > 5 {
+                let backoff_micros = if attempt <= 20 {
+                    100
                 } else if attempt <= 50 {
-                    5
+                    250
                 } else if attempt <= 100 {
-                    10
+                    500
                 } else {
-                    20
+                    1000
                 };
-                std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-            } else {
-                return Ok(());
+                std::thread::sleep(std::time::Duration::from_micros(backoff_micros));
             }
         }
-        Ok(())
+
+        // Fail-closed invariant: Never return Ok(()) on attempt exhaustion!
+        Err(StorageError::Tantivy(format!(
+            "Tantivy reader reload failed to synchronize with commit opstamp {} (target gen {}) after {} attempts. Last error: {}",
+            min_opstamp, target_gen, MAX_ATTEMPTS, last_err
+        )))
     }
 }
 
@@ -653,10 +707,13 @@ fn commit_with_retry(writer: &mut IndexWriter<TantivyDocument>) -> Result<u64, S
             Ok(opstamp) => return Ok(opstamp),
             Err(e) => {
                 attempts += 1;
-                if attempts >= 10 {
-                    return Err(StorageError::Tantivy(format!("Tantivy commit error: {}", e)));
+                if attempts >= 20 {
+                    return Err(StorageError::Tantivy(format!(
+                        "Tantivy commit error after {} attempts: {}", attempts, e
+                    )));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(20 * attempts));
+                std::thread::yield_now();
+                std::thread::sleep(std::time::Duration::from_millis(5 * attempts));
             }
         }
     }
