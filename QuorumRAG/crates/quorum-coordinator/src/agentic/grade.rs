@@ -14,32 +14,40 @@ impl Default for GradeRelevanceNode {
 
 impl GradeRelevanceNode {
     pub fn execute(&self, state: &mut AgenticGraphState) -> (RelevanceGrade, bool) {
-        let max_score = state
-            .retrieved_chunks
-            .iter()
-            .map(|c| c.score)
-            .fold(0.0f32, f32::max);
+        let is_empty = state.retrieved_chunks.is_empty();
+        let max_score = if is_empty {
+            0.0f32
+        } else {
+            state
+                .retrieved_chunks
+                .iter()
+                .map(|c| c.score)
+                .fold(0.0f32, f32::max)
+        };
 
         state.relevance_score = max_score;
 
-        let satisfactory =
-            max_score >= self.relevance_threshold || state.retrieved_chunks.is_empty();
+        let satisfactory = !is_empty && max_score >= self.relevance_threshold;
         let will_rewrite = !satisfactory && state.hop_count < state.max_hops;
+
+        let reasoning = if is_empty {
+            "Empty chunks retrieved. Scheduling query rewrite or fallback.".to_string()
+        } else if satisfactory {
+            format!(
+                "Top chunk score {:.3} meets threshold {:.3}",
+                max_score, self.relevance_threshold
+            )
+        } else {
+            format!(
+                "Top chunk score {:.3} below threshold {:.3}",
+                max_score, self.relevance_threshold
+            )
+        };
 
         let grade = RelevanceGrade {
             is_relevant: satisfactory,
             score: max_score,
-            reasoning: if satisfactory {
-                format!(
-                    "Top chunk score {:.3} meets threshold {:.3}",
-                    max_score, self.relevance_threshold
-                )
-            } else {
-                format!(
-                    "Top chunk score {:.3} below threshold {:.3}",
-                    max_score, self.relevance_threshold
-                )
-            },
+            reasoning,
             satisfactory,
         };
 

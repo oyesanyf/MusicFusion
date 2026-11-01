@@ -5,7 +5,7 @@ use crate::fusion::RrfCombiner;
 use crate::mesh::{MeshQueryDispatcher, MockRemotePeer};
 use chrono::Utc;
 use quorum_types::{
-    CandidateChunkDto, FederatedQueryRequest, ScoredChunk, VolatileRemoteChunk,
+    AccessTier, CandidateChunkDto, FederatedQueryRequest, ScoredChunk, VolatileRemoteChunk,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -115,7 +115,8 @@ impl ScatterGatherEngine {
             timestamp: Utc::now().timestamp(),
             signature: [0u8; 64],
         };
-        sign_request(&self.secret_seed, &mut req);
+        let tier = AccessTier::from_u8(access_tier).unwrap_or(AccessTier::Tier0Public);
+        sign_request(&self.secret_seed, &mut req, tier);
 
         let timeout_dur = Duration::from_millis(self.config.timeout_ms);
         let remote_responses = self
@@ -184,18 +185,20 @@ impl<S: StorageSearcher> FederatedQueryCoordinator<S> {
             .await;
 
         // 2. Parallel Remote Peer Queries bounded by 400ms hard deadline
-        let mut tasks = Vec::new();
+        use futures::stream::{FuturesUnordered, StreamExt};
+
+        let mut futures = FuturesUnordered::new();
         for peer in &self.remote_peers {
             let peer = peer.clone();
-            tasks.push(tokio::spawn(async move {
+            futures.push(tokio::spawn(async move {
                 peer.handle_query(access_tier).await
             }));
         }
 
         let mut peer_lists: Vec<Vec<CandidateChunkDto>> = Vec::new();
         let _ = tokio::time::timeout(self.timeout_duration, async {
-            for task in tasks {
-                if let Ok(chunks) = task.await {
+            while let Some(res) = futures.next().await {
+                if let Ok(chunks) = res {
                     peer_lists.push(chunks);
                 }
             }

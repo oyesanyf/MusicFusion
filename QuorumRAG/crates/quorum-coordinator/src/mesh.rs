@@ -67,10 +67,12 @@ impl MeshQueryDispatcher for MockMeshDispatcher {
             return Ok(Vec::new());
         }
 
-        let mut tasks = Vec::new();
+        use futures::stream::{FuturesUnordered, StreamExt};
+
+        let mut futures = FuturesUnordered::new();
         for peer in peers {
             let req = request.clone();
-            tasks.push(tokio::spawn(async move {
+            futures.push(tokio::spawn(async move {
                 let chunks = peer.handle_query(0).await;
                 FederatedQueryResponse {
                     query_id: req.query_id,
@@ -82,8 +84,8 @@ impl MeshQueryDispatcher for MockMeshDispatcher {
 
         let mut responses = Vec::new();
         let _ = tokio::time::timeout(timeout, async {
-            for task in tasks {
-                if let Ok(resp) = task.await {
+            while let Some(res) = futures.next().await {
+                if let Ok(resp) = res {
                     responses.push(resp);
                 }
             }
@@ -128,19 +130,21 @@ impl MeshQueryDispatcher for SwarmMeshDispatcher {
             return Ok(Vec::new());
         }
 
-        let mut tasks = Vec::new();
+        use futures::stream::{FuturesUnordered, StreamExt};
+
+        let mut futures = FuturesUnordered::new();
         for peer in peers {
             let handle = self.handle.clone();
             let req = request.clone();
-            tasks.push(tokio::spawn(async move {
+            futures.push(tokio::spawn(async move {
                 handle.send_query(peer, req).await
             }));
         }
 
         let mut responses = Vec::new();
         let _ = tokio::time::timeout(timeout, async {
-            for task in tasks {
-                if let Ok(Ok(resp)) = task.await {
+            while let Some(res) = futures.next().await {
+                if let Ok(Ok(resp)) = res {
                     responses.push(resp);
                 }
             }

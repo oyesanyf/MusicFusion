@@ -1,5 +1,5 @@
 use quorum_types::{CandidateChunkDto, DocumentChunk, ScoredChunk};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct RrfCombiner;
 
@@ -10,51 +10,67 @@ impl RrfCombiner {
     }
 
     /// Combines local rankings and remote peer candidate lists using Reciprocal Rank Fusion ($k=60.0$)
-    /// with BLAKE3 deduplication and deterministic tie-breaking on `(chunk_id, blake3_hash)`.
+    /// with BLAKE3 deduplication, 1.25x multi-peer consensus boost, and deterministic tie-breaking on `(chunk_id, blake3_hash)`.
     pub fn fuse_rankings(
         local_results: Vec<ScoredChunk>,
         remote_peer_lists: Vec<Vec<CandidateChunkDto>>,
         k: f32,
         top_k: usize,
     ) -> Vec<ScoredChunk> {
-        let mut rrf_map: HashMap<String, (f32, ScoredChunk)> = HashMap::new();
+        // Map from chunk_id to (base_rrf_score, ScoredChunk, HashSet of distinct peer IDs)
+        // Local is peer 0; remote peers are indexed 1..=N
+        let mut rrf_map: HashMap<String, (f32, ScoredChunk, HashSet<usize>)> = HashMap::new();
+
+        const LOCAL_PEER_ID: usize = 0;
 
         // 1. Local chunk rankings
         for (rank_0, scored) in local_results.into_iter().enumerate() {
             let score = 1.0 / (k + (rank_0 + 1) as f32);
+            let chunk_id = scored.chunk.chunk_id.clone();
             let entry = rrf_map
-                .entry(scored.chunk.chunk_id.clone())
-                .or_insert((0.0, scored));
+                .entry(chunk_id)
+                .or_insert_with(|| (0.0, scored, HashSet::new()));
             entry.0 += score;
+            entry.2.insert(LOCAL_PEER_ID);
         }
 
         // 2. Remote peer chunk rankings
-        for list in remote_peer_lists {
+        for (remote_idx, list) in remote_peer_lists.into_iter().enumerate() {
+            let remote_peer_id = remote_idx + 1;
             for (rank_0, candidate) in list.into_iter().enumerate() {
                 let score = 1.0 / (k + (rank_0 + 1) as f32);
-                let doc_chunk = DocumentChunk {
-                    chunk_id: candidate.chunk_id.clone(),
-                    document_id: "remote_doc".to_string(),
-                    file_path: candidate.file_path,
-                    line_start: candidate.line_start,
-                    line_end: candidate.line_end,
-                    blake3_hash: DocumentChunk::compute_blake3_hash(&candidate.content),
-                    access_tier: candidate.access_tier,
-                    vector: vec![0.0; 768],
-                    text_content: candidate.content,
-                    metadata_json: "{}".to_string(),
-                };
-                let scored = ScoredChunk::new(doc_chunk, candidate.score, "remote_peer", true);
-                let entry = rrf_map.entry(candidate.chunk_id).or_insert((0.0, scored));
+                let chunk_id = candidate.chunk_id.clone();
+                let entry = rrf_map.entry(chunk_id).or_insert_with(|| {
+                    let doc_chunk = DocumentChunk {
+                        chunk_id: candidate.chunk_id.clone(),
+                        document_id: "remote_doc".to_string(),
+                        file_path: candidate.file_path,
+                        line_start: candidate.line_start,
+                        line_end: candidate.line_end,
+                        blake3_hash: DocumentChunk::compute_blake3_hash(&candidate.content),
+                        access_tier: candidate.access_tier,
+                        vector: vec![0.0; 768],
+                        text_content: candidate.content,
+                        metadata_json: "{}".to_string(),
+                    };
+                    let scored = ScoredChunk::new(doc_chunk, candidate.score, "remote_peer", true);
+                    (0.0, scored, HashSet::new())
+                });
                 entry.0 += score;
+                entry.2.insert(remote_peer_id);
             }
         }
 
-        // 3. Finalize scores
+        // 3. Finalize scores with 1.25x multi-peer consensus boost for chunks seen across >= 2 peers
         let mut fused: Vec<ScoredChunk> = rrf_map
             .into_iter()
-            .map(|(_id, (rrf_score, mut chunk))| {
-                chunk.score = rrf_score;
+            .map(|(_id, (base_score, mut chunk, peers))| {
+                let final_score = if peers.len() >= 2 {
+                    base_score * 1.25
+                } else {
+                    base_score
+                };
+                chunk.score = final_score;
                 chunk
             })
             .collect();

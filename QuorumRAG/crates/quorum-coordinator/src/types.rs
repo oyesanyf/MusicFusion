@@ -72,6 +72,7 @@ pub struct AgenticGraphState {
     pub start_time: Instant,
     pub synthesized_response: Option<String>,
     pub citations: Vec<Citation>,
+    pub query_metadata_filters: Option<std::collections::BTreeMap<String, String>>,
 }
 
 impl AgenticGraphState {
@@ -95,6 +96,7 @@ impl AgenticGraphState {
             start_time: Instant::now(),
             synthesized_response: None,
             citations: Vec::new(),
+            query_metadata_filters: None,
         }
     }
 }

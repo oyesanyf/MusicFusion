@@ -35,6 +35,8 @@ impl ClassifyIntentNode {
         };
 
         state.intent = Some(intent);
+        state.query_metadata_filters =
+            crate::langextract::extract_query_metadata_filters(&state.original_prompt);
 
         let (family, tag, rationale) = AutoFusionRouter::select_model(
             state.model_family,

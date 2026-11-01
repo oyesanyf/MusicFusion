@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod error;
 pub mod fusion;
 pub mod hardware;
+pub mod langextract;
 pub mod mesh;
 pub mod model_router;
 pub mod offline_engine;
@@ -37,3 +38,7 @@ pub use types::{
     AgenticGraphState, AgenticStateName, QueryIntentType, RelevanceGrade, SynthesisModelFamily,
 };
 pub use volatile::{scrub_volatile, wrap_candidates, VolatileRemoteChunk};
+pub use langextract::{
+    extract_query_metadata_filters, filter_grounded, ground_extraction, ConsensusExtractionResult,
+    ExampleData, Extraction, LlmFusionArmReport, LlmFusionConsensus,
+};
