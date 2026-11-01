@@ -81,5 +81,26 @@ Gate Result: **PASS** (Milestone 4 Tokio REST 5050, Web Studio UI, Multi-LLM Ite
 
 Gate Result: **PASS** (Milestone 5 Final Acceptance & Tier 5 Adversarial Verification is DONE)
 
+## Milestone 6 — Iteration 1
+| Agent | Role | Verdict | Source | Notes |
+|-------|------|---------|--------|-------|
+| worker_m6 | teamwork_worker | DONE | handoff.md | Commit verified, 243 workspace tests pass, scratch removed, TTS engine added, sample lyrics added |
+| reviewer_m6_1 | teamwork_reviewer | APPROVE | handoff.md | Approved. Guitar wah continuous phase, drum modal sines, ModelFusion TTS verified |
+| reviewer_m6_2 | teamwork_reviewer | APPROVE | handoff.md | Approved. Dynamic port 5050..=5070, download routes, WebUI chat feedback & 404 resilience verified |
+| challenger_m6_1 | teamwork_challenger | REJECT | handoff.md | SAPI WAV 18-byte fmt chunk parsing offset defect |
+| challenger_m6_2 | teamwork_challenger | REJECT | handoff.md | Missing lyrics key in some manifests |
+| auditor_m6 | teamwork_auditor | CLEAN | handoff.md | Real DSP, no mocks |
 
+Gate Result: **FAIL** (challenger_m6_1 REJECT)
 
+## Milestone 7 — Iteration 1
+| Agent | Role | Verdict | Source | Notes |
+|-------|------|---------|--------|-------|
+| worker_m7 | teamwork_worker | DONE | handoff.md | All tasks implemented, 100% tests pass, 8 sample song versions regenerated, validate_disk_songs.py passed |
+| reviewer_m7_1 | teamwork_reviewer | APPROVE | handoff.md | Approved. Phase accumulator, Karplus-Strong 0.994, One-Drop drum & bass, headroom 0.20, Butterworth 12kHz, hound verified |
+| reviewer_m7_2 | teamwork_reviewer | APPROVE | handoff.md | Approved. Neural model selection, UvBridge, sample songs, all 7 instruments verified |
+| challenger_m7_1 | teamwork_challenger | APPROVE | handoff.md | Approved. Authored 10 empirical tests, zero phase resets, delay line stability, -1.0 dBFS ceiling verified |
+| challenger_m7_2 | teamwork_challenger | REJECT | handoff.md | REJECT: `song_afrobeats_002` `drums.wav` RMS = -68.79 dBFS (< -60 dBFS threshold) due to 3500 Hz highpass in `node4_stem_inpainting.rs:153-166`; secondary: `workers/generate_song.py` catching only `ImportError` instead of `Exception` |
+| auditor_m7 | teamwork_auditor | CLEAN | handoff.md | Verified 100% genuine physical modeling, zero mocks, real UvBridge, 88 WAV files verified |
+
+Gate Result: **FAIL** (challenger_m7_2 REJECT: "ALL INSTRUMENTS MUST BE USED" invariant breached on `song_afrobeats_002` `drums.wav` RMS < -60 dBFS)
