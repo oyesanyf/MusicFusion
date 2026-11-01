@@ -302,25 +302,40 @@ async fn challenge_static_assets_direct_and_spa_fallback() {
         );
     }
 
-    // Check SPA fallback on unknown route returns 200 OK with index.html
-    let req = Request::builder()
-        .uri("/unknown/spa/route/123")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.clone().oneshot(req).await.expect("spa request");
-    assert_eq!(
-        resp.status(),
-        StatusCode::OK,
-        "Unknown route on daemon router must return StatusCode::OK (SPA fallback to index.html), got: {:?}",
-        resp.status()
-    );
-    let body_bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
-        .await
-        .expect("read body");
-    let html = String::from_utf8_lossy(&body_bytes);
-    assert!(
-        html.contains("QuorumRAG"),
-        "SPA fallback must return index.html content"
-    );
+    // Check SPA fallback on arbitrary routes returns 200 OK with index.html and text/html
+    for spa_path in ["/unknown/spa/route/123", "/chat/456"] {
+        let req = Request::builder()
+            .uri(spa_path)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.expect("spa request");
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "SPA route '{}' on daemon router must return StatusCode::OK (fallback to index.html), got: {:?}",
+            spa_path,
+            resp.status()
+        );
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(
+            ct.contains("text/html"),
+            "SPA route '{}' expected MIME 'text/html', got: '{}'",
+            spa_path,
+            ct
+        );
+        let body_bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .expect("read body");
+        let html = String::from_utf8_lossy(&body_bytes);
+        assert!(
+            html.contains("QuorumRAG"),
+            "SPA fallback for '{}' must return index.html content",
+            spa_path
+        );
+    }
 }
 
