@@ -95,6 +95,21 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         Arc::clone(&dedup),
     ));
 
+    // Automatically start background Magika crawl & ingestion across configured watch_paths on startup
+    if !ingest_config.watch_paths.is_empty() {
+        let initial_options = quorum_ingest::ReindexOptions {
+            target_paths: ingest_config.watch_paths.clone(),
+            full_rebuild: false,
+            force_reembed: false,
+            batch_size: 64,
+            num_threads: 0,
+            dry_run: false,
+        };
+        if let Err(e) = reindex_worker.start_reindex(initial_options).await {
+            error!("Failed to start initial background watch_dir crawl: {}", e);
+        }
+    }
+
     // 3. Network Swarm & Query Coordinator
     let (mesh_dispatcher, swarm_handle): (Arc<dyn quorum_coordinator::MeshQueryDispatcher>, Option<quorum_network::NetworkSwarmHandle>) = if cli.local_only {
         info!("Running in local-only mode (P2P swarm networking disabled).");

@@ -14,6 +14,7 @@ use crate::classifier_router::{CandidateKind, ClassifierRouter, FilterDecision};
 use crate::chunker::TextChunker;
 use crate::config::{ChunkerConfig, DriftFixOptions, IngestConfig, ReindexOptions};
 use crate::dedup::{DedupAction, FileCatalogEntry, TwoLevelDedupEngine};
+use crate::document_extractor::DocumentExtractor;
 use crate::drift_healer::DriftHealer;
 use crate::error::IngestError;
 use crate::image_indexer::ImageIndexer;
@@ -138,7 +139,7 @@ impl IngestEngine {
 
         let chunks = match kind {
             CandidateKind::Text { .. } => {
-                let content = std::fs::read_to_string(path)?;
+                let content = DocumentExtractor::extract_text(path, &identity)?;
                 if content.is_empty() {
                     return Ok(Some(Vec::new()));
                 }

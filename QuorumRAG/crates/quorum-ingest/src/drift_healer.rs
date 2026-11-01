@@ -415,7 +415,7 @@ impl DriftHealer {
 
                 match kind {
                     CandidateKind::Text { .. } => {
-                        let content = std::fs::read_to_string(path)?;
+                        let content = crate::document_extractor::DocumentExtractor::extract_text(path, &identity)?;
                         let file_b3 = blake3::hash(content.as_bytes()).to_hex().to_string();
                         let chunker = TextChunker::new(ChunkerConfig::default());
                         let raw_chunks = chunker.chunk_text(&content);

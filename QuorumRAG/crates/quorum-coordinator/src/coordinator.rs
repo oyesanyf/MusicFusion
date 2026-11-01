@@ -166,13 +166,7 @@ impl QueryCoordinator {
         };
 
         let epoch = self.engine.local_storage.index_epoch();
-        let was_cached = self.cache_manager.query_cache.get(
-            prompt,
-            SearchMode::Hybrid,
-            family,
-            self.config.default_peer_access_tier,
-            epoch,
-        ).is_some();
+        let hits_before = self.cache_manager.telemetry(false).hits;
 
         let final_state = self
             .agentic_runner
@@ -187,6 +181,8 @@ impl QueryCoordinator {
             )
             .await
             .map_err(CoordinatorError::GraphError)?;
+
+        let was_cached = self.cache_manager.telemetry(false).hits > hits_before;
 
         let synthesis_prompt = final_state
             .synthesized_response

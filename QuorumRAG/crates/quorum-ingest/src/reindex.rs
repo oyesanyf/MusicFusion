@@ -17,6 +17,7 @@ use crate::chunker::TextChunker;
 use crate::config::{ChunkerConfig, IngestConfig, ReindexOptions};
 use crate::crawler::FilesystemCrawler;
 use crate::dedup::{DedupAction, FileCatalogEntry, TwoLevelDedupEngine};
+use crate::document_extractor::DocumentExtractor;
 use crate::error::IngestError;
 use crate::image_indexer::ImageIndexer;
 use quorum_classifier::FileTypeClassifier;
@@ -344,7 +345,7 @@ impl ReindexWorker {
                 // File is new, modified, or full rebuild was requested
                 match candidate.kind {
                     CandidateKind::Text { .. } => {
-                        let content = match std::fs::read_to_string(path) {
+                        let content = match DocumentExtractor::extract_text(path, &candidate.file_identity) {
                             Ok(c) => c,
                             Err(e) => {
                                 warn!("Failed to read file '{}': {}", path.display(), e);
