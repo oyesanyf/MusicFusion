@@ -100,7 +100,7 @@ impl VocalTimbreFusionNode {
             // Generate synthetic fallback buffer if no stem exists
             let fallback_path = stems_dir.join("temp_guide_vocal.wav");
             let buf = AudioBuffer::new_stereo(2.0);
-            buf.to_wav_file_with_format(&fallback_path, WavBitDepth::Float32).map_err(|e| {
+            buf.to_wav_file_with_format(&fallback_path, WavBitDepth::Pcm16).map_err(|e| {
                 PipelineError::DspError(format!("Failed to write temp guide vocal: {}", e))
             })?;
             fallback_path
@@ -273,7 +273,7 @@ impl VocalTimbreFusionNode {
         final_buf.clamp(-0.98, 0.98);
 
         // 8. Write to disk
-        final_buf.to_wav_file_with_format(output_vocal_path, WavBitDepth::Float32).map_err(|e| {
+        final_buf.to_wav_file_with_format(output_vocal_path, WavBitDepth::Pcm16).map_err(|e| {
             PipelineError::DspError(format!("Failed to write raspy_tenor_vocals.wav: {}", e))
         })?;
 

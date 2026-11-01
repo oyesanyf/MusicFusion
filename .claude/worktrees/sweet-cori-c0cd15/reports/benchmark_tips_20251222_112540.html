@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACDSO Benchmark Report</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        .subtitle { color: var(--text-muted); margin-bottom: 2rem; }
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--primary);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: rgba(37, 99, 235, 0.1);
+            font-weight: 600;
+            color: var(--primary);
+        }
+        tr:hover { background: rgba(255, 255, 255, 0.02); }
+        .winner { color: var(--success); font-weight: 600; }
+        .error { color: var(--danger); }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .badge-success { background: rgba(22, 163, 74, 0.2); color: var(--success); }
+        .badge-danger { background: rgba(220, 38, 38, 0.2); color: var(--danger); }
+        .badge-warning { background: rgba(217, 119, 6, 0.2); color: var(--warning); }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .metric-item {
+            background: rgba(37, 99, 235, 0.05);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .metric-label { color: var(--text-muted); font-size: 0.875rem; }
+        .metric-value { font-size: 1.5rem; font-weight: 600; color: var(--text); }
+        .footer {
+            text-align: center;
+            color: var(--text-muted);
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ACDSO Benchmark Report</h1>
+        <p class="subtitle">AutoML Comparison: 2025-12-22T11:27:06.670029</p>
+        
+        <div class="card">
+            <h2>Systems Comparison</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>System</th>
+                        <th>Score</th>
+                        <th>F1</th>
+                        <th>Time (s)</th>
+                        <th>Latency (ms/row)</th>
+                        <th>Memory (MB)</th>
+                        <th>Risk Detection</th>
+                        <th>Audit Trail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>ACDSO</td>
+                        <td>0.4968</td>
+                        <td>-</td>
+                        <td>5.9</td>
+                        <td>0.398</td>
+                        <td>0.0</td>
+                        <td><span class="badge badge-success">YES</span></td>
+                        <td><span class="badge badge-success">YES</span></td>
+                    </tr>
+                    <tr>
+                        <td>TPOT</td>
+                        <td colspan="7" class="error">ERROR: TPOT 1.0+ has a different API requiring search_space configu</td>
+                    </tr>
+                    <tr>
+                        <td class="winner">FLAML</td>
+                        <td class="winner">0.5109</td>
+                        <td>-</td>
+                        <td>61.3</td>
+                        <td>0.791</td>
+                        <td>22.0</td>
+                        <td><span class="badge badge-danger">NO</span></td>
+                        <td><span class="badge badge-danger">NO</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="card">
+            <h2>Winner by Metric</h2>
+            <div class="metric-grid">
+                <div class="metric-item">
+                    <div class="metric-label">Test Score</div>
+                    <div class="metric-value">FLAML</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Fit Time S</div>
+                    <div class="metric-value">ACDSO</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Latency Ms Per Row</div>
+                    <div class="metric-value">ACDSO</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Peak Memory Mb</div>
+                    <div class="metric-value">ACDSO</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Cv Score Std</div>
+                    <div class="metric-value">FLAML</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Risk Detection</div>
+                    <div class="metric-value">ACDSO</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Audit Trail</div>
+                    <div class="metric-value">ACDSO</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Leakage Detection Capability</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>System</th>
+                        <th>Leakage Type</th>
+                        <th>Detection Status</th>
+                        <th>Method</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>ACDSO</td>
+                        <td>proxy</td>
+                        <td><span class="badge badge-danger">NOT DETECTED</span></td>
+                        <td>-</td>
+                    </tr>
+                    <tr>
+                        <td>TPOT</td>
+                        <td>proxy</td>
+                        <td><span class="badge badge-danger">NOT DETECTED</span></td>
+                        <td>not_supported</td>
+                    </tr>
+                    <tr>
+                        <td>FLAML</td>
+                        <td>proxy</td>
+                        <td><span class="badge badge-danger">NOT DETECTED</span></td>
+                        <td>not_supported</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="card">
+            <h2>Benchmark Configuration</h2>
+            <div class="metric-grid">
+                <div class="metric-item">
+                    <div class="metric-label">Time Budget</div>
+                    <div class="metric-value">60s</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Datasets Tested</div>
+                    <div class="metric-value">1</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Systems Tested</div>
+                    <div class="metric-value">3</div>
+                </div>
+            </div>
+            <p style="margin-top: 1rem; color: var(--text-muted);">
+                Datasets: tips
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p>Generated by ACDSO Benchmark Suite</p>
+            <p>2025-12-22T11:27:06.670029</p>
+        </div>
+    </div>
+</body>
+</html>

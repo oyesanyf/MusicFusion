@@ -1,0 +1,143 @@
+# ACDSO v2.0 - Complete Requirements
+# ===================================
+# Install with: pip install -r requirements.txt
+# 
+# Note: Some AutoML tools have conflicting dependencies.
+# For best results, install in a fresh virtual environment:
+#   python -m venv acdso_env
+#   acdso_env\Scripts\activate  (Windows)
+#   source acdso_env/bin/activate  (Linux/Mac)
+#   pip install -r requirements.txt
+
+# ===================================
+# Core Dependencies (Required)
+# ===================================
+numpy>=1.21.0
+pandas>=1.3.0
+scikit-learn>=1.0.0
+seaborn>=0.12.0  # For demo datasets
+
+# ===================================
+# Optional Dependencies (Recommended)
+# ===================================
+psutil>=5.9.0  # Better memory measurement for native allocations (NumPy/BLAS/LightGBM/XGBoost)
+
+# ===================================
+# Boosting Libraries (Recommended)
+# ===================================
+xgboost>=1.5.0
+lightgbm>=3.3.0
+catboost>=1.0.0
+
+# ===================================
+# AutoML Systems for Benchmarking
+# ===================================
+
+# FLAML - Fast and lightweight (Recommended - works well)
+flaml>=2.0.0
+
+# TPOT - Genetic algorithm based (Requires >=200 samples, >=120s budget)
+tpot>=1.0.0
+
+# H2O AutoML - Enterprise-grade
+h2o>=3.40.0
+
+# AutoGluon - AWS's AutoML (specific version for stability)
+autogluon.tabular[fastai]==1.4.1b20251209
+
+# PyCaret - Low-code ML
+pycaret>=3.0.0
+
+# MLJAR - Automated ML with explanations
+mljar-supervised>=1.0.0
+
+# Auto-sklearn (Linux only - comment out on Windows)
+# auto-sklearn>=0.15.0
+
+# ===================================
+# Time Series Tools for AutoTS Benchmarking
+# ===================================
+
+# Facebook/Meta Prophet - Popular business forecasting
+prophet>=1.1.0
+
+# AutoTS - Automated time series forecasting
+autots>=0.5.0
+
+# StatsForecast - Fast statistical models (Nixtla)
+statsforecast>=1.5.0
+
+# MLForecast - ML models for forecasting (Nixtla)
+mlforecast>=0.10.0
+
+# sktime - Scikit-learn compatible time series
+sktime>=0.24.0
+
+# pmdarima - Auto-ARIMA
+pmdarima>=2.0.0
+
+# NeuralProphet - Neural network based forecasting
+neuralprophet>=0.7.0
+
+# Darts - Time series library with many models
+darts>=0.26.0
+
+# statsmodels - Statistical modeling (for decomposition, etc.)
+statsmodels>=0.14.0
+
+# ===================================
+# Decision Intelligence Tools
+# ===================================
+
+# DoWhy - Causal inference and effect estimation
+dowhy>=0.10.0
+
+# EconML - Heterogeneous treatment effects / uplift modeling
+econml>=0.14.0
+
+# OR-Tools - Optimization under constraints
+ortools>=9.7.0
+
+# Ray/RLlib - Reinforcement learning for policy optimization
+ray[rllib]>=2.7.0
+
+# Gymnasium - RL environments
+gymnasium>=0.29.0
+
+# PandasAI - LLM-powered data analysis (optional)
+# pandasai>=1.5.0
+
+# ===================================
+# EDA Tools (Optional)
+# ===================================
+ydata-profiling>=4.0.0
+sweetviz>=2.1.0
+# dataprep>=0.4.0  # Can have dependency conflicts
+# dtale>=2.0.0  # For interactive analysis
+
+# ===================================
+# LLM Providers (Optional)
+# ===================================
+openai>=1.0.0
+anthropic>=0.18.0
+litellm>=1.0.0
+
+# ===================================
+# Development Tools (Optional)
+# ===================================
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=22.0.0
+isort>=5.10.0
+mypy>=0.990
+flake8>=5.0.0
+
+# ===================================
+# Additional Utilities
+# ===================================
+joblib>=1.0.0
+scipy>=1.7.0
+matplotlib>=3.5.0
+openpyxl>=3.0.0  # For Excel file support
+pyarrow>=8.0.0  # For Parquet file support
+

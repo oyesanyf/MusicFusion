@@ -1,0 +1,1 @@
+alert http any any -> any any (msg:"RFCHUNT Exploit: Conflicting Transfer-Encoding and Content-Length Framing"; flow:established,to_server; http.header; content:"Transfer-Encoding"; nocase; content:"Content-Length"; nocase; distance:0; classtype:protocol-command-decode; sid:2060001; rev:1;)

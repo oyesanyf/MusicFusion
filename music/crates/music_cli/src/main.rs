@@ -133,11 +133,13 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 8. Default mode or --serve: Launch Tokio HTTP REST Server + ChatGPT-like Web Studio UI
+    // Dynamic port selection: scans from args.port..=(args.port + 100) and falls back to OS-assigned port if busy
+    let end_port = args.port.saturating_add(100);
     let bound_port = rest_server::start_rest_server(
         runner,
         args.storage_dir.clone(),
         args.port,
-        args.port + 10,
+        end_port,
         args.ollama_host.clone(),
     ).await?;
 

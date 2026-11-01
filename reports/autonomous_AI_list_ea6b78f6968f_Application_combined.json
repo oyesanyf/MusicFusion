@@ -1,0 +1,93 @@
+{
+  "timestamp": "2026-09-11T11:11:39.069153",
+  "acdso_version": "3.0",
+  "mode": "autonomous_custom_file",
+  "file": "C:\\harfile\\acdso\\uploads\\AI_list_ea6b78f6968f.csv",
+  "target": "Application",
+  "task": "classification",
+  "datetime_col": "Date",
+  "dataset_info": {
+    "rows": 1000000,
+    "columns": 20,
+    "features": 19
+  },
+  "summary": {
+    "total_phases": 9,
+    "successful": 3,
+    "failed": 4,
+    "skipped": 2,
+    "total_time": 168.70731592178345,
+    "success_rate": 33.33333333333333
+  },
+  "phase_results": {
+    "All Phases": [
+      {
+        "name": "Data Loading",
+        "status": "SUCCESS",
+        "time": 3.0766587257385254,
+        "model_name": null
+      },
+      {
+        "name": "Target Detection",
+        "status": "SUCCESS",
+        "time": 3.172175645828247,
+        "model_name": null
+      },
+      {
+        "name": "Auto EDA",
+        "status": "SUCCESS",
+        "time": 4.8642847537994385,
+        "model_name": null
+      },
+      {
+        "name": "Risk Analysis",
+        "status": "FAILED: '<' not supported between instances of 'str' and 'float'",
+        "time": 109.58566856384277,
+        "model_name": null
+      },
+      {
+        "name": "AutoML",
+        "status": "FAILED: Unable to allocate 78.5 GiB for an array with shape (84305, 1000000) and data type bool",
+        "time": 5.507931470870972,
+        "model_name": null
+      },
+      {
+        "name": "Time Series",
+        "status": "FAILED: can only concatenate str (not \"float\") to str",
+        "time": 1.0016498565673828,
+        "model_name": null
+      },
+      {
+        "name": "Advanced EDA Features",
+        "status": "SKIPPED: Advanced EDA features are included in basic EDA",
+        "time": 0.0,
+        "model_name": null
+      },
+      {
+        "name": "Decision Intelligence",
+        "status": "SKIPPED: DecisionIntelligence.__init__() got an unexpected keyword argument 'verbose'",
+        "time": 0.03365206718444824,
+        "model_name": null
+      },
+      {
+        "name": "Benchmark (Custom File)",
+        "status": "FAILED: ('Pycaret only supports python 3.9, 3.10, 3.11. Your actual Python version: ', sys.version_info(major=3, minor=12, micro=10, releaselevel='final', serial=0), 'Please DOWNGRADE your Python version.')",
+        "time": 43.83627533912659,
+        "model_name": null
+      }
+    ]
+  },
+  "console_output": "",
+  "eda_report": {
+    "dataset_name": "AI_list_ea6b78f6968f.csv",
+    "n_rows": 1000000,
+    "n_cols": 20,
+    "quality_score": 52.7
+  },
+  "eda_html": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>ACDSO Auto EDA Report - AI_list_ea6b78f6968f.csv</title>\n    <style>\n        :root {\n            --bg-primary: #0d1117;\n            --bg-secondary: #161b22;\n            --text-primary: #c9d1d9;\n            --text-secondary: #8b949e;\n            --accent: #58a6ff;\n            --success: #3fb950;\n            --warning: #d29922;\n            --error: #f85149;\n        }\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body {\n            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;\n            background: var(--bg-primary);\n            color: var(--text-primary);\n            line-height: 1.6;\n            padding: 2rem;\n        }\n        .container { max-width: 1200px; margin: 0 auto; }\n        h1, h2, h3 { color: var(--accent); margin-bottom: 1rem; }\n        h1 { font-size: 2rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.5rem; }\n        h2 { font-size: 1.5rem; margin-top: 2rem; }\n        .card {\n            background: var(--bg-secondary);\n            border-radius: 8px;\n            padding: 1.5rem;\n            margin: 1rem 0;\n            border: 1px solid #30363d;\n        }\n        .metric {\n            display: inline-block;\n            background: var(--bg-primary);\n            padding: 0.5rem 1rem;\n            border-radius: 4px;\n            margin: 0.25rem;\n        }\n        .metric-label { color: var(--text-secondary); font-size: 0.875rem; }\n        .metric-value { font-size: 1.25rem; font-weight: bold; }\n        .quality-score {\n            font-size: 3rem;\n            font-weight: bold;\n            color: var(--success);\n        }\n        .issue { color: var(--warning); margin: 0.5rem 0; }\n        .recommendation { color: var(--text-secondary); margin: 0.5rem 0; padding-left: 1rem; }\n        table {\n            width: 100%;\n            border-collapse: collapse;\n            margin: 1rem 0;\n        }\n        th, td {\n            padding: 0.75rem;\n            text-align: left;\n            border-bottom: 1px solid #30363d;\n        }\n        th { background: var(--bg-primary); color: var(--accent); }\n        tr:hover { background: rgba(88, 166, 255, 0.1); }\n        .footer {\n            margin-top: 2rem;\n            padding-top: 1rem;\n            border-top: 1px solid #30363d;\n            color: var(--text-secondary);\n            font-size: 0.875rem;\n        }\n    </style>\n</head>\n<body>\n    <div class=\"container\">\n        <h1>🔍 ACDSO Auto EDA Report</h1>\n        <p style=\"color: var(--text-secondary);\">Dataset: <strong>AI_list_ea6b78f6968f.csv</strong> | Generated: 2026-09-11T11:08:53.702461</p>\n        \n        <div class=\"card\">\n            <h2>📊 Dataset Overview</h2>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Rows</div>\n                <div class=\"metric-value\">1,000,000</div>\n            </div>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Columns</div>\n                <div class=\"metric-value\">20</div>\n            </div>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Numeric</div>\n                <div class=\"metric-value\">6</div>\n            </div>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Categorical</div>\n                <div class=\"metric-value\">14</div>\n            </div>\n            <div class=\"metric\">\n                <div class=\"metric-label\">Memory</div>\n                <div class=\"metric-value\">911.1 MB</div>\n            </div>\n        </div>\n        \n        <div class=\"card\">\n            <h2>⭐ Data Quality Score</h2>\n            <div class=\"quality-score\">53/100</div>\n            <div style=\"margin-top: 1rem;\">\n                <div class=\"metric\">\n                    <div class=\"metric-label\">Missing Values</div>\n                    <div class=\"metric-value\">6,025,748 (30.1%)</div>\n                </div>\n                <div class=\"metric\">\n                    <div class=\"metric-label\">Duplicates</div>\n                    <div class=\"metric-value\">135,939 (13.6%)</div>\n                </div>\n                <div class=\"metric\">\n                    <div class=\"metric-label\">Constant Cols</div>\n                    <div class=\"metric-value\">7</div>\n                </div>\n            </div>\n        </div>\n        \n        <div class='card'><h2>⚠️ Issues Detected</h2><div class='issue'>• High missing data: 30.1% of values are missing</div><div class='issue'>• Duplicate rows detected: 135939 (13.6%)</div><div class='issue'>• Constant columns found: ['Action', 'Integrations', 'Blocked Categories', 'Threats', 'Threat Types']</div></div>\n        \n        \n        \n        <div class=\"card\">\n            <h2>💡 Recommendations</h2>\n            <div class='recommendation'>1. Consider imputation strategies or removing columns with >50% missing</div><div class='recommendation'>2. Review and potentially remove duplicate rows</div><div class='recommendation'>3. Remove constant columns as they provide no predictive value</div>\n        </div>\n        \n        <div class=\"card\">\n            <h2>📋 Column Profiles</h2>\n            <table>\n                <tr>\n                    <th>Column</th>\n                    <th>Type</th>\n                    <th>Missing %</th>\n                    <th>Unique</th>\n                    <th>Flags</th>\n                </tr>\n                <tr><td>Date</td><td>object</td><td>0.0%</td><td>9</td><td></td></tr><tr><td>Time</td><td>object</td><td>0.0%</td><td>84306</td><td></td></tr><tr><td>Action</td><td>object</td><td>0.0%</td><td>1</td><td>⚠️ Constant</td></tr><tr><td>Identities</td><td>object</td><td>0.0%</td><td>1005</td><td></td></tr><tr><td>Identity Types</td><td>object</td><td>0.0%</td><td>5</td><td></td></tr><tr><td>Policy or Ruleset Identity</td><td>object</td><td>0.0%</td><td>792</td><td></td></tr><tr><td>Policy or Ruleset Identity Type</td><td>object</td><td>0.0%</td><td>2</td><td></td></tr><tr><td>Internal IP</td><td>object</td><td>0.0%</td><td>2277</td><td></td></tr><tr><td>External IP</td><td>object</td><td>0.0%</td><td>2376</td><td></td></tr><tr><td>Destination</td><td>object</td><td>0.0%</td><td>317</td><td></td></tr><tr><td>Categories</td><td>object</td><td>0.0%</td><td>47</td><td></td></tr><tr><td>Integrations</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Blocked Categories</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Application</td><td>object</td><td>1.3%</td><td>61</td><td></td></tr><tr><td>Application Category</td><td>object</td><td>1.3%</td><td>5</td><td></td></tr><tr><td>Threats</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Threat Types</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Query Type</td><td>object</td><td>0.0%</td><td>3</td><td></td></tr><tr><td>Client Reporting Id</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Event Correlation Id</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr>\n            </table>\n        </div>\n        \n        <div class=\"footer\">\n            <p>Generated by ACDSO v2.0 Auto EDA | Analysis time: 4.67s</p>\n        </div>\n    </div>\n</body>\n</html>",
+  "configuration": {
+    "input_file": "C:\\harfile\\acdso\\uploads\\AI_list_ea6b78f6968f.csv"
+  },
+  "html_report_path": "C:\\harfile\\acdso\\reports\\autonomous_AI_list_ea6b78f6968f_Application_report.html",
+  "json_report_path": "C:\\harfile\\acdso\\reports\\autonomous_AI_list_ea6b78f6968f_Application_combined.json"
+}

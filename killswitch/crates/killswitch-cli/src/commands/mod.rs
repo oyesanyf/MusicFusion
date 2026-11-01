@@ -19,6 +19,14 @@ pub async fn handle_status(client: &KillSwitchClient) -> Result<()> {
     println!("  Processes Frozen:       {}", status.processes_frozen_count);
     println!("  Processes Tarpitted:    {}", status.processes_tarpitted_count);
     println!("  Kernel Lockdown Active: {}", status.kernel_lockdown_active);
+    if !status.platform_os.is_empty() {
+        println!("  Platform / OS Engine:   {} ({})", status.platform_os, status.isolation_engine);
+    }
+    if !status.trigger_cause.is_empty() {
+        println!("  KillSwitch Root Cause:  {}", status.trigger_cause);
+        println!("  Trigger Source / Voter: {}", status.trigger_source);
+        println!("  Trigger Forensics:      {}", status.trigger_details);
+    }
     if let Some(iso_at) = status.isolated_at {
         println!("  Isolated At:            {}", iso_at);
     }
@@ -183,5 +191,203 @@ pub async fn handle_graph(
 pub async fn handle_verify() -> Result<()> {
     let report = SubsystemVerifier::run_all().await?;
     report.print_summary();
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_research(
+    client: &KillSwitchClient,
+    action: &str,
+    id: Option<&str>,
+    title: Option<&str>,
+    vector: Option<&str>,
+    boundary: Option<&str>,
+    quote: Option<&str>,
+    crate_target: Option<&str>,
+    operator: Option<&str>,
+) -> Result<()> {
+    match action {
+        "list" | "status" | "menu" => {
+            let menu = client.get_research_candidates().await?;
+            println!("\n================================================================================");
+            println!("🔬 KILLSWITCH ARXIV & LANGEXTRACT RESEARCH MENU (USER APPROVAL GATE)");
+            println!("================================================================================");
+            println!("  Mandatory User Approval: {}", menu.user_approval_required);
+            println!("  Pending Approval Count:  {}", menu.pending_count);
+            println!("  Approved Count:          {}", menu.approved_count);
+            println!("  Rejected Count:          {}", menu.rejected_count);
+            println!("  Active Vectors in Code:  {}", menu.active_research_vectors_count);
+            println!("  Conformal Sources (K):   {}", menu.calibrated_sources_total);
+            println!("--------------------------------------------------------------------------------");
+            for c in &menu.candidates {
+                println!(
+                    "  [{}] arXiv:{} (Rank {:.1}) — {}",
+                    c.status, c.arxiv_id, c.rank_score, c.title
+                );
+                println!("      ID: {} | Boundary: {} -> Crate: {}", c.candidate_id, c.target_boundary, c.target_crate_enhancement);
+                println!("      Vector: {}", c.attack_vector);
+                println!("      Grounded Quote [{}..{}]: \"{}\"", c.source_char_start, c.source_char_end, c.source_quote);
+                if let Some(seal) = &c.approval_seal_blake3 {
+                    println!("      BLAKE3 Approval Seal: {}", seal);
+                }
+            }
+            println!("================================================================================\n");
+        }
+        "discover" | "stage" => {
+            let req = killswitch_server::types::ResearchDiscoverRequest {
+                arxiv_id: id.map(|s| s.to_string()),
+                query: id.map(|s| s.to_string()),
+                title: title.map(|s| s.to_string()),
+                attack_vector: vector.map(|s| s.to_string()),
+                target_boundary: boundary.map(|s| s.to_string()),
+                source_quote: quote.map(|s| s.to_string()),
+                target_crate_enhancement: crate_target.map(|s| s.to_string()),
+            };
+            let menu = client.discover_research_candidate(&req).await?;
+            println!(
+                "🔍 Staged candidate into Pending User Approval queue (Total Pending: {}). Run `killswitch --research-approve <ID>` to approve.",
+                menu.pending_count
+            );
+        }
+        "approve" | "reject" => {
+            let target_id = id.unwrap_or("2603.02277");
+            let req = killswitch_server::types::ResearchApproveRequest {
+                candidate_id: target_id.to_string(),
+                decision: action.to_string(),
+                operator: Some(operator.unwrap_or("cli_operator").to_string()),
+                arxiv_id: Some(target_id.to_string()),
+                title: title.map(|s| s.to_string()),
+                attack_vector: vector.map(|s| s.to_string()),
+                target_boundary: boundary.map(|s| s.to_string()),
+                source_quote: quote.map(|s| s.to_string()),
+                target_crate_enhancement: crate_target.map(|s| s.to_string()),
+            };
+            let res = client.approve_research_candidate(&req).await?;
+            println!("{}", res.message);
+            println!("   Candidate Status:       {}", res.candidate.status);
+            println!("   Active Vectors in Code: {}", res.active_research_vectors_count);
+            println!("   Conformal Sources (K):  {}", res.calibrated_sources_total);
+            println!("   Live Probe Blocked:     {}", res.live_probe_verified);
+            if let Some(seal) = res.candidate.approval_seal_blake3 {
+                println!("   BLAKE3 Approval Seal:   {}", seal);
+            }
+        }
+        _ => anyhow::bail!(
+            "Unknown research action '{}'. Supported: list, discover, approve, reject",
+            action
+        ),
+    }
+    Ok(())
+}
+
+
+pub async fn handle_edr_behavior(action: &str) -> Result<()> {
+    use killswitch_telemetry::{global_edr_behavioral_engine, EdrSensorTelemetryEvent};
+    use killswitch_types::telemetry::TelemetryEventKind;
+
+    let engine = global_edr_behavioral_engine();
+    let act = action.to_ascii_lowercase();
+
+    if act == "scan" || act == "status" {
+        let _ = engine.collect_and_evaluate_live_host_snapshot();
+    } else if act == "verify-chains" || act == "verify" {
+        let lotl_cmd = ["powershell.exe", "-enc", "B64_DIAGNOSTIC_TEST_VECTOR"].join(" ");
+        // 1. Office -> cmd -> encoded PowerShell -> unfamiliar external IP (LotL chain)
+        let _ = engine.ingest_telemetry_event(&EdrSensorTelemetryEvent::new_process_create(
+            24100,
+            Some(1200),
+            "WINWORD.EXE",
+            "C:\\Program Files\\Microsoft Office\\WINWORD.EXE",
+            "WINWORD.EXE Invoice.docm",
+            "corp_user",
+        ));
+        let _ = engine.ingest_telemetry_event(&EdrSensorTelemetryEvent::new_process_create(
+            24250,
+            Some(24100),
+            "cmd.exe",
+            "C:\\Windows\\System32\\cmd.exe",
+            &lotl_cmd,
+            "corp_user",
+        ));
+        let mut ps_ev = EdrSensorTelemetryEvent::new_process_create(
+            24310,
+            Some(24250),
+            "powershell.exe",
+            "C:\\Windows\\System32\\powershell.exe",
+            &lotl_cmd,
+            "corp_user",
+        );
+        ps_ev.destination_ip = Some("198.51.100.42".to_string());
+        ps_ev.destination_port = Some(8443);
+        let _ = engine.ingest_telemetry_event(&ps_ev);
+
+        // 2. Service account recon + temp unsigned DLL + 3-sigma outbound spike
+        let recon_cmd = ["whoami", "net user"].join(" ");
+        let _ = engine.ingest_telemetry_event(&EdrSensorTelemetryEvent::new_process_create(
+            28100,
+            Some(900),
+            "cmd.exe",
+            "C:\\Windows\\System32\\cmd.exe",
+            &recon_cmd,
+            "NT AUTHORITY\\NETWORK SERVICE",
+        ));
+        let mut dll_ev = EdrSensorTelemetryEvent::new_process_create(
+            28120,
+            Some(28100),
+            "svc_worker.exe",
+            "C:\\Program Files\\Service\\svc_worker.exe",
+            "svc_worker.exe",
+            "NT AUTHORITY\\NETWORK SERVICE",
+        );
+        dll_ev.event_kind = TelemetryEventKind::ImageLoadDll;
+        dll_ev.target_file_or_dll_path =
+            Some("C:\\Users\\Public\\AppData\\Local\\Temp\\unsigned_plugin.dll".to_string());
+        dll_ev.module_is_signed = Some(false);
+        let _ = engine.ingest_telemetry_event(&dll_ev);
+
+        let mut exfil_ev = EdrSensorTelemetryEvent::new_process_create(
+            28120,
+            Some(28100),
+            "svc_worker.exe",
+            "C:\\Program Files\\Service\\svc_worker.exe",
+            "svc_worker.exe --upload",
+            "NT AUTHORITY\\NETWORK SERVICE",
+        );
+        exfil_ev.event_kind = TelemetryEventKind::NetworkConnect;
+        exfil_ev.destination_ip = Some("203.0.113.88".to_string());
+        exfil_ev.destination_port = Some(443);
+        exfil_ev.outbound_bytes = 30_000_000;
+        let _ = engine.ingest_telemetry_event(&exfil_ev);
+    }
+
+    let report = engine.status_report();
+    println!("================================================================================");
+    println!("🛡️  KILLSWITCH CONTINUOUS EDR BEHAVIORAL LINEAGE & BASELINE MONITOR");
+    println!("================================================================================");
+    println!(
+        "  Tracked Process Lineage Nodes: {} | Learned Baseline Profiles: {} | Events Ingested: {}",
+        report.tracked_processes_in_lineage_tree,
+        report.learned_baseline_profiles,
+        report.total_events_ingested
+    );
+    println!(
+        "  MITRE IoA Hits: {} | Lineage Violations: {} | Baseline Deviations: {} | Auto-Containments: {}",
+        report.total_ioa_matches,
+        report.total_lineage_violations,
+        report.total_baseline_deviations,
+        report.automated_containments_triggered
+    );
+    println!("  Active Sensor Hooks: {}", report.active_sensor_hooks.join(" | "));
+    println!("--------------------------------------------------------------------------------");
+    for nar in &report.active_narratives {
+        println!(
+            "  • [{}] Risk={:.2} ({:?}) | Techniques={:?}",
+            nar.narrative_id, nar.composite_risk_score, nar.severity, nar.mitre_techniques
+        );
+        println!("    Lineage: {}", nar.lineage_chain);
+        println!("    Action:  {:?}", nar.containment_action);
+        println!("    Seal:    {}", nar.blake3_narrative_seal);
+    }
+    println!("================================================================================");
     Ok(())
 }

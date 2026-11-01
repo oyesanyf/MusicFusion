@@ -10409,6 +10409,29 @@ def run_benchmark_only(
         return demo_benchmark_comparison()
 
 
+def _encode_categoricals_safe(X, cat_cols, max_cardinality=100):
+    """One-hot encode low-cardinality categoricals; frequency-encode the rest.
+
+    Unbounded get_dummies() on a high-cardinality column (e.g. an ID-like
+    field with tens of thousands of uniques) times the row count produces a
+    dense boolean matrix that can exceed available memory on large datasets.
+    """
+    low_card = [c for c in cat_cols if X[c].nunique(dropna=False) <= max_cardinality]
+    high_card = [c for c in cat_cols if c not in low_card]
+
+    if high_card:
+        print(f"    [WARN] {len(high_card)} high-cardinality column(s) frequency-encoded "
+              f"instead of one-hot (> {max_cardinality} uniques): {high_card}")
+        for c in high_card:
+            freq = X[c].value_counts(dropna=False)
+            X[c] = X[c].map(freq).astype('float64')
+
+    if low_card:
+        X = pd.get_dummies(X, columns=low_card, drop_first=True)
+
+    return X
+
+
 def run_multi_target_training(
     file_path: str,
     targets: List[str],
@@ -10489,8 +10512,8 @@ def run_multi_target_training(
         # Encode categorical features
         cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
         if cat_cols:
-            X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
-        
+            X = _encode_categoricals_safe(X, cat_cols)
+
         # Detect task type
         detected_task = task
         if task == "auto":
@@ -10589,8 +10612,8 @@ def run_multi_target_training(
             # Encode categorical features
             cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
             if cat_cols:
-                X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
-            
+                X = _encode_categoricals_safe(X, cat_cols)
+
             # Detect task type
             detected_task = task
             if task == "auto":

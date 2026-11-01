@@ -1,0 +1,79 @@
+{
+  "risk_report": {
+    "task": "regression",
+    "target_type": "regression",
+    "n_rows": 519,
+    "n_cols": 648,
+    "n_numeric": 648,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": -0.009072323398671322,
+    "temporal_leakage_gap": null,
+    "class_imbalance_max_ratio": null,
+    "imbalance_severity": 0.0,
+    "vif_max": 999999.9999712444,
+    "vif_features": [
+      "Date_1915-02-01",
+      "Date_1915-06-01",
+      "Date_1915-10-01",
+      "Date_1916-12-01",
+      "Date_1917-06-01",
+      "Date_1917-07-01",
+      "Date_1918-03-01"
+    ],
+    "cv_score_std": 0.03411626517416751,
+    "notes": [
+      "High multicollinearity: VIF max=1000000.0."
+    ]
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null
+  },
+  "candidates_evaluated": [
+    {
+      "name": "Ridge",
+      "metric": -0.04759576254874274,
+      "train_time_s": 0.17362332344055176,
+      "peak_mem_mb": 7.60546875,
+      "latency_ms_per_row": 0.018912367522716522,
+      "risk_penalty": 0.2523487955225025,
+      "cv_scores": [
+        -0.04923975212431153,
+        -0.042298906046175144,
+        -0.005019744833044015,
+        -0.10883871247566002,
+        -0.03258169726452298
+      ],
+      "cv_score_std": 0.03411626517416751,
+      "stress_worst_drop": 0.0,
+      "stress_tests": []
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "Ridge",
+      "metric": -0.04759576254874274,
+      "train_time_s": 0.17362332344055176,
+      "peak_mem_mb": 7.60546875,
+      "latency_ms_per_row": 0.018912367522716522,
+      "risk_penalty": 0.2523487955225025
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "Ridge",
+    "metric": -0.04759576254874274,
+    "train_time_s": 0.17362332344055176,
+    "peak_mem_mb": 7.60546875,
+    "latency_ms_per_row": 0.018912367522716522,
+    "risk_penalty": 0.2523487955225025,
+    "stress_worst_drop": 0.0
+  },
+  "risk_calibrator": {
+    "type": null,
+    "used": false
+  }
+}

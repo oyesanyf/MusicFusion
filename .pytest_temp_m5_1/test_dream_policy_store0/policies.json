@@ -1,0 +1,19 @@
+{
+  "total_generations": 1,
+  "latest_generation": 1,
+  "policies": [
+    {
+      "generation": 1,
+      "mutator_weights": {
+        "TE_CL_DUAL_HEADER": 0.6,
+        "PATH_NUL_EARLY_RESPONSE": 0.4
+      },
+      "normative_bias": 0.5,
+      "delta_aggressiveness": 0.5,
+      "fitness_score": 150.0,
+      "rsi_gain": 0.25,
+      "simulated_yield": 0.35,
+      "false_positive_rate": 0.0
+    }
+  ]
+}

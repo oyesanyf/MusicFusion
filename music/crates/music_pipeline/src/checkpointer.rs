@@ -193,7 +193,7 @@ impl CheckpointManager {
 
         let clean_name = Self::sanitize_path_component(stem_name)?;
         let stem_path = s_dir.join(format!("{}.wav", clean_name));
-        buffer.to_wav_file_with_format(&stem_path, WavBitDepth::Float32)
+        buffer.to_wav_file_with_format(&stem_path, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
 
         if let Some(conn_lock) = &self.sqlite_conn {

@@ -35,13 +35,18 @@
         </div>
       </div>
 
-      <!-- + New Song Button -->
-      <div class="sidebar-action-wrap">
+      <!-- + New Song & Load Local WAV Buttons -->
+      <div class="sidebar-action-wrap" style="display:flex; flex-direction:column; gap:8px;">
         <button type="button" class="sidebar-new-btn" id="sidebar-new-song" title="Start a brand-new song project (Ctrl+N)">
           <span class="btn-icon">➕</span>
           <span class="btn-text">New Song</span>
           <span class="btn-kbd">Ctrl+N</span>
         </button>
+        <button type="button" class="sidebar-new-btn" id="btn-sidebar-load-local" title="Load and play any local .WAV / audio file from disk" style="background:rgba(16,163,127,0.16); border-color:#10a37f;">
+          <span class="btn-icon">📂</span>
+          <span class="btn-text">Load Local WAV File</span>
+        </button>
+        <input type="file" id="local-audio-file-input" accept=".wav,.mp3,.ogg,.flac,.m4a,audio/*" multiple style="display:none;">
       </div>
 
       <!-- Scrollable Navigation and History -->
@@ -49,12 +54,12 @@
         <!-- Section: Song & Version History -->
         <div class="sidebar-section-header">
           <span class="section-title">SONG &amp; VERSION HISTORY</span>
-          <span class="section-count" id="history-count">2</span>
+          <span class="section-count" id="history-count">3</span>
         </div>
 
         <div class="sidebar-history-container" id="sidebar-song-history">
           <!-- Item 1: Flagship Reggae Anthem (Active) -->
-          <div class="history-item active" data-song-id="song_reggae_anthem_001" data-version="1" tabindex="0">
+          <div class="history-item active" data-song-id="roots_reggae_anthem" data-version="1" tabindex="0">
             <div class="history-item-top">
               <span class="history-genre-badge reggae">Roots Reggae</span>
               <span class="history-time">Just now</span>
@@ -62,21 +67,39 @@
             <div class="history-item-title">One Love Compassion Anthem</div>
             <div class="history-item-meta">76 BPM • A Major • 48 kHz</div>
             <div class="history-version-chips">
-              <button type="button" class="version-chip active" data-version="1" title="Version 1: Original Master">v1</button>
-              <button type="button" class="version-chip" data-version="2" title="Version 2: Wah Lead &amp; Sub-Bass Boost">v2 (Adjusted)</button>
+              <button type="button" class="version-chip sidebar-play-btn" data-action="play-song" data-song-id="roots_reggae_anthem" title="Play this song now" style="background:#10a37f; color:#fff; font-weight:600;">▶ Play</button>
+              <button type="button" class="version-chip active" data-song-id="roots_reggae_anthem" data-version="1" title="Version 1: Original Master">v1</button>
+              <button type="button" class="version-chip" data-song-id="roots_reggae_anthem" data-version="2" title="Version 2: Wah Lead &amp; Sub-Bass Boost">v2 (Adjusted)</button>
             </div>
           </div>
 
-          <!-- Item 2: Afrobeats Demo -->
+          <!-- Item 2: Afrobeats Lagos Sunrise Groove -->
           <div class="history-item" data-song-id="song_afrobeats_002" data-version="1" tabindex="0">
             <div class="history-item-top">
-              <span class="history-genre-badge afro">Afrobeats</span>
+              <span class="history-genre-badge afrobeats">Afrobeats</span>
               <span class="history-time">2h ago</span>
             </div>
             <div class="history-item-title">Lagos Sunrise Groove</div>
             <div class="history-item-meta">104 BPM • C Major • 48 kHz</div>
             <div class="history-version-chips">
-              <button type="button" class="version-chip active" data-version="1">v1</button>
+              <button type="button" class="version-chip sidebar-play-btn" data-action="play-song" data-song-id="song_afrobeats_002" title="Play Lagos Sunrise Groove now" style="background:#10a37f; color:#fff; font-weight:600;">▶ Play</button>
+              <button type="button" class="version-chip active" data-song-id="song_afrobeats_002" data-version="1" title="Version 1: Original Master">v1</button>
+              <button type="button" class="version-chip" data-song-id="song_afrobeats_002" data-version="2" title="Version 2: Club Log-Drum Boost">v2 (Club Mix)</button>
+            </div>
+          </div>
+
+          <!-- Item 3: One Love Shining 1977 -->
+          <div class="history-item" data-song-id="song-one-love-shining-1977" data-version="1" tabindex="0">
+            <div class="history-item-top">
+              <span class="history-genre-badge reggae">Roots Reggae 1977</span>
+              <span class="history-time">5m ago</span>
+            </div>
+            <div class="history-item-title">One Love Shining (1977 Master)</div>
+            <div class="history-item-meta">76 BPM • A Major • 48 kHz</div>
+            <div class="history-version-chips">
+              <button type="button" class="version-chip sidebar-play-btn" data-action="play-song" data-song-id="song-one-love-shining-1977" title="Play One Love Shining now" style="background:#10a37f; color:#fff; font-weight:600;">▶ Play</button>
+              <button type="button" class="version-chip active" data-song-id="song-one-love-shining-1977" data-version="1" title="Version 1: Original Master">v1</button>
+              <button type="button" class="version-chip" data-song-id="song-one-love-shining-1977" data-version="2" title="Version 2: Iterated Mix">v2</button>
             </div>
           </div>
         </div>
@@ -199,6 +222,16 @@
         </div>
 
         <div class="top-nav-right">
+          <!-- Audio Output Device Selector (Header Quick Picker) -->
+          <div class="output-device-header-wrap" title="Choose Sound Output Device (Speakers / Headphones / Monitor)">
+            <label for="header-audio-output-select" class="output-device-label">🔊 Output:</label>
+            <select id="header-audio-output-select" class="version-select output-device-select" title="Choose Sound Output Device">
+              <option value="default" selected>Speakers / Headphones (Realtek Audio)</option>
+              <option value="lg_ultrawide">LG ULTRAWIDE (NVIDIA High Definition Audio)</option>
+            </select>
+            <button type="button" class="rate-btn" id="btn-refresh-audio-devices" title="Scan &amp; Select Browser/OS Audio Output Devices">🔄 Scan</button>
+          </div>
+
           <!-- Multi-LLM Deliberation Panel Badge -->
           <div class="panel-models-badge" title="Active Multi-LLM Iteration Specialist Panel">
             <span class="panel-icon">✨</span>
@@ -248,9 +281,12 @@
                   <div class="song-card-title" id="card-song-title">One Love Compassion Anthem</div>
                   <div class="song-card-subtitle" id="card-song-meta">1977 Roots Reggae • 76 BPM • A Major • 48 kHz 24-bit WAV</div>
                 </div>
-                <div class="song-card-actions">
+                <div class="song-card-actions" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                   <span class="version-tag" id="card-version-tag">v1 Master</span>
-                  <a href="/api/songs/song_reggae_anthem_001/versions/1/audio/final_master" download="One_Love_Anthem_v1_Master.wav" class="card-download-btn" id="card-download-btn" title="Download Master 48 kHz WAV">
+                  <button type="button" class="card-download-btn" id="btn-card-load-local" title="Load and play a local .WAV or audio file from your computer" style="cursor:pointer; background:rgba(16,163,127,0.18); border:1px solid #10a37f; color:#e4e4e7;">
+                    📂 Load Local WAV
+                  </button>
+                  <a href="/api/songs/roots_reggae_anthem/versions/1/audio/final_master?download=1" download="One_Love_Anthem_v1_Master.wav" class="card-download-btn" id="card-download-btn" title="Download Master 48 kHz WAV">
                     ⬇ Download WAV
                   </a>
                 </div>
@@ -259,8 +295,8 @@
               <!-- Master Audio Player & Waveform Deck -->
               <div class="master-deck-container">
                 <div class="deck-top-row">
-                  <span class="deck-label">FINAL MASTER (48 kHz 24-Bit Stereo)</span>
-                  <span class="deck-time" id="master-time-display">00:00 / 03:24</span>
+                  <span class="deck-label">FINAL MASTER (48 kHz 16-Bit PCM Stereo)</span>
+                  <span class="deck-time" id="master-time-display">00:00 / 01:16</span>
                 </div>
 
                 <!-- Custom Styled Canvas Waveform -->
@@ -269,8 +305,8 @@
                   <div class="waveform-progress-bar" id="waveform-progress"></div>
                 </div>
 
-                <!-- Native HTML5 Audio Element (Driven by Custom Deck) -->
-                <audio id="master-audio-player" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/final_master">
+                <!-- Native HTML5 Audio Element (Driven by Custom Deck & Visible Controls) -->
+                <audio id="master-audio-player" controls preload="auto" src="/api/songs/roots_reggae_anthem/versions/1/audio/final_master" style="width:100%; height:36px; margin:8px 0; border-radius:8px;">
                   Your browser does not support the audio element.
                 </audio>
 
@@ -280,7 +316,14 @@
                   <button type="button" class="deck-stop-btn" id="btn-master-stop" title="Stop &amp; Rewind">⏹</button>
                   <div class="deck-volume-wrap">
                     <span class="volume-icon">🔊</span>
-                    <input type="range" id="master-volume-slider" min="0" max="1" step="0.01" value="0.9" title="Master Volume" class="volume-slider">
+                    <input type="range" id="master-volume-slider" min="0" max="1" step="0.01" value="0.95" title="Master Volume" class="volume-slider">
+                  </div>
+                  <div class="deck-output-device-wrap" style="display:inline-flex; align-items:center; gap:6px;">
+                    <label for="deck-audio-output-select" style="font-size:12px; color:#a1a1aa; white-space:nowrap;">🎧 Device:</label>
+                    <select id="deck-audio-output-select" class="version-select" title="Select Sound Output Device (Speakers / Headphones / Monitor)" style="max-width:240px; font-size:12px; padding:4px 8px;">
+                      <option value="default" selected>Speakers / Headphones (Realtek Audio)</option>
+                      <option value="lg_ultrawide">LG ULTRAWIDE (NVIDIA High Definition Audio)</option>
+                    </select>
                   </div>
                   <div class="deck-rate-wrap">
                     <button type="button" class="rate-btn" id="btn-toggle-loop" title="Toggle Loop Mode">🔁 Loop</button>
@@ -397,7 +440,7 @@
                         <button type="button" class="stem-btn solo" data-stem="vocals" title="Solo">S</button>
                         <button type="button" class="stem-btn mute" data-stem="vocals" title="Mute">M</button>
                         <input type="range" class="stem-vol" data-stem="vocals" min="0" max="1" step="0.05" value="0.85" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="vocals" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/raspy_tenor_vocals"></audio>
+                        <audio class="stem-audio-element" data-stem="vocals" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/raspy_tenor_vocals"></audio>
                         <button type="button" class="stem-regen-btn" data-stem="vocals" title="Regenerate only this vocal stem">🔄 Regen</button>
                       </div>
                     </div>
@@ -415,7 +458,7 @@
                         <button type="button" class="stem-btn solo" data-stem="drums" title="Solo">S</button>
                         <button type="button" class="stem-btn mute" data-stem="drums" title="Mute">M</button>
                         <input type="range" class="stem-vol" data-stem="drums" min="0" max="1" step="0.05" value="0.9" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="drums" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/drums"></audio>
+                        <audio class="stem-audio-element" data-stem="drums" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/drums"></audio>
                         <button type="button" class="stem-regen-btn" data-stem="drums" title="Regenerate drum pattern">🔄 Regen</button>
                       </div>
                     </div>
@@ -433,7 +476,7 @@
                         <button type="button" class="stem-btn solo" data-stem="bass" title="Solo">S</button>
                         <button type="button" class="stem-btn mute" data-stem="bass" title="Mute">M</button>
                         <input type="range" class="stem-vol" data-stem="bass" min="0" max="1" step="0.05" value="0.95" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="bass" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/bass"></audio>
+                        <audio class="stem-audio-element" data-stem="bass" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/bass"></audio>
                         <button type="button" class="stem-regen-btn" data-stem="bass" title="Regenerate sub-bass">🔄 Regen</button>
                       </div>
                     </div>
@@ -451,7 +494,7 @@
                         <button type="button" class="stem-btn solo" data-stem="guitar" title="Solo">S</button>
                         <button type="button" class="stem-btn mute" data-stem="guitar" title="Mute">M</button>
                         <input type="range" class="stem-vol" data-stem="guitar" min="0" max="1" step="0.05" value="0.8" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="guitar" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/guitar"></audio>
+                        <audio class="stem-audio-element" data-stem="guitar" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/guitar"></audio>
                         <button type="button" class="stem-regen-btn" data-stem="guitar" title="Regenerate guitar skank">🔄 Regen</button>
                       </div>
                     </div>
@@ -469,7 +512,7 @@
                         <button type="button" class="stem-btn solo" data-stem="other" title="Solo">S</button>
                         <button type="button" class="stem-btn mute" data-stem="other" title="Mute">M</button>
                         <input type="range" class="stem-vol" data-stem="other" min="0" max="1" step="0.05" value="0.75" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="other" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/other"></audio>
+                        <audio class="stem-audio-element" data-stem="other" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/other"></audio>
                         <button type="button" class="stem-regen-btn" data-stem="other" title="Regenerate organ/keys">🔄 Regen</button>
                       </div>
                     </div>
@@ -487,7 +530,7 @@
                         <button type="button" class="stem-btn solo" data-stem="inpainted_guitar" title="Solo">S</button>
                         <button type="button" class="stem-btn mute" data-stem="inpainted_guitar" title="Mute">M</button>
                         <input type="range" class="stem-vol" data-stem="inpainted_guitar" min="0" max="1" step="0.05" value="0.9" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="inpainted_guitar" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/inpainted_guitar"></audio>
+                        <audio class="stem-audio-element" data-stem="inpainted_guitar" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/inpainted_guitar"></audio>
                         <button type="button" class="stem-regen-btn" data-stem="inpainted_guitar" title="Re-synthesize virtuoso solo">🔄 Regen</button>
                       </div>
                     </div>
@@ -505,7 +548,7 @@
                         <button type="button" class="stem-btn solo" data-stem="inpainted_drums" title="Solo">S</button>
                         <button type="button" class="stem-btn mute" data-stem="inpainted_drums" title="Mute">M</button>
                         <input type="range" class="stem-vol" data-stem="inpainted_drums" min="0" max="1" step="0.05" value="0.85" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="inpainted_drums" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/inpainted_drums"></audio>
+                        <audio class="stem-audio-element" data-stem="inpainted_drums" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/inpainted_drums"></audio>
                         <button type="button" class="stem-regen-btn" data-stem="inpainted_drums" title="Re-roll drum fills">🔄 Regen</button>
                       </div>
                     </div>
@@ -523,7 +566,7 @@
                         <button type="button" class="stem-btn solo" data-stem="draft_groove" title="Solo">S</button>
                         <button type="button" class="stem-btn mute" data-stem="draft_groove" title="Mute">M</button>
                         <input type="range" class="stem-vol" data-stem="draft_groove" min="0" max="1" step="0.05" value="0.6" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="draft_groove" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/draft_groove"></audio>
+                        <audio class="stem-audio-element" data-stem="draft_groove" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/draft_groove"></audio>
                       </div>
                     </div>
                   </div>

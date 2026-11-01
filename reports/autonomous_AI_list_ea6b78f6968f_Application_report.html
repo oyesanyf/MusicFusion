@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='45' font-family='Arial,sans-serif' font-size='32' font-weight='700' fill='%23ffffff' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
+    <title>ACDSO 3.0 Report - Autonomous_Custom_File</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #3b82f6;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --info: #0891b2;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-highlight: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, var(--bg) 0%, #1a1a2e 100%);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(139, 92, 246, 0.1));
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        h2 { color: var(--primary-light); margin: 1.5rem 0 1rem 0; font-size: 1.5rem; }
+        h3 { color: var(--primary-light); margin: 1rem 0 0.5rem 0; font-size: 1.2rem; }
+        .subtitle { color: var(--text-muted); margin-bottom: 0.5rem; }
+        
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: rgba(37, 99, 235, 0.15);
+            font-weight: 600;
+            color: var(--primary-light);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        tr:hover { background: rgba(255, 255, 255, 0.03); }
+        .model-name { color: var(--success); font-weight: 600; }
+        .success { color: var(--success); }
+        .error { color: var(--danger); }
+        .selected-model { background: rgba(22, 163, 74, 0.15); border-left: 3px solid var(--success); }
+        .selected-model:hover { background: rgba(22, 163, 74, 0.25); }
+        .models-table { font-size: 0.9rem; }
+        .models-table th { position: sticky; top: 0; z-index: 10; }
+        .info-text { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem; font-style: italic; }
+        
+        /* Code/Console Output */
+        .console-output {
+            background: #000;
+            color: #0f0;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .badge-success { background: rgba(22, 163, 74, 0.2); color: var(--success); }
+        .badge-danger { background: rgba(220, 38, 38, 0.2); color: var(--danger); }
+        .badge-info { background: rgba(8, 145, 178, 0.2); color: var(--info); }
+        
+        /* Summary Grid */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .summary-item {
+            background: rgba(0,0,0,0.2);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .summary-value {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--primary-light);
+        }
+        .summary-label {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ACDSO 3.0 Report</h1>
+            <div class="subtitle">Mode: Autonomous_Custom_File</div>
+            <div class="subtitle">Generated: 2026-09-11T11:11:39.069153</div>
+        </div>
+
+        <div class="card">
+            <h2>Configuration</h2>
+            <table>
+                <tr><th>input_file</th><td>C:\harfile\acdso\uploads\AI_list_ea6b78f6968f.csv</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Phase Results with Selected Models</h2>
+            <h3>All Phases</h3>
+            <table>
+                <tr><th>Demo Name</th><th>Status</th><th>Selected Model</th><th>Time (s)</th></tr>
+                <tr><td>Data Loading</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>3.08</td></tr>
+                <tr><td>Target Detection</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>3.17</td></tr>
+                <tr><td>Auto EDA</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>4.86</td></tr>
+                <tr><td>Risk Analysis</td><td class='error'>FAILED: '<' not supported between instances of 'str' and 'float'</td><td class='model-name'>None</td><td>109.59</td></tr>
+                <tr><td>AutoML</td><td class='error'>FAILED: Unable to allocate 78.5 GiB for an array with shape (84305, 1000000) and data type bool</td><td class='model-name'>None</td><td>5.51</td></tr>
+                <tr><td>Time Series</td><td class='error'>FAILED: can only concatenate str (not "float") to str</td><td class='model-name'>None</td><td>1.00</td></tr>
+                <tr><td>Advanced EDA Features</td><td class='error'>SKIPPED: Advanced EDA features are included in basic EDA</td><td class='model-name'>None</td><td>0.00</td></tr>
+                <tr><td>Decision Intelligence</td><td class='error'>SKIPPED: DecisionIntelligence.__init__() got an unexpected keyword argument 'verbose'</td><td class='model-name'>None</td><td>0.03</td></tr>
+                <tr><td>Benchmark (Custom File)</td><td class='error'>FAILED: ('Pycaret only supports python 3.9, 3.10, 3.11. Your actual Python version: ', sys.version_info(major=3, minor=12, micro=10, releaselevel='final', serial=0), 'Please DOWNGRADE your Python version.')</td><td class='model-name'>None</td><td>43.84</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Exploratory Data Analysis (EDA)</h2>
+            <p class="info-text">Complete EDA report with data quality analysis, statistics, and visualizations.</p>
+            <div style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 800px; overflow-y: auto;">
+
+    <div class="container">
+        <h1>🔍 ACDSO Auto EDA Report</h1>
+        <p style="color: var(--text-secondary);">Dataset: <strong>AI_list_ea6b78f6968f.csv</strong> | Generated: 2026-09-11T11:08:53.702461</p>
+        
+        <div class="card">
+            <h2>📊 Dataset Overview</h2>
+            <div class="metric">
+                <div class="metric-label">Rows</div>
+                <div class="metric-value">1,000,000</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Columns</div>
+                <div class="metric-value">20</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Numeric</div>
+                <div class="metric-value">6</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Categorical</div>
+                <div class="metric-value">14</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Memory</div>
+                <div class="metric-value">911.1 MB</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>⭐ Data Quality Score</h2>
+            <div class="quality-score">53/100</div>
+            <div style="margin-top: 1rem;">
+                <div class="metric">
+                    <div class="metric-label">Missing Values</div>
+                    <div class="metric-value">6,025,748 (30.1%)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Duplicates</div>
+                    <div class="metric-value">135,939 (13.6%)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Constant Cols</div>
+                    <div class="metric-value">7</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'><h2>⚠️ Issues Detected</h2><div class='issue'>• High missing data: 30.1% of values are missing</div><div class='issue'>• Duplicate rows detected: 135939 (13.6%)</div><div class='issue'>• Constant columns found: ['Action', 'Integrations', 'Blocked Categories', 'Threats', 'Threat Types']</div></div>
+        
+        
+        
+        <div class="card">
+            <h2>💡 Recommendations</h2>
+            <div class='recommendation'>1. Consider imputation strategies or removing columns with >50% missing</div><div class='recommendation'>2. Review and potentially remove duplicate rows</div><div class='recommendation'>3. Remove constant columns as they provide no predictive value</div>
+        </div>
+        
+        <div class="card">
+            <h2>📋 Column Profiles</h2>
+            <table>
+                <tr>
+                    <th>Column</th>
+                    <th>Type</th>
+                    <th>Missing %</th>
+                    <th>Unique</th>
+                    <th>Flags</th>
+                </tr>
+                <tr><td>Date</td><td>object</td><td>0.0%</td><td>9</td><td></td></tr><tr><td>Time</td><td>object</td><td>0.0%</td><td>84306</td><td></td></tr><tr><td>Action</td><td>object</td><td>0.0%</td><td>1</td><td>⚠️ Constant</td></tr><tr><td>Identities</td><td>object</td><td>0.0%</td><td>1005</td><td></td></tr><tr><td>Identity Types</td><td>object</td><td>0.0%</td><td>5</td><td></td></tr><tr><td>Policy or Ruleset Identity</td><td>object</td><td>0.0%</td><td>792</td><td></td></tr><tr><td>Policy or Ruleset Identity Type</td><td>object</td><td>0.0%</td><td>2</td><td></td></tr><tr><td>Internal IP</td><td>object</td><td>0.0%</td><td>2277</td><td></td></tr><tr><td>External IP</td><td>object</td><td>0.0%</td><td>2376</td><td></td></tr><tr><td>Destination</td><td>object</td><td>0.0%</td><td>317</td><td></td></tr><tr><td>Categories</td><td>object</td><td>0.0%</td><td>47</td><td></td></tr><tr><td>Integrations</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Blocked Categories</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Application</td><td>object</td><td>1.3%</td><td>61</td><td></td></tr><tr><td>Application Category</td><td>object</td><td>1.3%</td><td>5</td><td></td></tr><tr><td>Threats</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Threat Types</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Query Type</td><td>object</td><td>0.0%</td><td>3</td><td></td></tr><tr><td>Client Reporting Id</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr><tr><td>Event Correlation Id</td><td>float64</td><td>100.0%</td><td>0</td><td>⚠️ Constant</td></tr>
+            </table>
+        </div>
+        
+        <div class="footer">
+            <p>Generated by ACDSO v2.0 Auto EDA | Analysis time: 4.67s</p>
+        </div>
+    </div>
+
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Summary</h2>
+            <div class="summary-grid">
+                <div class='summary-item'><div class='summary-value'>9</div><div class='summary-label'>Total Phases</div></div>
+                <div class='summary-item'><div class='summary-value'>3</div><div class='summary-label'>Successful</div></div>
+                <div class='summary-item'><div class='summary-value'>4</div><div class='summary-label'>Failed</div></div>
+                <div class='summary-item'><div class='summary-value'>2</div><div class='summary-label'>Skipped</div></div>
+                <div class='summary-item'><div class='summary-value'>168.7s</div><div class='summary-label'>Total Time</div></div>
+                <div class='summary-item'><div class='summary-value'>33.3%</div><div class='summary-label'>Success Rate</div></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📁 Files Generated</h2>
+            <p class="info-text">All files generated during this analysis session. Click a path to open/download it, or use the copy button.</p>
+            <table>
+                <tr><th>File Type</th><th>Path</th></tr>
+                <tr>
+                    <td>📄 Combined HTML Report</td>
+                    <td><a href="file:///C:/harfile/acdso/reports/autonomous_AI_list_ea6b78f6968f_Application_report.html" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration:none; background:#2d3748; padding:4px 8px; border-radius:4px; font-family:Consolas,monospace; font-size:0.85em; word-break:break-all;">C:\harfile\acdso\reports\autonomous_AI_list_ea6b78f6968f_Application_report.html</a> <button type="button" onclick="navigator.clipboard.writeText('C:\harfile\acdso\reports\autonomous_AI_list_ea6b78f6968f_Application_report.html').then(()=>alert('Path copied!'))" style="background:#334155; color:#94a3b8; border:none; border-radius:4px; padding:3px 8px; cursor:pointer; font-size:0.75em; vertical-align:middle;">copy</button></td>
+                </tr>
+                <tr>
+                    <td>📁 Input Dataset</td>
+                    <td><a href="file:///C:/harfile/acdso/uploads/AI_list_ea6b78f6968f.csv" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration:none; background:#2d3748; padding:4px 8px; border-radius:4px; font-family:Consolas,monospace; font-size:0.85em; word-break:break-all;">C:\harfile\acdso\uploads\AI_list_ea6b78f6968f.csv</a> <button type="button" onclick="navigator.clipboard.writeText('C:\harfile\acdso\uploads\AI_list_ea6b78f6968f.csv').then(()=>alert('Path copied!'))" style="background:#334155; color:#94a3b8; border:none; border-radius:4px; padding:3px 8px; cursor:pointer; font-size:0.75em; vertical-align:middle;">copy</button></td>
+                </tr>
+            </table>
+        </div>
+
+    </div>
+</body>
+</html>

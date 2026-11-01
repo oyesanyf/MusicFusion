@@ -47,6 +47,20 @@ struct Cli {
     #[arg(long)]
     db_dir: Option<PathBuf>,
 
+    /// Display the ArXiv & LangExtract Research Menu and pending user-approval candidates
+    #[arg(long)]
+    research: bool,
+
+    /// Approve a staged ArXiv research candidate by ID (e.g. 2603.02277) and activate in Rust defense code
+    #[arg(long)]
+    research_approve: Option<String>,
+
+    /// Reject a staged ArXiv research candidate by ID (e.g. 2603.02277)
+    #[arg(long)]
+    research_reject: Option<String>,
+    #[arg(long)]
+    edr_behavior: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -128,6 +142,46 @@ enum Commands {
 
     /// Run the 6-phase in-memory self-diagnostics
     Verify,
+    /// Inspect or verify the Continuous EDR Behavioral Anomaly & Process Lineage Engine
+    EdrBehavior {
+        #[arg(default_value = "verify-chains")]
+        action: String,
+    },
+
+    /// Inspect, stage, approve, or reject ArXiv & LangExtract security research candidates
+    Research {
+        /// Action: list, discover, approve, reject
+        #[arg(default_value = "list")]
+        action: String,
+
+        /// Candidate ID or arXiv ID (e.g. 2603.02277 or cand-2603-02277)
+        #[arg(short, long)]
+        id: Option<String>,
+
+        /// Paper title override
+        #[arg(short, long)]
+        title: Option<String>,
+
+        /// Extracted breakout vector override
+        #[arg(short, long)]
+        vector: Option<String>,
+
+        /// Target boundary override (e.g. agent_memory_store, container, mcp_tool_registry)
+        #[arg(short, long)]
+        boundary: Option<String>,
+
+        /// Grounded verbatim quote override
+        #[arg(short, long)]
+        quote: Option<String>,
+
+        /// Target Rust crate enhancement override (e.g. killswitch-telemetry, killswitch-conformal)
+        #[arg(long)]
+        crate_target: Option<String>,
+
+        /// Approving operator identity
+        #[arg(short, long, default_value = "cli_operator")]
+        operator: String,
+    },
 }
 
 async fn boot_unified_webui_runtime(
@@ -190,11 +244,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.verify {
-        println!("🛡️  [KILLSWITCH.EXE] Executing 6-Phase Subsystem Self-Diagnostics...");
+        println!("🛡️  [KILLSWITCH.EXE] Executing 7-Phase Subsystem Self-Diagnostics...");
         match SubsystemVerifier::run_all().await {
             Ok(report) => {
                 report.print_summary();
-                println!("✅ [KILLSWITCH.EXE] All 6 Subsystems Verified Successfully! Self-check passed (exit 0).");
+                println!("✅ [KILLSWITCH.EXE] All 7 Subsystems Verified Successfully! Self-check passed (exit 0).");
                 std::process::exit(0);
             }
             Err(e) => {
@@ -205,6 +259,47 @@ async fn main() -> Result<()> {
     }
 
     let client = KillSwitchClient::new(&cli.host, cli.port);
+
+    if let Some(ref approve_id) = cli.research_approve {
+        handle_research(
+            &client,
+            "approve",
+            Some(approve_id),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("cli_operator"),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if let Some(ref reject_id) = cli.research_reject {
+        handle_research(
+            &client,
+            "reject",
+            Some(reject_id),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("cli_operator"),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if cli.edr_behavior {
+        handle_edr_behavior("verify-chains").await?;
+        return Ok(());
+    }
+    if cli.research {
+        handle_research(&client, "list", None, None, None, None, None, None, None).await?;
+        return Ok(());
+    }
 
     match cli.command {
         None | Some(Commands::Run) => {
@@ -257,6 +352,30 @@ async fn main() -> Result<()> {
             handle_graph(&client, &action, node.as_deref()).await?
         }
         Some(Commands::Verify) => handle_verify().await?,
+        Some(Commands::EdrBehavior { action }) => handle_edr_behavior(&action).await?,
+        Some(Commands::Research {
+            action,
+            id,
+            title,
+            vector,
+            boundary,
+            quote,
+            crate_target,
+            operator,
+        }) => {
+            handle_research(
+                &client,
+                &action,
+                id.as_deref(),
+                title.as_deref(),
+                vector.as_deref(),
+                boundary.as_deref(),
+                quote.as_deref(),
+                crate_target.as_deref(),
+                Some(&operator),
+            )
+            .await?
+        }
     }
 
     Ok(())

@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "OCTO-ARM106-0001",
+    "name": "Hardening Rule for DESYNCHRONIZATION",
+    "type": "WAF_MODSEC",
+    "anchor": "RFC9112",
+    "body": "SecRule REQUEST_HEADERS_NAMES \"@rx .*\" \"id:0001,phase:1,deny,status:400\"",
+    "severity": "CRITICAL"
+  }
+]

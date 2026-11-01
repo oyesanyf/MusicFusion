@@ -26,6 +26,44 @@ pub struct StatusResponse {
     pub active_mode: String,
     pub uptime_secs: u64,
     pub version: String,
+    #[serde(default)]
+    pub trigger_cause: String,
+    #[serde(default)]
+    pub trigger_source: String,
+    #[serde(default)]
+    pub trigger_details: String,
+    #[serde(default)]
+    pub platform_os: String,
+    #[serde(default)]
+    pub isolation_engine: String,
+    #[serde(default = "default_peers_enabled")]
+    pub peers_enabled: bool,
+    #[serde(default)]
+    pub connected_peers_count: usize,
+    #[serde(default)]
+    pub connected_peer_endpoints: Vec<String>,
+    #[serde(default)]
+    pub tpm_present: bool,
+    #[serde(default)]
+    pub tpm_version: String,
+    #[serde(default)]
+    pub tpm_provider: String,
+    #[serde(default)]
+    pub tpm_interface_type: String,
+    #[serde(default)]
+    pub tpm_sealed: bool,
+    #[serde(default)]
+    pub tpm_integrity_verified: bool,
+    #[serde(default)]
+    pub tpm_pcr_0_7_sha256: String,
+    #[serde(default)]
+    pub tpm_anchored_ledger_hash: String,
+    #[serde(default)]
+    pub tpm_status_detail: String,
+}
+
+fn default_peers_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +94,12 @@ pub struct EngageRequest {
     pub token: Option<String>,
     pub level: Option<String>,
     pub caller_pid: Option<u32>,
+    /// Optional candidate YARA / detection rule that MUST pass SWE-bench `FAIL_TO_PASS` and
+    /// `PASS_TO_PASS` (0 false positives on benign baseline) before engaging the KillSwitch.
+    #[serde(default)]
+    pub candidate_rule: Option<String>,
+    #[serde(default)]
+    pub task_instance_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +107,10 @@ pub struct EngageResponse {
     pub success: bool,
     pub message: String,
     pub status: KillChainStatus,
+    #[serde(default)]
+    pub blind_killswitch_prevented: bool,
+    #[serde(default)]
+    pub swe_bench_report: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,4 +333,344 @@ pub struct LineageEvaluateResponse {
     pub classification: Option<String>,
     pub policy: Option<String>,
     pub source_hashes: Vec<String>,
+    #[serde(default)]
+    pub autonomous_killswitch_triggered: bool,
+    #[serde(default)]
+    pub trigger_cause: Option<String>,
+}
+
+// =============================================================================
+// SWE-Bench Two-Gate (`FAIL_TO_PASS` + `PASS_TO_PASS`) EDR-Bench DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdrBenchEvaluateRequest {
+    #[serde(default)]
+    pub instance_id: Option<String>,
+    /// Candidate YARA / containment rule or preset (`"overbroad_blind"`, `"surgical_verified"`).
+    #[serde(default)]
+    pub candidate_yara_rule: Option<String>,
+    #[serde(default)]
+    pub preset: Option<String>,
+    /// Whether to run the compiler-in-the-loop feedback loop to refine false-positive rules.
+    #[serde(default)]
+    pub auto_refine: Option<bool>,
+    #[serde(default)]
+    pub max_iterations: Option<usize>,
+    /// If true and the rule passes BOTH `FAIL_TO_PASS` and `PASS_TO_PASS` (0 FPs), engage KillSwitch.
+    #[serde(default)]
+    pub engage_if_promoted: Option<bool>,
+}
+
+// =============================================================================
+// Connected Peers Control DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PeersControlRequest {
+    /// Explicit boolean (`true` = enable peers, `false` = disable & disconnect peers)
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// Optional action string (`"disable"`, `"enable"`, `"toggle"`, `"disconnect"`)
+    #[serde(default)]
+    pub action: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeersStatusResponse {
+    pub success: bool,
+    pub peers_enabled: bool,
+    pub connected_peers_count: usize,
+    pub connected_peer_endpoints: Vec<String>,
+    pub terminated_connections: usize,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TpmStatusResponse {
+    pub success: bool,
+    pub tpm_present: bool,
+    pub tpm_version: String,
+    pub tpm_provider: String,
+    pub tpm_interface_type: String,
+    pub tpm_sealed: bool,
+    pub tpm_integrity_verified: bool,
+    pub pcr_0_7_sha256: String,
+    pub pcr_update_counter: u32,
+    pub anchored_ledger_hash: String,
+    pub anchored_sequence_number: u64,
+    pub last_sealed_at: Option<String>,
+    pub status_detail: String,
+}
+
+
+
+// =============================================================================
+// NASA JPL F' (F Prime) Flight-Software Command & Telemetry DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FPrimeCommandRequest {
+    /// Optional numeric opcode (`0x0100`..`0x0105`).
+    #[serde(default)]
+    pub opcode: Option<u32>,
+    /// Optional mnemonic (`"CMD_NO_OP"`, `"CMD_PING_ALL_COMPONENTS"`, `"CMD_VERIFY_SWEBENCH_GATES"`, `"CMD_ENGAGE_SAFE_MODE"`, `"CMD_EXIT_SAFE_MODE"`).
+    #[serde(default)]
+    pub mnemonic: Option<String>,
+}
+
+// =============================================================================
+// Conformal Sequential Detection DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConformalEvaluateRequest {
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub feature_vector: Option<Vec<f64>>,
+    #[serde(default)]
+    pub is_base_injection: Option<bool>,
+    #[serde(default)]
+    pub reset_stream: Option<bool>,
+}
+
+// =============================================================================
+// Research Breakout Ingest & Google LangExtract DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchBreakoutExtraction {
+    pub arxiv_id: String,
+    pub title: String,
+    pub attack_vector: String,
+    pub target_boundary: String,
+    #[serde(default)]
+    pub evasion_technique: Option<String>,
+    #[serde(default)]
+    pub mitigation: Option<String>,
+    #[serde(default)]
+    pub source_char_start: Option<usize>,
+    #[serde(default)]
+    pub source_char_end: Option<usize>,
+    #[serde(default)]
+    pub source_quote: Option<String>,
+    #[serde(default)]
+    pub extraction_class: Option<String>,
+    #[serde(default)]
+    pub target_crate_enhancement: Option<String>,
+    #[serde(default)]
+    pub novelty_delta_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchIngestRequest {
+    #[serde(default)]
+    pub extractions: Vec<ResearchBreakoutExtraction>,
+    #[serde(default)]
+    pub auto_synthesize_rules: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchCoverageReport {
+    pub attack_vector: String,
+    pub target_boundary: String,
+    pub covered_by_killswitch: bool,
+    pub active_gate: String,
+    pub details: String,
+    #[serde(default)]
+    pub live_probe_executed: bool,
+    #[serde(default)]
+    pub live_probe_blocked: bool,
+    #[serde(default)]
+    pub execution_latency_us: u64,
+    #[serde(default)]
+    pub is_novel_to_codebase: bool,
+    #[serde(default)]
+    pub target_crate_enhancement: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchIngestResponse {
+    pub success: bool,
+    pub ingested_count: usize,
+    pub evaluated_against_containment: bool,
+    pub coverage_percentage: f64,
+    pub containment_coverage: Vec<ResearchCoverageReport>,
+    pub timestamp: String,
+    #[serde(default)]
+    pub all_live_probes_executed: bool,
+    #[serde(default)]
+    pub novel_enhancement_count: usize,
+    #[serde(default)]
+    pub calibrated_sources_total: usize,
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LangGraphSwarmRequest {
+    #[serde(default)]
+    pub arxiv_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub extractions: Vec<ResearchBreakoutExtraction>,
+    #[serde(default)]
+    pub max_recursion_limit: Option<usize>,
+    #[serde(default)]
+    pub auto_enroll_conformal_source: Option<bool>,
+    #[serde(default)]
+    pub only_novel_enhancements: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgenticToolInvocation {
+    pub arm_id: usize,
+    pub arm_name: String,
+    pub tool_name: String,
+    pub tool_input: serde_json::Value,
+    pub tool_output: serde_json::Value,
+    pub execution_latency_us: u64,
+    pub containment_verified: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LangGraphEdgeTransition {
+    pub step: usize,
+    pub from_node: String,
+    pub to_node: String,
+    pub condition_evaluated: String,
+    pub hmac_signature_hex: String,
+    pub generation_epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LangGraphSwarmResponse {
+    pub success: bool,
+    pub run_id: String,
+    pub stopping_reason: String,
+    pub recursion_steps_used: usize,
+    pub max_recursion_limit: usize,
+    pub visited_nodes: Vec<String>,
+    pub edge_transitions: Vec<LangGraphEdgeTransition>,
+    pub tool_invocations: Vec<AgenticToolInvocation>,
+    pub initial_conformal_sources_k: usize,
+    pub final_conformal_sources_k: usize,
+    pub enrolled_conformal_sources: Vec<String>,
+    pub post_calibration_conformal_verified: bool,
+    pub synthesized_cedar_rules: Vec<String>,
+    pub ingest_report: ResearchIngestResponse,
+    pub timestamp: String,
+}
+
+// =============================================================================
+// Research Menu & Human-in-the-Loop (HITL) User Approval Gate DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchCandidateDto {
+    pub candidate_id: String,
+    pub arxiv_id: String,
+    pub title: String,
+    pub attack_vector: String,
+    pub target_boundary: String,
+    pub source_quote: String,
+    pub source_char_start: usize,
+    pub source_char_end: usize,
+    pub target_crate_enhancement: String,
+    pub rank_score: f64,
+    /// "PendingApproval" | "Approved" | "Rejected"
+    pub status: String,
+    #[serde(default)]
+    pub approved_by: Option<String>,
+    #[serde(default)]
+    pub approved_at: Option<String>,
+    #[serde(default)]
+    pub approval_seal_blake3: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchMenuResponse {
+    pub candidates: Vec<ResearchCandidateDto>,
+    pub pending_count: usize,
+    pub approved_count: usize,
+    pub rejected_count: usize,
+    pub active_research_vectors_count: usize,
+    pub calibrated_sources_total: usize,
+    pub user_approval_required: bool,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchDiscoverRequest {
+    #[serde(default)]
+    pub arxiv_id: Option<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub attack_vector: Option<String>,
+    #[serde(default)]
+    pub target_boundary: Option<String>,
+    #[serde(default)]
+    pub source_quote: Option<String>,
+    #[serde(default)]
+    pub target_crate_enhancement: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchApproveRequest {
+    pub candidate_id: String,
+    /// "approve" | "reject"
+    pub decision: String,
+    #[serde(default)]
+    pub operator: Option<String>,
+    #[serde(default)]
+    pub arxiv_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub attack_vector: Option<String>,
+    #[serde(default)]
+    pub target_boundary: Option<String>,
+    #[serde(default)]
+    pub source_quote: Option<String>,
+    #[serde(default)]
+    pub target_crate_enhancement: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchApproveResponse {
+    pub success: bool,
+    pub candidate: ResearchCandidateDto,
+    pub active_research_vectors_count: usize,
+    pub calibrated_sources_total: usize,
+    pub live_probe_verified: bool,
+    pub message: String,
+    pub timestamp: String,
+}
+
+
+// =============================================================================
+// Continuous EDR Behavioral Anomaly, Process Lineage Tree & Baseline DTOs
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EdrBehavioralIngestRequest {
+    #[serde(default)]
+    pub scenario: Option<String>,
+    #[serde(default)]
+    pub events: Vec<killswitch_telemetry::EdrSensorTelemetryEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdrBehavioralIngestResponse {
+    pub success: bool,
+    pub events_processed: usize,
+    pub narratives_emitted: Vec<killswitch_telemetry::EdrThreatNarrative>,
+    pub status: killswitch_telemetry::EdrBehavioralStatusReport,
+    pub timestamp: String,
 }

@@ -104,7 +104,7 @@ impl GrooveAndYueSynthesisNode {
         // 2. Stage 1: Generate draft_groove.wav using pure-Rust Universal Drum Synthesizer
         let groove_buf = self.generate_draft_groove(state, duration_secs)?;
         let groove_path = stems_dir.join("draft_groove.wav");
-        groove_buf.to_wav_file_with_format(&groove_path, WavBitDepth::Float32).map_err(|e| {
+        groove_buf.to_wav_file_with_format(&groove_path, WavBitDepth::Pcm16).map_err(|e| {
             PipelineError::DspError(format!("Failed to write draft_groove.wav: {}", e))
         })?;
         state.set_stem(STEM_DRAFT_GROOVE, groove_path.clone());
@@ -327,7 +327,7 @@ impl GrooveAndYueSynthesisNode {
         }
 
         let inst_path = stems_dir.join("yue_instrumentals.wav");
-        inst_buf.to_wav_file_with_format(&inst_path, WavBitDepth::Float32).map_err(|e| {
+        inst_buf.to_wav_file_with_format(&inst_path, WavBitDepth::Pcm16).map_err(|e| {
             PipelineError::DspError(format!("Failed to write yue_instrumentals.wav: {}", e))
         })?;
 
@@ -358,7 +358,7 @@ impl GrooveAndYueSynthesisNode {
         }
 
         let vocals_path = stems_dir.join("yue_vocals.wav");
-        vocal_buf.to_wav_file_with_format(&vocals_path, WavBitDepth::Float32).map_err(|e| {
+        vocal_buf.to_wav_file_with_format(&vocals_path, WavBitDepth::Pcm16).map_err(|e| {
             PipelineError::DspError(format!("Failed to write yue_vocals.wav: {}", e))
         })?;
 

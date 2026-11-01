@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACDSO v3.0 Autonomous Report</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #0f3460 0%, #1a1a2e 100%);
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        .header h1 {
+            font-size: 2.5em;
+            margin: 0;
+            color: #00d9ff;
+            text-shadow: 0 0 20px rgba(0,217,255,0.5);
+        }
+        .header .subtitle {
+            font-size: 1.2em;
+            color: #888;
+            margin-top: 10px;
+        }
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: linear-gradient(135deg, #1e3a5f 0%, #16213e 100%);
+            border-radius: 12px;
+            padding: 25px;
+            text-align: center;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+        }
+        .card .value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #00d9ff;
+        }
+        .card .label {
+            font-size: 0.9em;
+            color: #888;
+            margin-top: 5px;
+        }
+        .card.success .value { color: #28a745; }
+        .card.failed .value { color: #dc3545; }
+        .card.rate .value { color: #ffc107; }
+        .section {
+            background: rgba(30, 58, 95, 0.5);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+        }
+        .section h2 {
+            color: #00d9ff;
+            border-bottom: 2px solid #0f3460;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #0f3460;
+        }
+        th {
+            background: #0f3460;
+            color: #00d9ff;
+        }
+        tr:hover {
+            background: rgba(0, 217, 255, 0.05);
+        }
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+            font-size: 0.9em;
+        }
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+        .badge-success { background: #28a745; color: white; }
+        .badge-failed { background: #dc3545; color: white; }
+        .badge-llm { background: #9b59b6; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ACDSO v3.0</h1>
+            <div class="subtitle">Autonomous Mode - Complete System Report</div>
+            <div style="margin-top: 15px;">
+                <span class="badge badge-failed">
+                    16% Success Rate
+                </span>
+                <span class="badge badge-llm" style="margin-left: 10px;">LLM Enabled</span>
+            </div>
+        </div>
+        
+        <div class="section" style="background: linear-gradient(135deg, #1e4d2b 0%, #0f3460 100%);"><h2>Custom File Analysis</h2><table><tr><td><strong>File:</strong></td><td>c:\dataset\dowjones.csv</td></tr><tr><td><strong>Target:</strong></td><td>None</td></tr><tr><td><strong>Datetime Column:</strong></td><td>None</td></tr><tr><td><strong>Horizon:</strong></td><td>7</td></tr><tr><td><strong>Task Type:</strong></td><td>auto</td></tr></table></div>
+        
+        <div class="summary-cards">
+            <div class="card">
+                <div class="value">25</div>
+                <div class="label">Total Demos</div>
+            </div>
+            <div class="card success">
+                <div class="value">4</div>
+                <div class="label">Successful</div>
+            </div>
+            <div class="card failed">
+                <div class="value">21</div>
+                <div class="label">Failed</div>
+            </div>
+            <div class="card rate">
+                <div class="value">641s</div>
+                <div class="label">Total Time</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Phase Results</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Phase</th>
+                        <th style="text-align: center;">Success</th>
+                        <th style="text-align: center;">Rate</th>
+                        <th style="text-align: center;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+        <tr>
+            <td style="font-weight: bold;">Phase 1 - Core AutoML</td>
+            <td style="text-align: center;">0/6</td>
+            <td style="text-align: center; color: #dc3545; font-weight: bold;">0%</td>
+            <td style="text-align: center; color: #dc3545; font-size: 1.2em;">&#10008;</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="padding: 10px; background: #f8f9fa; font-size: 0.9em;"><div style="margin-left: 20px; color: #dc3545;">&#10008; Basic Classification</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Production Constraints</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Risk Analysis</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Pareto Front Exploration</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Regression</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Audit Trail</div></td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Phase 2 - LLM Advisor</td>
+            <td style="text-align: center;">0/2</td>
+            <td style="text-align: center; color: #dc3545; font-weight: bold;">0%</td>
+            <td style="text-align: center; color: #dc3545; font-size: 1.2em;">&#10008;</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="padding: 10px; background: #f8f9fa; font-size: 0.9em;"><div style="margin-left: 20px; color: #dc3545;">&#10008; LLM Advisor</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Custom File Analysis</div></td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Phase 3 - Auto EDA</td>
+            <td style="text-align: center;">0/9</td>
+            <td style="text-align: center; color: #dc3545; font-weight: bold;">0%</td>
+            <td style="text-align: center; color: #dc3545; font-size: 1.2em;">&#10008;</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="padding: 10px; background: #f8f9fa; font-size: 0.9em;"><div style="margin-left: 20px; color: #dc3545;">&#10008; Auto EDA - Basic</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Auto EDA - Quality</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Auto EDA - Pareto</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Auto EDA - LLM</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Auto EDA - Export</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Safe Feature Importance</div><div style="margin-left: 20px; color: #dc3545;">&#10008; AutoEDA Preprocessing</div><div style="margin-left: 20px; color: #dc3545;">&#10008; EDA Tool Integrations</div><div style="margin-left: 20px; color: #dc3545;">&#10008; EDA Utility Functions</div></td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Phase 4 - v3 Innovations</td>
+            <td style="text-align: center;">1/1</td>
+            <td style="text-align: center; color: #28a745; font-weight: bold;">100%</td>
+            <td style="text-align: center; color: #28a745; font-size: 1.2em;">&#10004;</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="padding: 10px; background: #f8f9fa; font-size: 0.9em;"><div style="margin-left: 20px; color: #28a745;">&#10004; ACDSO v3 Innovations</div></td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Phase 5 - Time Series</td>
+            <td style="text-align: center;">1/1</td>
+            <td style="text-align: center; color: #28a745; font-weight: bold;">100%</td>
+            <td style="text-align: center; color: #28a745; font-size: 1.2em;">&#10004;</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="padding: 10px; background: #f8f9fa; font-size: 0.9em;"><div style="margin-left: 20px; color: #28a745;">&#10004; Auto Time Series (Custom File)</div></td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Phase 6 - Decision Intelligence</td>
+            <td style="text-align: center;">2/2</td>
+            <td style="text-align: center; color: #28a745; font-weight: bold;">100%</td>
+            <td style="text-align: center; color: #28a745; font-size: 1.2em;">&#10004;</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="padding: 10px; background: #f8f9fa; font-size: 0.9em;"><div style="margin-left: 20px; color: #28a745;">&#10004; Decision Intelligence</div><div style="margin-left: 20px; color: #28a745;">&#10004; Policy Learning (RL)</div></td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Phase 7 - Integrations</td>
+            <td style="text-align: center;">0/3</td>
+            <td style="text-align: center; color: #dc3545; font-weight: bold;">0%</td>
+            <td style="text-align: center; color: #dc3545; font-size: 1.2em;">&#10008;</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="padding: 10px; background: #f8f9fa; font-size: 0.9em;"><div style="margin-left: 20px; color: #dc3545;">&#10008; AutoML Integration</div><div style="margin-left: 20px; color: #dc3545;">&#10008; FLAML Integration</div><div style="margin-left: 20px; color: #dc3545;">&#10008; Complete ML Workflow</div></td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Phase 8 - Benchmarks</td>
+            <td style="text-align: center;">0/1</td>
+            <td style="text-align: center; color: #dc3545; font-weight: bold;">0%</td>
+            <td style="text-align: center; color: #dc3545; font-size: 1.2em;">&#10008;</td>
+        </tr>
+        <tr>
+            <td colspan="4" style="padding: 10px; background: #f8f9fa; font-size: 0.9em;"><div style="margin-left: 20px; color: #dc3545;">&#10008; Benchmark Comparison</div></td>
+        </tr>
+        
+                </tbody>
+            </table>
+        </div>
+        
+        <h3 style='color: #dc3545;'>Failed Demos</h3><ul><li><strong>Basic Classification</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Production Constraints</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Risk Analysis</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Pareto Front Exploration</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Regression</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Audit Trail</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>LLM Advisor</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Custom File Analysis</strong>: FAILED: demo_user_file() got an unexpected keyword argument 'file_path'. Did you mean 'filepath'?</li><li><strong>Auto EDA - Basic</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Auto EDA - Quality</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Auto EDA - Pareto</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Auto EDA - LLM</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Auto EDA - Export</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Safe Feature Importance</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>AutoEDA Preprocessing</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>EDA Tool Integrations</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>EDA Utility Functions</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>AutoML Integration</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>FLAML Integration</strong>: [X] FAILED: 'charmap' codec can't encode character '\u2713' in</li><li><strong>Complete ML Workflow</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li><li><strong>Benchmark Comparison</strong>: [X] FAILED: 'charmap' codec can't encode characters in positio</li></ul>
+        
+        <div class="section">
+            <h2>Features Covered</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Feature</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+        <tr>
+            <td style="font-weight: bold;">Core AutoML</td>
+            <td>Classification & Regression with risk-aware optimization</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Multi-Objective Optimization</td>
+            <td>6-objective Pareto optimization with knee-point selection</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Risk Analysis</td>
+            <td>Leakage detection, multicollinearity, class imbalance analysis</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">v3 Stress Testing</td>
+            <td>Robustness measurement under perturbations</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Successive Halving</td>
+            <td>Multi-fidelity search for efficient evaluation</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Learned Risk Calibration</td>
+            <td>Data-driven risk penalty adjustment</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Auto EDA</td>
+            <td>Automated exploratory data analysis with quality scoring</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">LLM Advisor</td>
+            <td>Intelligent target detection and column analysis</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Auto Time Series</td>
+            <td>Time-aware CV, lag features, forecasting models</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Decision Intelligence</td>
+            <td>Causal inference, uplift modeling, optimization</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">Policy Learning</td>
+            <td>Reinforcement learning for sequential decisions</td>
+        </tr>
+        
+        <tr>
+            <td style="font-weight: bold;">AutoML Benchmarking</td>
+            <td>Comparison with FLAML, TPOT, H2O, AutoGluon</td>
+        </tr>
+        
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="section">
+            <h2>v3 Innovation Highlights</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 15px;">
+                <div style="background: #0f3460; padding: 20px; border-radius: 10px;">
+                    <h3 style="color: #00d9ff; margin-top: 0;">Stress Testing</h3>
+                    <p>Robustness measurement under missingness, feature jitter, and label noise perturbations.</p>
+                </div>
+                <div style="background: #0f3460; padding: 20px; border-radius: 10px;">
+                    <h3 style="color: #00d9ff; margin-top: 0;">Successive Halving</h3>
+                    <p>Multi-fidelity search evaluates candidates on subsampled data first, then full data for survivors.</p>
+                </div>
+                <div style="background: #0f3460; padding: 20px; border-radius: 10px;">
+                    <h3 style="color: #00d9ff; margin-top: 0;">6-Objective Optimization</h3>
+                    <p>Metric, time, memory, latency, risk, and robustness drop - all optimized together.</p>
+                </div>
+                <div style="background: #0f3460; padding: 20px; border-radius: 10px;">
+                    <h3 style="color: #00d9ff; margin-top: 0;">Learned Risk Calibration</h3>
+                    <p>Ridge model predicts robustness from dataset features for data-driven risk penalties.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Quick Reference</h2>
+            <div style="background: #0a1929; padding: 20px; border-radius: 10px; font-family: monospace;">
+                <div style="color: #888; margin-bottom: 5px;"># Run everything</div>
+                <div style="color: #00d9ff;">python demo.py --autonomous</div>
+                <br>
+                <div style="color: #888; margin-bottom: 5px;"># Your own data with LLM target detection</div>
+                <div style="color: #00d9ff;">python demo.py --file data.csv</div>
+                <br>
+                <div style="color: #888; margin-bottom: 5px;"># Time series</div>
+                <div style="color: #00d9ff;">python demo.py --timeseries --file ts.csv --target y --datetime-col date</div>
+                <br>
+                <div style="color: #888; margin-bottom: 5px;"># Benchmark vs other AutoML</div>
+                <div style="color: #00d9ff;">python demo.py --benchmark --file data.csv --target y</div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Generated by ACDSO v3.0 | 2025-12-25T07:53:58.706351</p>
+            <p>Risk-Optimized AutoML for Production Systems</p>
+        </div>
+    </div>
+</body>
+</html>

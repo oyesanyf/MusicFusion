@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACDSO 3.0 Report - Autonomous_Custom_File</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #3b82f6;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --info: #0891b2;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-highlight: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, var(--bg) 0%, #1a1a2e 100%);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(139, 92, 246, 0.1));
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        h2 { color: var(--primary-light); margin: 1.5rem 0 1rem 0; font-size: 1.5rem; }
+        h3 { color: var(--primary-light); margin: 1rem 0 0.5rem 0; font-size: 1.2rem; }
+        .subtitle { color: var(--text-muted); margin-bottom: 0.5rem; }
+        
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: rgba(37, 99, 235, 0.15);
+            font-weight: 600;
+            color: var(--primary-light);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        tr:hover { background: rgba(255, 255, 255, 0.03); }
+        .model-name { color: var(--success); font-weight: 600; }
+        .success { color: var(--success); }
+        .error { color: var(--danger); }
+        .selected-model { background: rgba(22, 163, 74, 0.15); border-left: 3px solid var(--success); }
+        .selected-model:hover { background: rgba(22, 163, 74, 0.25); }
+        .models-table { font-size: 0.9rem; }
+        .models-table th { position: sticky; top: 0; z-index: 10; }
+        .info-text { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem; font-style: italic; }
+        
+        /* Code/Console Output */
+        .console-output {
+            background: #000;
+            color: #0f0;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .badge-success { background: rgba(22, 163, 74, 0.2); color: var(--success); }
+        .badge-danger { background: rgba(220, 38, 38, 0.2); color: var(--danger); }
+        .badge-info { background: rgba(8, 145, 178, 0.2); color: var(--info); }
+        
+        /* Summary Grid */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .summary-item {
+            background: rgba(0,0,0,0.2);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .summary-value {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--primary-light);
+        }
+        .summary-label {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ACDSO 3.0 Report</h1>
+            <div class="subtitle">Mode: Autonomous_Custom_File</div>
+            <div class="subtitle">Generated: 2025-12-27T15:33:37.085194</div>
+        </div>
+
+        <div class="card">
+            <h2>Selected Model</h2>
+            <table>
+                <tr><th>Model Name</th><td class="model-name">RandomForestRegressor</td></tr>
+                <tr><th>Type</th><td>Pipeline</td></tr>
+                <tr><th colspan='2'><h3>Metrics</h3></th></tr>
+                <tr><th>metric</th><td>-0.0344</td></tr>
+                <tr><th>train_time_s</th><td>76.5023</td></tr>
+                <tr><th>peak_mem_mb</th><td>28.7070</td></tr>
+                <tr><th>latency_ms_per_row</th><td>0.3841</td></tr>
+                <tr><th>risk_penalty</th><td>0.1849</td></tr>
+
+            <h3>Actual Execution Code</h3>
+            <p class="info-text"><strong>Execution Summary:</strong> ACDSO selected RandomForestRegressor with score -0.0344 in 76.5s</p>
+            <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; overflow-x: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"><code># ═══════════════════════════════════════════════════════════════════════════
+# ACDSO AutoML - ACTUAL EXECUTION CODE
+# ═══════════════════════════════════════════════════════════════════════════
+# File: c:\dataset\ads4000patientpoint_devices_ads_dataset.csv
+# Target: ads_served
+# Task: regression
+# Selected Model: RandomForestRegressor
+# Score: -0.0344
+# Fit Time: 76.5s
+# ═══════════════════════════════════════════════════════════════════════════
+
+from acdso import ACDSORegressor
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+# Load data
+df = pd.read_csv('c:\dataset\ads4000patientpoint_devices_ads_dataset.csv')
+
+# Exclude columns (auto-detected problematic columns)
+exclude_cols = []
+X = df.drop(columns=['ads_served'] + exclude_cols)
+y = df['ads_served']
+
+# Encode categorical columns
+cat_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
+if cat_cols:
+    X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Train ACDSO (with risk-aware selection)
+model = ACDSORegressor(
+    scorer='r2',
+    cv=5,
+    preference='safe',
+    max_latency_ms_per_row=10.0,
+    verbose=1,
+)
+model.fit(X_train, y_train)
+
+# Results
+predictions = model.predict(X_test)
+score = model.score(X_test, y_test)
+
+# ACDSO provides:
+# 1. Risk Report - production safety analysis
+print(f"Risk Report: {model.risk_report_}")
+
+# 2. Audit Trail - full decision transparency
+print(f"Selected Model: {model.audit_trail_['selected']['name']}")
+print(f"Score: {score:.4f}")
+
+# 3. Pareto Front - all optimal models
+print(f"Pareto Front: {len(model.pareto_front_)} optimal models")
+
+# Save audit trail for compliance
+import json
+with open('audit_trail.json', 'w') as f:
+    json.dump(model.audit_trail_, f, indent=2)
+</code></pre>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Phase Results with Selected Models</h2>
+            <h3>All Phases</h3>
+            <table>
+                <tr><th>Demo Name</th><th>Status</th><th>Selected Model</th><th>Time (s)</th></tr>
+                <tr><td>Data Loading</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>0.04</td></tr>
+                <tr><td>Target Detection</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>0.05</td></tr>
+                <tr><td>Auto EDA</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>3.39</td></tr>
+                <tr><td>Risk Analysis</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>32.26</td></tr>
+                <tr><td>AutoML</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>125.11</td></tr>
+                <tr><td>Time Series</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>144.83</td></tr>
+                <tr><td>Advanced EDA Features</td><td class='error'>SKIPPED: Advanced EDA features are included in basic EDA</td><td class='model-name'>None</td><td>0.00</td></tr>
+                <tr><td>Decision Intelligence</td><td class='error'>SKIPPED: No treatment column</td><td class='model-name'>None</td><td>0.00</td></tr>
+                <tr><td>Benchmark (Custom File)</td><td class='success'>SUCCESS</td><td class='model-name'>None</td><td>349.86</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>All Models Evaluated by ACDSO</h2>
+            <p class="info-text">Complete list of all models tested during optimization with their scores and metrics.</p>
+            <table class="models-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Model Name</th>
+                        <th>CV Score</th>
+                        <th>CV Std</th>
+                        <th>Train Time (s)</th>
+                        <th>Memory (MB)</th>
+                        <th>Latency (ms/row)</th>
+                        <th>Risk Penalty</th>
+                        <th>Stress Drop</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="selected-model">
+                        <td>1</td>
+                        <td class="model-name">RandomForestRegressor</td>
+                        <td>-0.0344</td>
+                        <td>0.0096</td>
+                        <td>76.50</td>
+                        <td>28.7</td>
+                        <td>0.384</td>
+                        <td>0.1849</td>
+                        <td>0.0000</td>
+                        <td>✓ Selected</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Pareto Front Models (Optimal Trade-offs)</h2>
+            <p class="info-text">Models on the Pareto front representing optimal trade-offs between objectives.</p>
+            <table class="models-table">
+                <thead>
+                    <tr>
+                        <th>Model Name</th>
+                        <th>Score</th>
+                        <th>Train Time (s)</th>
+                        <th>Memory (MB)</th>
+                        <th>Latency (ms/row)</th>
+                        <th>Risk Penalty</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="model-name">RandomForestRegressor</td>
+                        <td>-0.0344</td>
+                        <td>76.50</td>
+                        <td>28.7</td>
+                        <td>0.384</td>
+                        <td>0.1849</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Benchmark Results - Selected Models & Code Examples</h2>
+            <p class="info-text">Final selected model for each AutoML system in the benchmark with code examples.</p>
+            <table>
+                <tr><th>System</th><th>Dataset</th><th>Score</th><th>F1</th><th>Time (s)</th><th>Latency (ms)</th><th>Selected Model</th></tr>
+            </table>
+
+            <h3>Actual Execution Code for Each Framework</h3>
+            <p class="info-text">The following code blocks show the actual code that was executed during benchmarking, with real file paths, parameters, and results.</p>
+        </div>
+
+        <div class="card">
+            <h2>Exploratory Data Analysis (EDA)</h2>
+            <p class="info-text">Complete EDA report with data quality analysis, statistics, and visualizations.</p>
+            <div style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 800px; overflow-y: auto;">
+
+    <div class="container">
+        <h1>🔍 ACDSO Auto EDA Report</h1>
+        <p style="color: var(--text-secondary);">Dataset: <strong>ads4000patientpoint_devices_ads_dataset.csv</strong> | Generated: 2025-12-27T15:22:44.932442</p>
+        
+        <div class="card">
+            <h2>📊 Dataset Overview</h2>
+            <div class="metric">
+                <div class="metric-label">Rows</div>
+                <div class="metric-value">4,000</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Columns</div>
+                <div class="metric-value">20</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Numeric</div>
+                <div class="metric-value">11</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Categorical</div>
+                <div class="metric-value">9</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Memory</div>
+                <div class="metric-value">2.4 MB</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>⭐ Data Quality Score</h2>
+            <div class="quality-score">96/100</div>
+            <div style="margin-top: 1rem;">
+                <div class="metric">
+                    <div class="metric-label">Missing Values</div>
+                    <div class="metric-value">0 (0.0%)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Duplicates</div>
+                    <div class="metric-value">0 (0.0%)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Constant Cols</div>
+                    <div class="metric-value">0</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'><h2>⚠️ Issues Detected</h2><div class='issue'>• ID-like columns detected: ['device_id', 'avg_session_duration_sec', 'uptime_hours', 'temperature_celsius']</div></div>
+        
+        
+        
+        <div class="card">
+            <h2>💡 Recommendations</h2>
+            <div class='recommendation'>1. Exclude ID columns from modeling or use for grouping only</div>
+        </div>
+        
+        <div class="card">
+            <h2>📋 Column Profiles</h2>
+            <table>
+                <tr>
+                    <th>Column</th>
+                    <th>Type</th>
+                    <th>Missing %</th>
+                    <th>Unique</th>
+                    <th>Flags</th>
+                </tr>
+                <tr><td>device_id</td><td>object</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>device_type</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>location_type</td><td>object</td><td>0.0%</td><td>5</td><td></td></tr><tr><td>region</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>daily_views</td><td>int64</td><td>0.0%</td><td>2751</td><td></td></tr><tr><td>ads_served</td><td>int64</td><td>0.0%</td><td>491</td><td></td></tr><tr><td>avg_session_duration_sec</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>ad_category</td><td>object</td><td>0.0%</td><td>7</td><td></td></tr><tr><td>content_type</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>time_slot</td><td>object</td><td>0.0%</td><td>3</td><td></td></tr><tr><td>ad_performance</td><td>object</td><td>0.0%</td><td>3</td><td></td></tr><tr><td>network_signal_strength</td><td>float64</td><td>0.0%</td><td>501</td><td></td></tr><tr><td>battery_level_percent</td><td>int64</td><td>0.0%</td><td>51</td><td></td></tr><tr><td>uptime_hours</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>temperature_celsius</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>firmware_version</td><td>object</td><td>0.0%</td><td>500</td><td></td></tr><tr><td>is_online</td><td>int64</td><td>0.0%</td><td>2</td><td></td></tr><tr><td>error_count</td><td>int64</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>last_maintenance_days_ago</td><td>int64</td><td>0.0%</td><td>61</td><td></td></tr><tr><td>ads_predicted_next_hour</td><td>int64</td><td>0.0%</td><td>76</td><td></td></tr>
+            </table>
+        </div>
+        
+        <div class="footer">
+            <p>Generated by ACDSO v2.0 Auto EDA | Analysis time: 0.08s</p>
+        </div>
+    </div>
+
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Time Series Forecasting Results</h2>
+            <p class="info-text">Time series analysis, forecasting models, and benchmark comparisons.</p>
+            <div style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 800px; overflow-y: auto;">
+
+    <div class="container">
+        <div class="header">
+            <h1>ACDSO Time Series Benchmark</h1>
+            <p>Comprehensive comparison of forecasting systems</p>
+        </div>
+        
+        <div class="card">
+            <h2>Benchmark Results</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>System</th>
+                        <th>RMSE</th>
+                        <th>MAE</th>
+                        <th>MAPE</th>
+                        <th>sMAPE</th>
+                        <th>MASE</th>
+                        <th>Fit Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                <tr>
+                    <td><strong>ACDSO</strong></td>
+                    <td>128.9925</td>
+                    <td>108.4341</td>
+                    <td>110.02%</td>
+                    <td>49.35%</td>
+                    <td>0.6597</td>
+                    <td>14.9s</td>
+                </tr>
+            
+
+                <tr>
+                    <td><strong>STATSFORECAST</strong></td>
+                    <td>139.5375</td>
+                    <td>119.9161</td>
+                    <td>125.21%</td>
+                    <td>52.96%</td>
+                    <td>0.7295</td>
+                    <td>20.0s</td>
+                </tr>
+            
+
+                <tr>
+                    <td><strong>PMDARIMA</strong></td>
+                    <td>139.5454</td>
+                    <td>119.9259</td>
+                    <td>125.10%</td>
+                    <td>52.98%</td>
+                    <td>0.7296</td>
+                    <td>6.1s</td>
+                </tr>
+            
+
+                <tr>
+                    <td><strong>PROPHET</strong></td>
+                    <td>139.7035</td>
+                    <td>119.8839</td>
+                    <td>121.16%</td>
+                    <td>53.18%</td>
+                    <td>0.7293</td>
+                    <td>0.6s</td>
+                </tr>
+            
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="card winners-section">
+            <h2>Winners by Metric</h2>
+            <ul><li><strong>mae:</strong> acdso</li>
+<li><strong>rmse:</strong> acdso</li>
+<li><strong>mape:</strong> acdso</li>
+<li><strong>smape:</strong> acdso</li>
+<li><strong>mase:</strong> acdso</li>
+<li><strong>fit_time:</strong> prophet</li></ul>
+        </div>
+        
+        
+                <div class="failed-section">
+                    <h3>Failed Systems</h3>
+                    <ul><li><strong>autots:</strong> forecast_length is too large for training data.
+What this means is you don't have enough history to </li>
+<li><strong>sktime:</strong> unsupported operand type(s) for *: 'int' and 'NoneType'</li></ul>
+                </div>
+            
+        
+        <div class="card">
+            <h2>Benchmark Configuration</h2>
+            <ul>
+                <li><strong>Datasets:</strong> ads4000patientpoint_devices_ads_dataset</li>
+                <li><strong>Systems Tested:</strong> acdso, prophet, autots, statsforecast, sktime, pmdarima</li>
+                <li><strong>Forecast Horizon:</strong> 7</li>
+                <li><strong>Time Budget:</strong> 120s per system</li>
+                <li><strong>Total Time:</strong> 49.6s</li>
+            </ul>
+        </div>
+        
+        <p class="timestamp">
+            Generated: 2025-12-27T15:26:39.269626
+        </p>
+    </div>
+
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Time Series Summary</h2>
+            <table>
+                <tr><th>Forecast Horizon</th><td>7</td></tr>
+                <tr><th>Datetime Column</th><td>daily_views</td></tr>
+                <tr><th>Target Column</th><td>ads_served</td></tr>
+            </table>
+                <tr><th>Best Model</th><td class='model-name'>RandomForest (n=100, d=5)</td></tr>
+            </table>
+
+            <h3>Actual Execution Code</h3>
+            <p class="info-text" style="color: var(--success); font-weight: bold;">✓ AutoTS selected RandomForest (n=100, d=5) with RMSE 131.0945 in 0.2s</p>
+            <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; overflow-x: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px;"><code># ═══════════════════════════════════════════════════════════════════════════
+# ACDSO Auto Time Series - ACTUAL EXECUTION CODE
+# ═══════════════════════════════════════════════════════════════════════════
+# File: c:\dataset\ads4000patientpoint_devices_ads_dataset.csv
+# Target: ads_served
+# Datetime Column: daily_views
+# Horizon: 7
+# Selected Model: RandomForest (n=100, d=5)
+# RMSE Score: 131.0945
+# Fit Time: 0.2s
+# ═══════════════════════════════════════════════════════════════════════════
+
+from acdso.timeseries import AutoTS
+import pandas as pd
+
+# Load data
+df = pd.read_csv('c:\dataset\ads4000patientpoint_devices_ads_dataset.csv')
+df['daily_views'] = pd.to_datetime(df['daily_views'])
+
+# Train AutoTS (with time-aware cross-validation)
+ts = AutoTS(
+    datetime_col='daily_views',
+    target_col='ads_served',
+    horizon=7,
+    cv_type='expanding',
+    n_splits=5,
+    primary_metric='rmse',
+    include_baselines=True,
+    verbose=True,
+)
+result = ts.fit(df)
+
+# Results
+print(f"Best Model: {result.best_pipeline.name}")
+print(f"CV Score (RMSE): {result.best_pipeline.cv_score:.4f}")
+print(f"Fit Time: {result.best_pipeline.fit_time:.2f}s")
+
+# Get model leaderboard
+leaderboard = result.get_leaderboard(top_n=10)
+print("\nModel Leaderboard:")
+print(leaderboard)
+
+# Make forecasts
+forecasts = result.forecast(df, horizon=7)
+print(f"\nForecasts: {forecasts}")
+</code></pre>
+            <h3>Model Leaderboard</h3>
+            <table>
+                <tr><th>Rank</th><th>Model</th><th>RMSE</th><th>MAE</th></tr>
+                <tr><td>1</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>2</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>3</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>4</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>5</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>6</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>7</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>8</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>9</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+                <tr><td>10</td><td class='model-name'>Unknown</td><td>N/A</td><td>N/A</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Predictions on Full Dataset</h2>
+            <p class="info-text">Predictions made on the complete dataset using the best trained model.</p>
+            <table>
+                <tr><th>Target Column</th><td class="model-name">ads_served</td></tr>
+                <tr><th>Total Predictions</th><td>4000</td></tr>
+                <tr><th>Task Type</th><td>regression</td></tr>
+                <tr><th>Output File</th><td><code>reports/predictions_ads4000patientpoint_devices_ads_dataset_ads_served_full_dataset.csv</code></td></tr>
+            </table>
+            <h3>Prediction Statistics</h3>
+            <table>
+                <tr><th>Mean</th><td>254.2916</td></tr>
+                <tr><th>Std Dev</th><td>75.3209</td></tr>
+                <tr><th>Min</th><td>65.1880</td></tr>
+                <tr><th>Max</th><td>442.8000</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Summary</h2>
+            <div class="summary-grid">
+                <div class='summary-item'><div class='summary-value'>9</div><div class='summary-label'>Total Phases</div></div>
+                <div class='summary-item'><div class='summary-value'>7</div><div class='summary-label'>Successful</div></div>
+                <div class='summary-item'><div class='summary-value'>0</div><div class='summary-label'>Failed</div></div>
+                <div class='summary-item'><div class='summary-value'>2</div><div class='summary-label'>Skipped</div></div>
+                <div class='summary-item'><div class='summary-value'>655.5056428909302</div><div class='summary-label'>Total Time</div></div>
+                <div class='summary-item'><div class='summary-value'>77.77777777777779</div><div class='summary-label'>Success Rate</div></div>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>

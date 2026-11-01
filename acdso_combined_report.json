@@ -1,0 +1,242 @@
+{
+  "timestamp": "2026-08-24T13:47:39.712472",
+  "acdso_version": "3.0",
+  "console_output": "================================================================================\n  DEMO 1: Basic Classification (Tips Dataset)\n================================================================================\n\n------------------------------------------------------------\n  Tips Dataset Overview\n------------------------------------------------------------\n  • Source: Seaborn tips dataset\n  • Samples: 244\n  • Task: Predict if customer is a smoker (binary classification)\n  • Raw columns: total_bill, tip, sex, smoker, day, time, size\n\n------------------------------------------------------------\n  Dataset After Preprocessing\n------------------------------------------------------------\n  • One-hot encoding applied (drop_first=True)\n  • Training samples: 195\n  • Test samples: 49\n  • Encoded features: 8 → ['total_bill', 'tip', 'size', 'sex_Female', 'day_Fri', 'day_Sat', 'day_Sun', 'time_Dinner']\n  • Target: smoker (0=No, 1=Yes)\n  • Class distribution (train): {0: 120, 1: 75}\n\n------------------------------------------------------------\n  Fitting ACDSO Classifier\n------------------------------------------------------------\n\n[ACDSO Fitting Output]\n[ACDSO v3] Risk report: {'task': 'classification', 'target_type': 'binary', 'n_rows': 195, 'n_cols': 8, 'n_numeric': 8, 'n_categorical': 0, 'missing_ratio': 0.0, 'leakage_proxy_features': [], 'leakage_proxy_score_max': 0.27674578603371175, 'temporal_leakage_gap': None, 'class_imbalance_max_ratio': 0.6153846153846154, 'imbalance_severity': 0.23076923076923084, 'vif_max': 10.092654342961637, 'vif_features': ['day_Sat'], 'cv_score_std': 0.0, 'notes': ['High multicollinearity: VIF max=10.1.']}\n[ACDSO v3] Generated 5 candidates.\n[ACDSO v3] Halving stage: cheap | row_frac=0.25 cv=2 keep=3\n  [♥ ACDSO cheap] Heartbeat started (every 30s)\n[ACDSO v3] Evaluating (cheap) [1/5]: LogisticRegression\n[ACDSO v3] LogisticRegression: metric=0.5227, time=0.02s, mem=0.0MB, lat=0.23ms/row, risk=0.14, robustness_drop=0.0952\n[ACDSO v3] Evaluating (cheap) [2/5]: LogisticRegression_C0.1\n[ACDSO v3] LogisticRegression_C0.1: metric=0.2000, time=0.03s, mem=0.0MB, lat=0.20ms/row, risk=0.23, robustness_drop=0.1000\n[ACDSO v3] Evaluating (cheap) [3/5]: RandomForest_d5\n[ACDSO v3] RandomForest_d5: metric=0.1250, time=0.11s, mem=0.4MB, lat=0.21ms/row, risk=0.23, robustness_drop=0.0667\n[ACDSO v3] Evaluating (cheap) [4/5]: RandomForest_d10\n[ACDSO v3] RandomForest_d10: metric=0.1111, time=0.11s, mem=0.1MB, lat=0.26ms/row, risk=0.23, robustness_drop=0.0667\n[ACDSO v3] Evaluating (cheap) [5/5]: RandomForest\n[ACDSO v3] RandomForest: metric=0.1111, time=0.12s, mem=0.2MB, lat=0.31ms/row, risk=0.23, robustness_drop=0.0667\n  [♥ ACDSO cheap] Complete in 1.4s (0 heartbeats)\n[ACDSO v3] Halving stage: full | row_frac=1.0 cv=5 keep=5\n  [♥ ACDSO full] Heartbeat started (every 30s)\n[ACDSO v3] Evaluating (full) [1/3]: LogisticRegression\n[ACDSO v3] LogisticRegression: metric=0.4398, time=0.09s, mem=0.3MB, lat=0.05ms/row, risk=0.23, robustness_drop=0.0246\n[ACDSO v3] Evaluating (full) [2/3]: LogisticRegression_C0.1\n[ACDSO v3] LogisticRegression_C0.1: metric=0.3869, time=0.08s, mem=0.0MB, lat=0.03ms/row, risk=0.23, robustness_drop=0.0254\n[ACDSO v3] Evaluating (full) [3/3]: RandomForest_d5\n[ACDSO v3] RandomForest_d5: metric=0.4317, time=0.19s, mem=0.0MB, lat=0.09ms/row, risk=0.23, robustness_drop=0.0351\n  [♥ ACDSO full] Complete in 1.0s (0 heartbeats)\n[ACDSO v3] Pareto front size: 3\n[ACDSO v3] Selected: RandomForest_d5 (knee-point)\n\n\n------------------------------------------------------------\n  Prediction Results\n------------------------------------------------------------\n\n  [PERFORMANCE METRICS]\n  Note: 'Weighted' averages by class support; 'Positive' is for smoker=1 only\n\n  Metric            | Weighted    | Positive-Class\n  ------------------------------------------\n  Accuracy          | 0.6939      | -\n  Precision         | 0.6992      | 0.7143\n  Recall            | 0.6939      | 0.2778\n  F1 Score          | 0.6496      | 0.4000\n\n  clf.score() uses scorer='f1' (positive-class F1): 0.4000\n\n  [CONFUSION MATRIX]\n                 Predicted\n              |  0  |  1  |\n        ------┼-----┼-----┤\n  Actual   0  |  29 |   2 |\n           1  |  13 |   5 |\n\n  [SAMPLE PREDICTIONS (first 10)]\n  Index   | True  | Pred  | Prob(0)   | Prob(1)   | Correct\n  ------------------------------------------------------\n  0       | 0     | 0     | 0.578     | 0.422     | [OK]\n  1       | 0     | 0     | 0.767     | 0.233     | [OK]\n  2       | 0     | 0     | 0.790     | 0.210     | [OK]\n  3       | 1     | 0     | 0.556     | 0.444     | [X]\n  4       | 1     | 0     | 0.603     | 0.397     | [X]\n  5       | 1     | 0     | 0.798     | 0.202     | [X]\n  6       | 1     | 0     | 0.562     | 0.438     | [X]\n  7       | 0     | 0     | 0.631     | 0.369     | [OK]\n  8       | 0     | 0     | 0.705     | 0.295     | [OK]\n  9       | 1     | 1     | 0.425     | 0.575     | [OK]\n\n------------------------------------------------------------\n  Model Selection Results\n------------------------------------------------------------\n  [OK] Selected Model: RandomForest_d5\n  • CV Metric (F1): 0.4317 (±0.0000)\n  • Training Time: 0.19s\n  • Peak Memory: 0.0 MB\n  • Latency: 0.09 ms/row\n  • Risk Penalty: 0.2835\n\n  Note: The 'cv_score_std: 0.0' in verbose output is a placeholder\n  before CV runs. Final CV std is shown above (±value).",
+  "configuration": {
+    "scorer": "f1",
+    "cv": 5,
+    "preference": "balanced",
+    "max_candidates": 12,
+    "random_state": 42,
+    "time_budget_s": null,
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null,
+    "enable_feature_selection": true
+  },
+  "risk_report": {
+    "task": "classification",
+    "target_type": "binary",
+    "n_rows": 195,
+    "n_cols": 8,
+    "n_numeric": 8,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": 0.27674578603371175,
+    "temporal_leakage_gap": null,
+    "class_imbalance_max_ratio": 0.6153846153846154,
+    "imbalance_severity": 0.23076923076923084,
+    "vif_max": 10.092654342961637,
+    "vif_features": [
+      "day_Sat"
+    ],
+    "cv_score_std": 0.08760507513059301,
+    "notes": [
+      "High multicollinearity: VIF max=10.1."
+    ]
+  },
+  "audit_trail": {
+    "risk_report": {
+      "task": "classification",
+      "target_type": "binary",
+      "n_rows": 195,
+      "n_cols": 8,
+      "n_numeric": 8,
+      "n_categorical": 0,
+      "missing_ratio": 0.0,
+      "leakage_proxy_features": [],
+      "leakage_proxy_score_max": 0.27674578603371175,
+      "temporal_leakage_gap": null,
+      "class_imbalance_max_ratio": 0.6153846153846154,
+      "imbalance_severity": 0.23076923076923084,
+      "vif_max": 10.092654342961637,
+      "vif_features": [
+        "day_Sat"
+      ],
+      "cv_score_std": 0.08760507513059301,
+      "notes": [
+        "High multicollinearity: VIF max=10.1."
+      ]
+    },
+    "constraints": {
+      "max_train_time_s": null,
+      "max_peak_mem_mb": null,
+      "max_latency_ms_per_row": null
+    },
+    "candidates_evaluated": [
+      {
+        "name": "LogisticRegression",
+        "metric": 0.43984746348630194,
+        "train_time_s": 0.09460854530334473,
+        "peak_mem_mb": 0.34765625,
+        "latency_ms_per_row": 0.051253881209935896,
+        "risk_penalty": 0.28341260705549987,
+        "cv_scores": [
+          0.5,
+          0.38095238095238093,
+          0.625,
+          0.21052631578947367,
+          0.4827586206896552
+        ],
+        "cv_score_std": 0.1384181898210541,
+        "stress_worst_drop": 0.024615384615384595,
+        "stress_tests": [
+          {
+            "name": "label_noise_2pct",
+            "stressed_metric": 0.6153846153846154,
+            "delta": 0.024615384615384595
+          }
+        ]
+      },
+      {
+        "name": "RandomForest_d5",
+        "metric": 0.4316655164481252,
+        "train_time_s": 0.1915292739868164,
+        "peak_mem_mb": 0.0,
+        "latency_ms_per_row": 0.09325834421011117,
+        "risk_penalty": 0.28348858846530745,
+        "cv_scores": [
+          0.5925925925925926,
+          0.38095238095238093,
+          0.4166666666666667,
+          0.43478260869565216,
+          0.3333333333333333
+        ],
+        "cv_score_std": 0.08760507513059301,
+        "stress_worst_drop": 0.03508771929824561,
+        "stress_tests": [
+          {
+            "name": "label_noise_2pct",
+            "stressed_metric": 0.631578947368421,
+            "delta": 0.03508771929824561
+          }
+        ]
+      },
+      {
+        "name": "LogisticRegression_C0.1",
+        "metric": 0.3868627450980392,
+        "train_time_s": 0.07531023025512695,
+        "peak_mem_mb": 0.00390625,
+        "latency_ms_per_row": 0.03348864041841947,
+        "risk_penalty": 0.28335896662246046,
+        "cv_scores": [
+          0.5833333333333334,
+          0.3,
+          0.6,
+          0.11764705882352941,
+          0.3333333333333333
+        ],
+        "cv_score_std": 0.18271059170982046,
+        "stress_worst_drop": 0.025362318840579712,
+        "stress_tests": [
+          {
+            "name": "label_noise_2pct",
+            "stressed_metric": 0.5833333333333334,
+            "delta": 0.025362318840579712
+          }
+        ]
+      }
+    ],
+    "pareto_front": [
+      {
+        "name": "LogisticRegression",
+        "metric": 0.43984746348630194,
+        "train_time_s": 0.09460854530334473,
+        "peak_mem_mb": 0.34765625,
+        "latency_ms_per_row": 0.051253881209935896,
+        "risk_penalty": 0.28341260705549987
+      },
+      {
+        "name": "RandomForest_d5",
+        "metric": 0.4316655164481252,
+        "train_time_s": 0.1915292739868164,
+        "peak_mem_mb": 0.0,
+        "latency_ms_per_row": 0.09325834421011117,
+        "risk_penalty": 0.28348858846530745
+      },
+      {
+        "name": "LogisticRegression_C0.1",
+        "metric": 0.3868627450980392,
+        "train_time_s": 0.07531023025512695,
+        "peak_mem_mb": 0.00390625,
+        "latency_ms_per_row": 0.03348864041841947,
+        "risk_penalty": 0.28335896662246046
+      }
+    ],
+    "pruned_or_failed": [],
+    "selected": {
+      "name": "RandomForest_d5",
+      "metric": 0.4316655164481252,
+      "train_time_s": 0.1915292739868164,
+      "peak_mem_mb": 0.0,
+      "latency_ms_per_row": 0.09325834421011117,
+      "risk_penalty": 0.28348858846530745,
+      "stress_worst_drop": 0.03508771929824561
+    },
+    "risk_calibrator": {
+      "type": "ridge",
+      "used": true
+    }
+  },
+  "pareto_front": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.43984746348630194,
+      "train_time_s": 0.09460854530334473,
+      "peak_mem_mb": 0.34765625,
+      "latency_ms_per_row": 0.051253881209935896,
+      "risk_penalty": 0.28341260705549987
+    },
+    {
+      "name": "RandomForest_d5",
+      "metric": 0.4316655164481252,
+      "train_time_s": 0.1915292739868164,
+      "peak_mem_mb": 0.0,
+      "latency_ms_per_row": 0.09325834421011117,
+      "risk_penalty": 0.28348858846530745
+    },
+    {
+      "name": "LogisticRegression_C0.1",
+      "metric": 0.3868627450980392,
+      "train_time_s": 0.07531023025512695,
+      "peak_mem_mb": 0.00390625,
+      "latency_ms_per_row": 0.03348864041841947,
+      "risk_penalty": 0.28335896662246046
+    }
+  ],
+  "selected_model": {
+    "name": "RandomForest_d5",
+    "type": "Pipeline",
+    "pipeline_steps": [
+      "pre",
+      "select",
+      "model"
+    ],
+    "metrics": {
+      "metric": 0.4316655164481252,
+      "train_time_s": 0.1915292739868164,
+      "peak_mem_mb": 0.0,
+      "latency_ms_per_row": 0.09325834421011117,
+      "risk_penalty": 0.28348858846530745,
+      "stress_worst_drop": 0.03508771929824561
+    }
+  },
+  "test_performance": {
+    "accuracy": 0.6938775510204082,
+    "f1_weighted": 0.6495946323734973
+  },
+  "additional_info": {
+    "dataset": {
+      "name": "tips",
+      "n_samples": 244,
+      "n_features": 8,
+      "task": "binary_classification"
+    },
+    "data_split": {
+      "train_size": 195,
+      "test_size": 49,
+      "test_ratio": 0.2
+    }
+  }
+}

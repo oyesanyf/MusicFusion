@@ -43,6 +43,7 @@ from .column_validator import (
     validate_columns,
 )
 from .forecast import SeriesSpec, run_forecast
+from .nl_plan import build_plan
 
 # src/acdso/webui/app.py -> src/acdso/webui -> src/acdso -> src -> <repo root>
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -499,6 +500,21 @@ def build_argv(payload: dict[str, Any], data_file: Path | None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+_RUN_KEY_RE = re.compile(r"(?:^|_)([0-9a-f]{12}|[0-9a-f]{6})(?:_|\.)")
+
+
+def _run_key(name: str) -> str | None:
+    """Pull the run-hash token out of a report filename, if it has one.
+
+    Filenames from the same run share a short hex token (e.g.
+    ``..._5f5747b2a705_...`` or a forecast's ``..._cd8149.csv``), so grouping
+    on it lets us report a run's start/end span instead of just a single
+    file's mtime, which is what actually confused Femi in the report table.
+    """
+    m = _RUN_KEY_RE.search(name)
+    return m.group(1) if m else None
+
+
 def _all_report_files() -> list[dict[str, Any]]:
     """Every file under ``reports/`` (excluding webui job logs), newest first."""
     if not REPORTS_DIR.is_dir():
@@ -520,8 +536,26 @@ def _all_report_files() -> list[dict[str, Any]]:
                 "size": stat.st_size,
                 "modified": stat.st_mtime,
                 "kind": path.suffix.lstrip(".").lower(),
+                "run_key": _run_key(path.name),
             }
         )
+
+    # Group files sharing a run-hash token and stamp each with that group's
+    # start/end mtimes, so the UI can show a run's real wall-clock span
+    # instead of one confusing per-file timestamp.
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for f in found:
+        key = f["run_key"] or f["path"]
+        groups.setdefault(key, []).append(f)
+    for members in groups.values():
+        start = min(m["modified"] for m in members)
+        end = max(m["modified"] for m in members)
+        for m in members:
+            m["run_start"] = start
+            m["run_end"] = end
+            m["run_seconds"] = round(end - start, 1)
+        del members
+
     found.sort(key=lambda a: a["modified"], reverse=True)
     return found
 
@@ -800,6 +834,30 @@ def create_app() -> Flask:
         result = validate_columns(frame, roles)
         return jsonify(result.to_dict())
 
+    @app.post("/api/nl-plan")
+    def nl_plan_route():
+        """Turn a free-text request into a column-role plan.
+
+        Never starts a run -- returned for the webui to show back to the
+        user, who applies it to the existing form and presses Run
+        themselves. See nl_plan.py for why.
+        """
+        payload = request.get_json(silent=True) or {}
+        record = uploads.get(payload.get("upload_id") or "")
+        if record is None:
+            return jsonify(error="Upload a data file first"), 400
+
+        prompt = (payload.get("prompt") or "").strip()
+        if not prompt:
+            return jsonify(error="Type a request first"), 400
+
+        try:
+            frame = _read_frame(record.path, nrows=5000)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify(error=f"Could not read the file: {exc}"), 400
+
+        return jsonify(build_plan(prompt, frame))
+
     @app.post("/api/run")
     def run():
         payload = request.get_json(silent=True) or {}
@@ -917,6 +975,38 @@ def create_app() -> Flask:
         target = _safe_report_path(rel)
         inline = request.args.get("inline") == "1"
         return send_file(target, as_attachment=not inline)
+
+    @app.delete("/api/reports")
+    def reports_delete():
+        """Delete one report file (?path=...) or every report file (?all=1)."""
+        if manager.active_job is not None and manager.active_job.status == "running":
+            return jsonify(error="Cannot delete while a job is running"), 409
+
+        if request.args.get("all") == "1":
+            deleted, errors = [], []
+            for entry in _all_report_files():
+                target = REPORTS_DIR / entry["path"]
+                try:
+                    target.unlink()
+                    deleted.append(entry["path"])
+                except OSError as exc:
+                    errors.append({"path": entry["path"], "error": str(exc)})
+            return jsonify(deleted=deleted, errors=errors)
+
+        rel = request.args.get("path", "")
+        if not rel:
+            return jsonify(error="Missing path"), 400
+        base = REPORTS_DIR.resolve()
+        target = (base / rel).resolve()
+        if target != base and base not in target.parents:
+            return jsonify(error="Path outside the reports directory"), 403
+        if not target.is_file():
+            return jsonify(error="No such artifact"), 404
+        try:
+            target.unlink()
+        except OSError as exc:
+            return jsonify(error=str(exc)), 500
+        return jsonify(deleted=[rel])
 
     @app.get("/api/health")
     def health():

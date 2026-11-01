@@ -232,11 +232,19 @@ class AutoTS:
         Whether to include baseline models.
     include_statistical : bool, default=False
         Whether to include statistical models (requires statsmodels).
+    include_timesfm : bool, default=False
+        Whether to include Google's TimesFM pretrained foundation model
+        (requires ``pip install timesfm[torch]``). Off by default: heavy
+        optional dependency, and only added as a candidate when the
+        training series is long enough to matter (see
+        ``TimesFMForecaster.min_context_length`` in candidates.py) -- on
+        this project's typical short aggregated series it would be
+        skipped even with this flag on.
     verbose : bool, default=True
         Whether to print progress.
     random_state : int, default=42
         Random seed.
-    
+
     Example
     -------
     >>> ts = AutoTS(
@@ -249,7 +257,7 @@ class AutoTS:
     >>> print(result.summary())
     >>> forecast = result.predict(df_future)
     """
-    
+
     def __init__(
         self,
         datetime_col: str,
@@ -262,6 +270,7 @@ class AutoTS:
         time_budget: Optional[int] = None,
         include_baselines: bool = True,
         include_statistical: bool = False,
+        include_timesfm: bool = False,
         verbose: bool = True,
         random_state: int = 42,
     ):
@@ -275,6 +284,7 @@ class AutoTS:
         self.time_budget = time_budget
         self.include_baselines = include_baselines
         self.include_statistical = include_statistical
+        self.include_timesfm = include_timesfm
         self.verbose = verbose
         self.random_state = random_state
         
@@ -456,8 +466,10 @@ class AutoTS:
             seasonality=self.seasonality or 7,
             include_baselines=self.include_baselines,
             include_statistical=self.include_statistical,
+            include_timesfm=self.include_timesfm,
+            n_samples=len(df),
         )
-        
+
         return generator.generate()
     
     def _evaluate_candidates(

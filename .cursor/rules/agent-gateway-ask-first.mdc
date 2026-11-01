@@ -1,0 +1,19 @@
+---
+description: Prefer user-agent-gateway MCP ask as the first tool call for user turns (parity with Claude Code agent-gateway).
+alwaysApply: true
+---
+
+# User-agent-gateway: call `ask` automatically
+
+For **Agent** chat in this workspace, treat the **user-agent-gateway** MCP tool **`ask`** as the default first step when the user sends a substantive message (question, task, or request for action).
+
+- Pass the user’s **current message** as the `prompt` argument (you may prepend brief session context if it improves routing).
+- Use the tool **without** requiring the user to `@` the server.
+- After you receive the tool result, continue in Cursor as usual: apply edits, run commands, or summarize—incorporate the gateway response when it helps.
+
+Skip calling `ask` only when:
+
+- The user explicitly asks not to use the gateway, or
+- The message is a trivial control instruction (“stop”, “undo that”) that does not need routing.
+
+This mirrors Claude Code’s automatic **agent-gateway / ask** behavior: one gateway call per user turn by default, not “run every MCP server always.”

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "agent-gateway": {
+      "command": "C:\\harfile\\RouterGateWay\\target\\release\\mcp-server.exe",
+      "args": [],
+      "env": {
+        "GATEWAY_URL": "http://127.0.0.1:8080",
+        "GATEWAY_API_KEY": "b7c6aeabea77120832cd3fedd3f7e6a2b8988ad5c6e51718624b76f29b97b800",
+        "ANTHROPIC_BASE_URL": "http://127.0.0.1:8080",
+        "ANTHROPIC_AUTH_TOKEN": "b7c6aeabea77120832cd3fedd3f7e6a2b8988ad5c6e51718624b76f29b97b800",
+        "MCP_HTTP_BIND": "127.0.0.1:3002"
+      }
+    }
+  }
+}

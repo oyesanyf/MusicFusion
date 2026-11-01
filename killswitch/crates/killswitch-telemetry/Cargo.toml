@@ -10,6 +10,7 @@ description = "EDR Telemetry, Nonlinear Phase-Lock Lyapunov Monitor, Causal/Atta
 
 [dependencies]
 killswitch-types = { workspace = true }
+killswitch-conformal = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
@@ -32,8 +33,6 @@ url = { workspace = true }
 
 # OpenTelemetry & OpenLineage Integration
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-opentelemetry-stdout = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }

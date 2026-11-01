@@ -166,9 +166,9 @@ impl AnalogMasteringNode {
 
         state.set_telemetry(final_telemetry.clone());
 
-        // 4. Save final_master.wav
+        // 4. Save final_master.wav as universally playable 16-bit PCM WAV
         let master_path = song_dir.join("final_master.wav");
-        master_buf.to_wav_file_with_format(&master_path, WavBitDepth::Float32)
+        master_buf.to_wav_file_with_format(&master_path, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
         state.set_stem(STEM_FINAL_MASTER, master_path);
 

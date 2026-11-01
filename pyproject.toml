@@ -108,6 +108,13 @@ pmdarima = ["pmdarima>=2.0.0"]
 neuralprophet = ["neuralprophet>=0.7.0"]
 darts = ["darts>=0.26.0"]
 statsmodels = ["statsmodels>=0.14.0"]
+# Google's TimesFM pretrained time-series foundation model. Source and
+# weights up to 2.5 are Apache-2.0; the default checkpoint used by
+# TimesFMForecaster is a 2.5 checkpoint deliberately -- TimesFM 3.0's
+# pretrained weights are restricted to non-commercial/non-production use
+# under timesfm-non-commercial-license-v1.0. Heavy (pulls in torch), so
+# kept opt-in rather than added to timeseries-full.
+timesfm = ["timesfm[torch]"]
 timeseries = [  # Core time series tools
     "statsmodels>=0.14.0",
     "prophet>=1.1.0",

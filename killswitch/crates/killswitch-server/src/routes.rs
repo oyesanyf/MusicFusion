@@ -1,6 +1,6 @@
 //! # Axum Router Assembly & Middleware Stacking
 //!
-//! Exposes all 15 dedicated endpoints with layered security middleware.
+//! Exposes all dedicated endpoints with layered security middleware.
 
 use std::sync::Arc;
 use axum::routing::{get, post};
@@ -35,7 +35,74 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/lineage/status", get(handlers::get_lineage_status))
         .route("/lineage/seed", post(handlers::post_lineage_seed))
         .route("/lineage/evaluate", post(handlers::post_lineage_evaluate))
+        // 6. SWE-Bench Two-Gate (`FAIL_TO_PASS` + `PASS_TO_PASS`) Anti-Blind-KillSwitch Harness
+        .route("/api/edr-bench/tasks", get(handlers::get_edr_bench_tasks))
+        .route("/edr-bench/tasks", get(handlers::get_edr_bench_tasks))
+        .route("/api/killswitch-bench/tasks", get(handlers::get_edr_bench_tasks))
+        .route("/api/edr-bench/evaluate", post(handlers::post_edr_bench_evaluate))
+        .route("/edr-bench/evaluate", post(handlers::post_edr_bench_evaluate))
+        .route("/api/killswitch-bench/evaluate", post(handlers::post_edr_bench_evaluate))
+        // 7. Connected Peers Inspection & 1-Click Disable/Enable Control
+        .route("/peers/status", get(handlers::get_peers_status))
+        .route("/api/peers/status", get(handlers::get_peers_status))
+        .route("/peers/control", post(handlers::post_peers_control))
+        .route("/api/peers/control", post(handlers::post_peers_control))
+        // 8. Native TPM 2.0 Hardware Security & PCR Attestation
+        .route("/tpm/status", get(handlers::get_tpm_status))
+        .route("/api/tpm/status", get(handlers::get_tpm_status))
+        .route("/tpm/seal", post(handlers::post_tpm_seal))
+        .route("/api/tpm/seal", post(handlers::post_tpm_seal))
+        // 9. NASA JPL F' (F Prime) Flight-Software Component & Rate-Group Supervision
+        .route("/fprime/status", get(handlers::get_fprime_status))
+        .route("/api/fprime/status", get(handlers::get_fprime_status))
+        .route("/fprime/dispatch", post(handlers::post_fprime_dispatch))
+        .route("/api/fprime/dispatch", post(handlers::post_fprime_dispatch))
+        // 10. Dynamic OS-Query + Reinforcement Learning (RL) Traffic Learner & OpenAI/Anthropic Breakout Gate
+        .route("/rl/status", get(handlers::get_rl_status))
+        .route("/api/rl/status", get(handlers::get_rl_status))
+        .route("/rl/learn", post(handlers::post_rl_learn))
+        .route("/api/rl/learn", post(handlers::post_rl_learn))
+        .route("/rl/benchmark", get(handlers::get_rl_benchmark))
+        .route("/api/rl/benchmark", get(handlers::get_rl_benchmark))
+        .route("/octopus/breakout", post(handlers::post_octopus_breakout))
+        .route("/api/octopus/breakout", post(handlers::post_octopus_breakout))
+        // 11. Adapted EDR Multi-Protocol Rate-Limit Backoff, RETE 3-Voter Ensemble & Agent Velocity Gate
+        .route("/rate-limit/status", get(handlers::get_rate_limit_status))
+        .route("/api/rate-limit/status", get(handlers::get_rate_limit_status))
+        .route("/rate-limit/evaluate", post(handlers::post_rate_limit_evaluate))
+        .route("/api/rate-limit/evaluate", post(handlers::post_rate_limit_evaluate))
+        .route("/rate-limit/allowlist", post(handlers::post_rate_limit_allowlist))
+        .route("/api/rate-limit/allowlist", post(handlers::post_rate_limit_allowlist))
+        // 12. Continuous Security Architecture (Oyesanya 2026 Taxonomy, Vassilev Sisyphean Bound & MTTD/MTTR)
+        .route("/resilience/status", get(handlers::get_resilience_status))
+        .route("/api/resilience/status", get(handlers::get_resilience_status))
+        .route("/octopus/inspect-boundary", post(handlers::post_inspect_boundary))
+        .route("/api/octopus/inspect-boundary", post(handlers::post_inspect_boundary))
+        // 13. Conformal Sequential Jailbreak Detection (Persist-L, SR-DKW, LayeredGuardrail)
+        .route("/conformal/status", get(handlers::get_conformal_status))
+        .route("/api/conformal/status", get(handlers::get_conformal_status))
+        .route("/conformal/evaluate", post(handlers::post_conformal_evaluate))
+        .route("/api/conformal/evaluate", post(handlers::post_conformal_evaluate))
+        // 14. Research Breakout Ingestion, Verification, 4-Arm LangGraph Swarm & User Approval Menu
+        .route("/research/ingest", post(handlers::post_research_ingest))
+        .route("/api/research/ingest", post(handlers::post_research_ingest))
+        .route("/research/langgraph-swarm", post(handlers::post_research_langgraph_swarm))
+        .route("/api/research/langgraph-swarm", post(handlers::post_research_langgraph_swarm))
+        .route("/research/candidates", get(handlers::get_research_candidates))
+        .route("/api/research/candidates", get(handlers::get_research_candidates))
+        .route("/research/discover", post(handlers::post_research_discover))
+        .route("/api/research/discover", post(handlers::post_research_discover))
+        .route("/research/approve", post(handlers::post_research_approve))
+        .route("/api/research/approve", post(handlers::post_research_approve))
+        // 15. Continuous EDR Behavioral Anomaly, Stateful Process Lineage Tree & Statistical Baseline
+        .route("/edr/behavioral/status", get(handlers::get_edr_behavioral_status))
+        .route("/api/edr/behavioral/status", get(handlers::get_edr_behavioral_status))
+        .route("/edr/behavioral/ingest", post(handlers::post_edr_behavioral_ingest))
+        .route("/api/edr/behavioral/ingest", post(handlers::post_edr_behavioral_ingest))
+        .route("/edr/behavioral/scan-host", post(handlers::post_edr_behavioral_scan_host))
+        .route("/api/edr/behavioral/scan-host", post(handlers::post_edr_behavioral_scan_host))
         // Middleware Layers (applied bottom-up)
+        .layer(axum::middleware::from_fn(middleware::rate_limit_middleware))
         .layer(middleware::cors_layer())
         .layer(middleware::body_limit_layer(state.config.max_body_bytes))
         .layer(middleware::trace_layer())

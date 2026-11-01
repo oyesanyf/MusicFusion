@@ -250,17 +250,17 @@ impl VirtuosoStemInpaintingNode {
         let p_in_guitar = stems_dir.join("inpainted_guitar.wav");
         let p_in_drums = stems_dir.join("inpainted_drums.wav");
 
-        drums_buf.to_wav_file_with_format(&p_drums, WavBitDepth::Float32)
+        drums_buf.to_wav_file_with_format(&p_drums, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
-        bass_buf.to_wav_file_with_format(&p_bass, WavBitDepth::Float32)
+        bass_buf.to_wav_file_with_format(&p_bass, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
-        guitar_buf.to_wav_file_with_format(&p_guitar, WavBitDepth::Float32)
+        guitar_buf.to_wav_file_with_format(&p_guitar, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
-        other_buf.to_wav_file_with_format(&p_other, WavBitDepth::Float32)
+        other_buf.to_wav_file_with_format(&p_other, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
-        inpainted_guitar.to_wav_file_with_format(&p_in_guitar, WavBitDepth::Float32)
+        inpainted_guitar.to_wav_file_with_format(&p_in_guitar, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
-        inpainted_drums.to_wav_file_with_format(&p_in_drums, WavBitDepth::Float32)
+        inpainted_drums.to_wav_file_with_format(&p_in_drums, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
 
         state.set_stem(STEM_DRUMS, p_drums);

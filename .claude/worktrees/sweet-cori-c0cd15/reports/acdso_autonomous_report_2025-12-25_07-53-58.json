@@ -1,0 +1,154 @@
+{
+  "timestamp": "2025-12-25T07:53:58.706351",
+  "total_time_seconds": 640.550342798233,
+  "llm_available": true,
+  "summary": {
+    "total": 25,
+    "success": 4,
+    "failed": 21,
+    "success_rate": 16.0
+  },
+  "phases": {
+    "Phase 1 - Core AutoML": [
+      {
+        "name": "Basic Classification",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Production Constraints",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Risk Analysis",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Pareto Front Exploration",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Regression",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Audit Trail",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      }
+    ],
+    "Phase 2 - LLM Advisor": [
+      {
+        "name": "LLM Advisor",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Custom File Analysis",
+        "status": "FAILED: demo_user_file() got an unexpected keyword argument 'file_path'. Did you mean 'filepath'?",
+        "success": false
+      }
+    ],
+    "Phase 3 - Auto EDA": [
+      {
+        "name": "Auto EDA - Basic",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Auto EDA - Quality",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Auto EDA - Pareto",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Auto EDA - LLM",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Auto EDA - Export",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "Safe Feature Importance",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "AutoEDA Preprocessing",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "EDA Tool Integrations",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "EDA Utility Functions",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      }
+    ],
+    "Phase 4 - v3 Innovations": [
+      {
+        "name": "ACDSO v3 Innovations",
+        "status": "[OK] SUCCESS",
+        "success": true
+      }
+    ],
+    "Phase 5 - Time Series": [
+      {
+        "name": "Auto Time Series (Custom File)",
+        "status": "SUCCESS",
+        "success": true
+      }
+    ],
+    "Phase 6 - Decision Intelligence": [
+      {
+        "name": "Decision Intelligence",
+        "status": "[OK] SUCCESS",
+        "success": true
+      },
+      {
+        "name": "Policy Learning (RL)",
+        "status": "[OK] SUCCESS",
+        "success": true
+      }
+    ],
+    "Phase 7 - Integrations": [
+      {
+        "name": "AutoML Integration",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      },
+      {
+        "name": "FLAML Integration",
+        "status": "[X] FAILED: 'charmap' codec can't encode character '\\u2713' in",
+        "success": false
+      },
+      {
+        "name": "Complete ML Workflow",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      }
+    ],
+    "Phase 8 - Benchmarks": [
+      {
+        "name": "Benchmark Comparison",
+        "status": "[X] FAILED: 'charmap' codec can't encode characters in positio",
+        "success": false
+      }
+    ]
+  }
+}

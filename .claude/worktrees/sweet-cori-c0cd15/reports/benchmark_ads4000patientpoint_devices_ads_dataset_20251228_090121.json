@@ -1,0 +1,302 @@
+{
+  "timestamp": "2025-12-28T09:05:47.075414",
+  "systems_tested": [
+    "ACDSO",
+    "TPOT",
+    "FLAML",
+    "AutoGluon",
+    "H2O"
+  ],
+  "datasets_tested": [
+    "ads4000patientpoint_devices_ads_dataset"
+  ],
+  "time_budget_s": 60,
+  "results": [
+    {
+      "system": "ACDSO",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": -0.005785192640601178,
+      "test_f1": null,
+      "test_precision": null,
+      "test_recall": null,
+      "test_rmse": 1414.4244033445007,
+      "test_mae": 1220.319366892367,
+      "fit_time_s": 111.226722240448,
+      "predict_time_s": 0.006084442138671875,
+      "latency_ms_per_row": 0.007605552673339844,
+      "peak_memory_mb": 4.052265167236328,
+      "cv_score_mean": 0.0,
+      "cv_score_std": 0.0035314368424311754,
+      "has_risk_report": true,
+      "has_audit_trail": true,
+      "models_evaluated": [
+        {
+          "name": "ElasticNet",
+          "score": -0.004977469957430314,
+          "fit_time": 0,
+          "memory_mb": 0,
+          "latency_ms": 0.07448531687259674,
+          "risk_penalty": 0.010594310527293526,
+          "is_best": true
+        },
+        {
+          "name": "RandomForest_d5",
+          "score": -0.007409511707456273,
+          "fit_time": 0,
+          "memory_mb": 0,
+          "latency_ms": 0.40348153561353683,
+          "risk_penalty": 0.01775085976510419,
+          "is_best": false
+        },
+        {
+          "name": "RandomForest_d10",
+          "score": -0.01460942350090555,
+          "fit_time": 0,
+          "memory_mb": 0,
+          "latency_ms": 0.6165159866213799,
+          "risk_penalty": 0.031185321885561425,
+          "is_best": false
+        },
+        {
+          "name": "RandomForestRegressor",
+          "score": -0.027193413549798783,
+          "fit_time": 0,
+          "memory_mb": 0,
+          "latency_ms": 0.6047002971172333,
+          "risk_penalty": 0.04714326219045964,
+          "is_best": false
+        }
+      ],
+      "detected_leakage": false,
+      "detected_multicollinearity": false,
+      "risk_penalty": 0.0,
+      "pareto_front_size": 1,
+      "n_train": 3200,
+      "n_test": 800,
+      "n_features": 18,
+      "time_budget_s": 60,
+      "error": null,
+      "model_name": "ElasticNet"
+    },
+    {
+      "system": "TPOT",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": 0.0,
+      "test_f1": null,
+      "test_precision": null,
+      "test_recall": null,
+      "test_rmse": null,
+      "test_mae": null,
+      "fit_time_s": 0.0,
+      "predict_time_s": 0.0,
+      "latency_ms_per_row": 0.0,
+      "peak_memory_mb": 0.0,
+      "cv_score_mean": 0.0,
+      "cv_score_std": 0.0,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "models_evaluated": [],
+      "detected_leakage": false,
+      "detected_multicollinearity": false,
+      "risk_penalty": null,
+      "pareto_front_size": null,
+      "n_train": 3200,
+      "n_test": 800,
+      "n_features": 18,
+      "time_budget_s": 60,
+      "error": "TPOT 1.0+ requires >=120s budget and >=200 samples (got 60s, 3200 samples)",
+      "model_name": null
+    },
+    {
+      "system": "FLAML",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": -0.00545614615900325,
+      "test_f1": null,
+      "test_precision": null,
+      "test_recall": null,
+      "test_rmse": 1414.1930172352602,
+      "test_mae": 1221.272740600168,
+      "fit_time_s": 61.479451179504395,
+      "predict_time_s": 0.02892589569091797,
+      "latency_ms_per_row": 0.03615736961364746,
+      "peak_memory_mb": 3.071544647216797,
+      "cv_score_mean": 0.0,
+      "cv_score_std": 0.0,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "models_evaluated": [
+        {
+          "name": "str",
+          "score": 0.998693987793825,
+          "config": {
+            "early_stopping_rounds": 10,
+            "learning_rate": 0.09999999999999996,
+            "n_estimators": 8192
+          },
+          "is_best": true
+        }
+      ],
+      "detected_leakage": false,
+      "detected_multicollinearity": false,
+      "risk_penalty": null,
+      "pareto_front_size": null,
+      "n_train": 3200,
+      "n_test": 800,
+      "n_features": 18,
+      "time_budget_s": 60,
+      "error": null,
+      "model_name": null
+    },
+    {
+      "system": "AutoGluon",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": -0.006320595741271973,
+      "test_f1": null,
+      "test_precision": null,
+      "test_recall": null,
+      "test_rmse": 1414.8007810289052,
+      "test_mae": 1221.0384521484375,
+      "fit_time_s": 47.443180084228516,
+      "predict_time_s": 0.22444939613342285,
+      "latency_ms_per_row": 0.28056174516677856,
+      "peak_memory_mb": 85.88973617553711,
+      "cv_score_mean": 0.0,
+      "cv_score_std": 0.0,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "models_evaluated": [
+        {
+          "name": "WeightedEnsemble_L2",
+          "score": -1448.44413433295,
+          "fit_time": 6.932000160217285,
+          "pred_time": 1.5414032936096191,
+          "is_best": true
+        },
+        {
+          "name": "LightGBM_BAG_L1",
+          "score": -1449.1376711819748,
+          "fit_time": 3.8645970821380615,
+          "pred_time": 0.09641814231872559,
+          "is_best": false
+        },
+        {
+          "name": "ExtraTrees_BAG_L1",
+          "score": -1458.507993020656,
+          "fit_time": 3.035367012023926,
+          "pred_time": 1.444122076034546,
+          "is_best": false
+        },
+        {
+          "name": "RandomForest_BAG_L1",
+          "score": -1464.7741775277893,
+          "fit_time": 3.4723315238952637,
+          "pred_time": 1.1309092044830322,
+          "is_best": false
+        }
+      ],
+      "detected_leakage": false,
+      "detected_multicollinearity": false,
+      "risk_penalty": null,
+      "pareto_front_size": null,
+      "n_train": 3200,
+      "n_test": 800,
+      "n_features": 18,
+      "time_budget_s": 60,
+      "error": null,
+      "model_name": null
+    },
+    {
+      "system": "H2O",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": -0.0007601179564187266,
+      "test_f1": null,
+      "test_precision": null,
+      "test_recall": null,
+      "test_rmse": 1410.886625973114,
+      "test_mae": 1218.4263187652866,
+      "fit_time_s": 41.250288248062134,
+      "predict_time_s": 0.3057594299316406,
+      "latency_ms_per_row": 0.3821992874145508,
+      "peak_memory_mb": 2.33676815032959,
+      "cv_score_mean": 0.0,
+      "cv_score_std": 0.0,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "models_evaluated": [
+        {
+          "name": "GLM_1_AutoML_1_20251228_90530",
+          "score": 1448.6160677493976,
+          "is_best": true
+        },
+        {
+          "name": "DRF_1_AutoML_1_20251228_90530",
+          "score": 1571.5817442840826,
+          "is_best": false
+        },
+        {
+          "name": "GBM_1_AutoML_1_20251228_90530",
+          "score": 1589.835453644772,
+          "is_best": false
+        },
+        {
+          "name": "GBM_2_AutoML_1_20251228_90530",
+          "score": 1619.911137927959,
+          "is_best": false
+        },
+        {
+          "name": "GBM_3_AutoML_1_20251228_90530",
+          "score": 1632.06751421764,
+          "is_best": false
+        }
+      ],
+      "detected_leakage": false,
+      "detected_multicollinearity": false,
+      "risk_penalty": null,
+      "pareto_front_size": null,
+      "n_train": 3200,
+      "n_test": 800,
+      "n_features": 18,
+      "time_budget_s": 60,
+      "error": null,
+      "model_name": null
+    }
+  ],
+  "leakage_tests": [
+    {
+      "system": "ACDSO",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": null
+    },
+    {
+      "system": "TPOT",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": "not_supported"
+    },
+    {
+      "system": "FLAML",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": "not_supported"
+    }
+  ],
+  "winner_by_metric": {
+    "test_score": "H2O",
+    "fit_time_s": "H2O",
+    "latency_ms_per_row": "ACDSO",
+    "peak_memory_mb": "H2O",
+    "cv_score_std": "FLAML",
+    "risk_detection": "ACDSO",
+    "audit_trail": "ACDSO"
+  },
+  "statistical_tests": {}
+}

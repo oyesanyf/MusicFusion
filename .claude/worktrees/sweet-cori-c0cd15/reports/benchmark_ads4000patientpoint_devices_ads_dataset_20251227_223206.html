@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACDSO Benchmark Report - Complete Analysis</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #3b82f6;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --info: #0891b2;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-highlight: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, var(--bg) 0%, #1a1a2e 100%);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(139, 92, 246, 0.1));
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        h3 { color: var(--primary-light); margin: 1rem 0 0.5rem 0; }
+        .subtitle { color: var(--text-muted); margin-bottom: 0.5rem; }
+        
+        /* Executive Summary */
+        .executive-summary {
+            background: linear-gradient(135deg, rgba(22, 163, 74, 0.1), rgba(37, 99, 235, 0.1));
+            border: 2px solid var(--success);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .executive-summary h2 {
+            color: var(--success);
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+        .summary-item {
+            background: rgba(0,0,0,0.2);
+            padding: 1rem;
+            border-radius: 8px;
+        }
+        .summary-label { color: var(--text-muted); font-size: 0.85rem; }
+        .summary-value { font-size: 1.25rem; font-weight: 600; color: var(--text); }
+        .summary-detail { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; }
+        
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--primary-light);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .card h2::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 1.25rem;
+            background: linear-gradient(180deg, var(--primary), var(--info));
+            border-radius: 2px;
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: rgba(37, 99, 235, 0.15);
+            font-weight: 600;
+            color: var(--primary-light);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        tr:hover { background: rgba(255, 255, 255, 0.03); }
+        .winner { color: var(--success); font-weight: 600; }
+        .error { color: var(--danger); }
+        
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .badge-success { background: rgba(22, 163, 74, 0.2); color: var(--success); }
+        .badge-danger { background: rgba(220, 38, 38, 0.2); color: var(--danger); }
+        .badge-warning { background: rgba(217, 119, 6, 0.2); color: var(--warning); }
+        .badge-info { background: rgba(8, 145, 178, 0.2); color: var(--info); }
+        .badge-primary { background: rgba(37, 99, 235, 0.2); color: var(--primary-light); }
+        
+        /* Charts */
+        .chart-container {
+            margin: 1rem 0;
+        }
+        .bar-chart {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .bar-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .bar-label {
+            width: 100px;
+            font-size: 0.85rem;
+            color: var(--text);
+            text-align: right;
+        }
+        .bar-container {
+            flex: 1;
+            height: 24px;
+            background: var(--bg-highlight);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        .bar {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+        }
+        .bar-score { background: linear-gradient(90deg, var(--primary), var(--info)); }
+        .bar-time { background: linear-gradient(90deg, var(--warning), #f59e0b); }
+        .bar-latency { background: linear-gradient(90deg, var(--danger), #f87171); }
+        .bar-efficiency { background: linear-gradient(90deg, var(--success), #4ade80); }
+        
+        /* Metric Grids */
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1rem;
+        }
+        .metric-item {
+            background: rgba(37, 99, 235, 0.05);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .metric-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+        }
+        .metric-label { color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .metric-value { font-size: 1.5rem; font-weight: 700; color: var(--text); margin-top: 0.25rem; }
+        .metric-change { font-size: 0.75rem; margin-top: 0.25rem; }
+        .metric-change.positive { color: var(--success); }
+        .metric-change.negative { color: var(--danger); }
+        
+        /* System Cards */
+        .system-card {
+            background: rgba(37, 99, 235, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin: 0.75rem 0;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .system-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        .system-card.winner {
+            border-color: var(--success);
+            background: rgba(22, 163, 74, 0.05);
+        }
+        .system-card.failed {
+            border-color: var(--danger);
+            background: rgba(220, 38, 38, 0.05);
+        }
+        .system-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        .system-name { font-size: 1.15rem; font-weight: 600; }
+        .system-rank { 
+            width: 28px; 
+            height: 28px; 
+            border-radius: 50%; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.85rem;
+        }
+        .rank-1 { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #000; }
+        .rank-2 { background: linear-gradient(135deg, #9ca3af, #6b7280); color: #fff; }
+        .rank-3 { background: linear-gradient(135deg, #cd7f32, #a0522d); color: #fff; }
+        .rank-other { background: var(--bg-highlight); color: var(--text-muted); }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .detail-item { padding: 0.35rem 0; }
+        .detail-label { color: var(--text-muted); font-size: 0.8rem; }
+        .detail-value { font-weight: 500; }
+        
+        /* Recommendations */
+        .recommendation {
+            background: rgba(22, 163, 74, 0.1);
+            border-left: 4px solid var(--success);
+            padding: 1rem 1.25rem;
+            margin: 0.75rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .recommendation h3 { color: var(--success); margin: 0 0 0.5rem 0; font-size: 1rem; }
+        .recommendation p { color: var(--text-muted); font-size: 0.9rem; margin: 0; }
+        
+        .warning-box {
+            background: rgba(217, 119, 6, 0.1);
+            border-left: 4px solid var(--warning);
+            padding: 1rem 1.25rem;
+            margin: 0.75rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .warning-box h3 { color: var(--warning); margin: 0 0 0.5rem 0; font-size: 1rem; }
+        
+        .info-box {
+            background: rgba(8, 145, 178, 0.1);
+            border-left: 4px solid var(--info);
+            padding: 1rem 1.25rem;
+            margin: 0.75rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .info-box h3 { color: var(--info); margin: 0 0 0.5rem 0; font-size: 1rem; }
+        
+        /* Risk Analysis */
+        .risk-meter {
+            height: 8px;
+            background: var(--bg-highlight);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+        .risk-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+        .risk-low { background: var(--success); }
+        .risk-medium { background: var(--warning); }
+        .risk-high { background: var(--danger); }
+        
+        /* Trade-off Analysis */
+        .tradeoff-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .tradeoff-item {
+            padding: 1rem;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+        .tradeoff-vs {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .tradeoff-metric { font-weight: 600; font-size: 0.9rem; }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            color: var(--text-muted);
+            margin-top: 2rem;
+            padding: 1.5rem;
+            border-top: 1px solid var(--border);
+            background: rgba(0,0,0,0.2);
+            border-radius: 0 0 12px 12px;
+        }
+        .footer p { margin: 0.25rem 0; }
+        
+        /* Layout Helpers */
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        .three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+        @media (max-width: 768px) { 
+            .two-col, .three-col { grid-template-columns: 1fr; }
+            .tradeoff-grid { grid-template-columns: 1fr; }
+        }
+        
+        /* Table of Contents */
+        .toc {
+            background: rgba(37, 99, 235, 0.05);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .toc h3 { margin-bottom: 0.75rem; font-size: 1rem; }
+        .toc-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.5rem;
+            list-style: none;
+        }
+        .toc-list li a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: color 0.2s;
+        }
+        .toc-list li a:hover { color: var(--primary-light); }
+        
+        /* Print Styles */
+        @media print {
+            body { background: white; color: black; }
+            .card { border: 1px solid #ccc; box-shadow: none; }
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>ACDSO Benchmark Report</h1>
+            <p class="subtitle">Complete AutoML Performance Analysis</p>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Generated: 2025-12-28T06:54:17.624029</p>
+        </div>
+        
+        <!-- Table of Contents -->
+        <div class="toc no-print">
+            <h3>Quick Navigation</h3>
+            <ul class="toc-list">
+                <li><a href="#executive-summary">Executive Summary</a></li>
+                <li><a href="#dataset-overview">Dataset Overview</a></li>
+                <li><a href="#performance-comparison">Performance Comparison</a></li>
+                <li><a href="#visual-analysis">Visual Analysis</a></li>
+                <li><a href="#detailed-analysis">Detailed System Analysis</a></li>
+                <li><a href="#statistical-analysis">Statistical Analysis</a></li>
+                <li><a href="#tradeoff-analysis">Trade-off Analysis</a></li>
+                <li><a href="#risk-analysis">Risk Analysis</a></li>
+                <li><a href="#leakage-detection">Leakage Detection</a></li>
+                <li><a href="#recommendations">Recommendations</a></li>
+                <li><a href="#methodology">Methodology</a></li>
+            </ul>
+        </div>
+        
+        <!-- Executive Summary -->
+        <div class="executive-summary" id="executive-summary">
+            <h2>Executive Summary</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <div class="summary-label">Best Performing System</div>
+                    <div class="summary-value">H2O</div>
+                    <div class="summary-detail">Score: -0.0008 (regression)</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Fastest System</div>
+                    <div class="summary-value">ACDSO</div>
+                    <div class="summary-detail">Time: 69.9s (avg: 7531.7s)</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Most Production-Ready</div>
+                    <div class="summary-value">ACDSO</div>
+                    <div class="summary-detail">Risk Report + Audit Trail</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Systems Evaluated</div>
+                    <div class="summary-value">4/5</div>
+                    <div class="summary-detail">1 failed</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Dataset Overview -->
+        <div class="card" id="dataset-overview">
+            <h2>Dataset Overview</h2>
+            <div class="metric-grid">
+                <div class="metric-item">
+                    <div class="metric-label">Dataset</div>
+                    <div class="metric-value">ads4000patientpoint_devices_ads_dataset</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Task Type</div>
+                    <div class="metric-value">Regression</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Training Samples</div>
+                    <div class="metric-value">3,200</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Test Samples</div>
+                    <div class="metric-value">800</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Features</div>
+                    <div class="metric-value">18</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Time Budget</div>
+                    <div class="metric-value">60s</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Performance Comparison Table -->
+        <div class="card" id="performance-comparison">
+            <h2>Performance Comparison</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>System</th>
+                        <th>Score (R²)</th>
+                        <th>RMSE</th>
+                        <th>MAE</th>
+                        <th>Time (s)</th>
+                        <th>Latency (ms)</th>
+                        <th>Memory (MB)</th>
+                        <th>CV Std</th>
+                        <th>Risk</th>
+                        <th>Audit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="winner">1</td>
+                        <td class="winner">H2O</td>
+                        <td class="winner">-0.0008</td>
+                        <td>1410.8858</td>
+                        <td>1218.4259</td>
+                        <td>96.5</td>
+                        <td>0.361</td>
+                        <td>2.3</td>
+                        <td>0.0000</td>
+                        <td><span class="badge badge-danger">NO</span></td>
+                        <td><span class="badge badge-danger">NO</span></td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td>FLAML</td>
+                        <td>-0.0055</td>
+                        <td>1414.1930</td>
+                        <td>1221.2727</td>
+                        <td>15815.3</td>
+                        <td>0.041</td>
+                        <td>3.2</td>
+                        <td>0.0000</td>
+                        <td><span class="badge badge-danger">NO</span></td>
+                        <td><span class="badge badge-danger">NO</span></td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td>AutoGluon</td>
+                        <td>-0.0112</td>
+                        <td>1418.2071</td>
+                        <td>1222.7288</td>
+                        <td>14145.2</td>
+                        <td>0.379</td>
+                        <td>73.3</td>
+                        <td>0.0000</td>
+                        <td><span class="badge badge-danger">NO</span></td>
+                        <td><span class="badge badge-danger">NO</span></td>
+                    </tr>
+                    <tr>
+                        <td>4</td>
+                        <td>ACDSO</td>
+                        <td>-0.0530</td>
+                        <td>1447.2576</td>
+                        <td>1243.4627</td>
+                        <td>69.9</td>
+                        <td>0.208</td>
+                        <td>3.7</td>
+                        <td>0.0157</td>
+                        <td><span class="badge badge-success">YES</span></td>
+                        <td><span class="badge badge-success">YES</span></td>
+                    </tr>
+                    <tr>
+                        <td>-</td>
+                        <td>TPOT</td>
+                        <td colspan="9" class="error">ERROR: TPOT 1.0+ requires >=120s budget and >=200 samples (got 60s, 3200 samples)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Visual Analysis -->
+        <div class="card" id="visual-analysis">
+            <h2>Visual Analysis</h2>
+            <div class="two-col">
+                <div>
+                    <h3>Performance Score</h3>
+                    <div class="chart-container">
+                        <div class="bar-chart">
+                            <div class="bar-row">
+                                <span class="bar-label">H2O</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-score" style="width: 100.0%">-0.001</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">FLAML</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-score" style="width: 718.9%">-0.005</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">AutoGluon</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-score" style="width: 1472.0%">-0.011</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">ACDSO</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-score" style="width: 6986.3%">-0.053</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <h3>Training Time (lower is better)</h3>
+                    <div class="chart-container">
+                        <div class="bar-chart">
+                            <div class="bar-row">
+                                <span class="bar-label">H2O</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-time" style="width: 0.6%">96.5s</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">FLAML</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-time" style="width: 100.0%">15815.3s</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">AutoGluon</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-time" style="width: 89.4%">14145.2s</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">ACDSO</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-time" style="width: 0.4%">69.9s</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="two-col" style="margin-top: 1.5rem;">
+                <div>
+                    <h3>Inference Latency (lower is better)</h3>
+                    <div class="chart-container">
+                        <div class="bar-chart">
+                            <div class="bar-row">
+                                <span class="bar-label">H2O</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-latency" style="width: 95.2%">0.36ms</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">FLAML</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-latency" style="width: 10.8%">0.04ms</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">AutoGluon</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-latency" style="width: 100.0%">0.38ms</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">ACDSO</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-latency" style="width: 55.0%">0.21ms</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <h3>Efficiency (Score / Time)</h3>
+                    <div class="chart-container">
+                        <div class="bar-chart">
+                            <div class="bar-row">
+                                <span class="bar-label">H2O</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-efficiency" style="width: 2279.0%">-0.00</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">FLAML</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-efficiency" style="width: 100.0%">-0.00</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">AutoGluon</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-efficiency" style="width: 228.9%">-0.00</div>
+                                </div>
+                            </div>
+                            <div class="bar-row">
+                                <span class="bar-label">ACDSO</span>
+                                <div class="bar-container">
+                                    <div class="bar bar-efficiency" style="width: 219866.1%">-0.08</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistical Analysis -->
+        <div class="card" id="statistical-analysis">
+            <h2>Statistical Analysis</h2>
+            <div class="metric-grid">
+                <div class="metric-item">
+                    <div class="metric-label">Average Score</div>
+                    <div class="metric-value">-0.0176</div>
+                    <div class="metric-change">Std: 0.0240</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Best Score</div>
+                    <div class="metric-value">-0.0008</div>
+                    <div class="metric-change positive">+-95.7% vs avg</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Average Time</div>
+                    <div class="metric-value">7531.7s</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Average Latency</div>
+                    <div class="metric-value">0.25ms</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Systems Evaluated</div>
+                    <div class="metric-value">4</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Systems Failed</div>
+                    <div class="metric-value">1</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Winner Summary -->
+        <div class="card">
+            <h2>Winner by Metric</h2>
+            <div class="metric-grid">
+                <div class="metric-item">
+                    <div class="metric-label">Test Score</div>
+                    <div class="metric-value">H2O</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Fit Time S</div>
+                    <div class="metric-value">ACDSO</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Latency Ms Per Row</div>
+                    <div class="metric-value">FLAML</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Peak Memory Mb</div>
+                    <div class="metric-value">H2O</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Cv Score Std</div>
+                    <div class="metric-value">FLAML</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Risk Detection</div>
+                    <div class="metric-value">ACDSO</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Audit Trail</div>
+                    <div class="metric-value">ACDSO</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Detailed System Analysis -->
+        <div class="card" id="detailed-analysis">
+            <h2>Detailed System Analysis</h2>
+            <div class="system-card winner">
+                <div class="system-header">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span class="system-rank rank-1">1</span>
+                        <span class="system-name">H2O</span>
+                        <span class="badge badge-success">BEST</span>
+                    </div>
+                    <span class="badge badge-info">Efficiency: -0.00</span>
+                </div>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">Score</div>
+                        <div class="detail-value">-0.0008</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Train Time</div>
+                        <div class="detail-value">96.53s</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Predict Time</div>
+                        <div class="detail-value">0.2887s</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Latency</div>
+                        <div class="detail-value">0.361 ms/row</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Memory</div>
+                        <div class="detail-value">2.3 MB</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">CV Std</div>
+                        <div class="detail-value">0.0000</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">RMSE</div>
+                        <div class="detail-value">1410.8858</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">MAE</div>
+                        <div class="detail-value">1218.4259</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Risk Report</div>
+                        <div class="detail-value"><span style="color: var(--text-muted)">No</span></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Audit Trail</div>
+                        <div class="detail-value"><span style="color: var(--text-muted)">No</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="system-card ">
+                <div class="system-header">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span class="system-rank rank-2">2</span>
+                        <span class="system-name">FLAML</span>
+                        
+                    </div>
+                    <span class="badge badge-info">Efficiency: -0.00</span>
+                </div>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">Score</div>
+                        <div class="detail-value">-0.0055</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Train Time</div>
+                        <div class="detail-value">15815.33s</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Predict Time</div>
+                        <div class="detail-value">0.0329s</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Latency</div>
+                        <div class="detail-value">0.041 ms/row</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Memory</div>
+                        <div class="detail-value">3.2 MB</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">CV Std</div>
+                        <div class="detail-value">0.0000</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">RMSE</div>
+                        <div class="detail-value">1414.1930</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">MAE</div>
+                        <div class="detail-value">1221.2727</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Risk Report</div>
+                        <div class="detail-value"><span style="color: var(--text-muted)">No</span></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Audit Trail</div>
+                        <div class="detail-value"><span style="color: var(--text-muted)">No</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="system-card ">
+                <div class="system-header">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span class="system-rank rank-3">3</span>
+                        <span class="system-name">AutoGluon</span>
+                        
+                    </div>
+                    <span class="badge badge-info">Efficiency: -0.00</span>
+                </div>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">Score</div>
+                        <div class="detail-value">-0.0112</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Train Time</div>
+                        <div class="detail-value">14145.20s</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Predict Time</div>
+                        <div class="detail-value">0.3032s</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Latency</div>
+                        <div class="detail-value">0.379 ms/row</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Memory</div>
+                        <div class="detail-value">73.3 MB</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">CV Std</div>
+                        <div class="detail-value">0.0000</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">RMSE</div>
+                        <div class="detail-value">1418.2071</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">MAE</div>
+                        <div class="detail-value">1222.7288</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Risk Report</div>
+                        <div class="detail-value"><span style="color: var(--text-muted)">No</span></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Audit Trail</div>
+                        <div class="detail-value"><span style="color: var(--text-muted)">No</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="system-card ">
+                <div class="system-header">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span class="system-rank rank-other">4</span>
+                        <span class="system-name">ACDSO</span>
+                        
+                    </div>
+                    <span class="badge badge-info">Efficiency: -0.08</span>
+                </div>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">Score</div>
+                        <div class="detail-value">-0.0530</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Train Time</div>
+                        <div class="detail-value">69.90s</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Predict Time</div>
+                        <div class="detail-value">0.1667s</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Latency</div>
+                        <div class="detail-value">0.208 ms/row</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Memory</div>
+                        <div class="detail-value">3.7 MB</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">CV Std</div>
+                        <div class="detail-value">0.0157</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">RMSE</div>
+                        <div class="detail-value">1447.2576</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">MAE</div>
+                        <div class="detail-value">1243.4627</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Risk Report</div>
+                        <div class="detail-value"><span style="color: var(--success)">Yes</span></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Audit Trail</div>
+                        <div class="detail-value"><span style="color: var(--success)">Yes</span></div>
+                    </div>
+                </div>
+                <p style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.85rem;">
+                    <strong>Selected Model:</strong> RandomForestRegressor
+                </p>
+            </div>
+            <div class="system-card failed">
+                <div class="system-header">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <span class="system-rank rank-other">-</span>
+                        <span class="system-name" style="color: var(--danger)">TPOT</span>
+                    </div>
+                    <span class="badge badge-danger">FAILED</span>
+                </div>
+                <p style="color: var(--danger); margin-top: 0.5rem;">Error: TPOT 1.0+ requires >=120s budget and >=200 samples (got 60s, 3200 samples)</p>
+            </div>
+        </div>
+        
+        <!-- Leakage Detection -->
+        <div class="card">
+            <h2>Data Leakage Detection Capability</h2>
+            <p style="color: var(--text-muted); margin-bottom: 1rem;">
+                Comparison of each system's ability to detect data leakage issues.
+            </p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>System</th>
+                        <th>Leakage Type</th>
+                        <th>Detection Status</th>
+                        <th>Detection Method</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>ACDSO</td>
+                        <td>proxy</td>
+                        <td><span class="badge badge-danger">NOT DETECTED</span></td>
+                        <td>N/A</td>
+                    </tr>
+                    <tr>
+                        <td>TPOT</td>
+                        <td>proxy</td>
+                        <td><span class="badge badge-danger">NOT DETECTED</span></td>
+                        <td>not_supported</td>
+                    </tr>
+                    <tr>
+                        <td>FLAML</td>
+                        <td>proxy</td>
+                        <td><span class="badge badge-danger">NOT DETECTED</span></td>
+                        <td>not_supported</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Recommendations -->
+        <div class="card">
+            <h2>Recommendations</h2>
+            <div class="recommendation">
+                <h3 style="margin-top: 0;">Best Overall: H2O</h3>
+                <p>Achieved the highest score of -0.0008 on this benchmark.</p>
+            </div>
+            <div class="recommendation">
+                <h3 style="margin-top: 0;">Fastest Training: ACDSO</h3>
+                <p>Completed training in 69.9s (Score: -0.0530).</p>
+            </div>
+            <div class="recommendation">
+                <h3 style="margin-top: 0;">Best for Production (Low Latency): FLAML</h3>
+                <p>Lowest inference latency at 0.041 ms/row.</p>
+            </div>
+            <div class="recommendation">
+                <h3 style="margin-top: 0;">Production-Ready: ACDSO</h3>
+                <p>Only system providing Risk Analysis and Audit Trail for MLOps compliance.</p>
+            </div>
+            <div class="warning-box">
+                <h3 style="margin-top: 0; color: var(--warning);">Systems That Failed</h3>
+                <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                    <li><strong>TPOT</strong>: TPOT 1.0+ requires >=120s budget and >=200 samples (got 60s, 3200 samples)</li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Benchmark Configuration -->
+        <div class="card">
+            <h2>Benchmark Configuration</h2>
+            <div class="metric-grid">
+                <div class="metric-item">
+                    <div class="metric-label">Time Budget</div>
+                    <div class="metric-value">60s</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Datasets Tested</div>
+                    <div class="metric-value">1</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Systems Tested</div>
+                    <div class="metric-value">5</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Systems Succeeded</div>
+                    <div class="metric-value">4</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Systems Failed</div>
+                    <div class="metric-value">1</div>
+                </div>
+            </div>
+            <p style="margin-top: 1rem; color: var(--text-muted);">
+                Datasets: ads4000patientpoint_devices_ads_dataset
+            </p>
+            <p style="color: var(--text-muted);">
+                Systems: ACDSO, TPOT, FLAML, AutoGluon, H2O
+            </p>
+        </div>
+        
+        <!-- Methodology -->
+        <div class="card">
+            <h2>Methodology</h2>
+            <div class="two-col">
+                <div>
+                    <h3>Metrics Explained</h3>
+                    <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                        <li><strong>Score</strong>: R² (coefficient of determination)</li>
+                        <li><strong>F1/RMSE</strong>: Root Mean Square Error</li>
+                        <li><strong>Time</strong>: Total training time in seconds</li>
+                        <li><strong>Latency</strong>: Inference time per row (ms)</li>
+                        <li><strong>Memory</strong>: Peak memory usage during training</li>
+                        <li><strong>CV Std</strong>: Cross-validation score variance</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Fairness Principles</h3>
+                    <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                        <li>Same train/test split for all systems</li>
+                        <li>Same time budget constraint</li>
+                        <li>Same random seed for reproducibility</li>
+                        <li>Same evaluation metrics</li>
+                        <li>Same hardware environment</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Generated by ACDSO Benchmark Suite</p>
+            <p>2025-12-28T06:54:17.624029</p>
+            <p style="font-size: 0.8rem; margin-top: 0.5rem;">
+                For questions or issues, please visit the ACDSO documentation.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

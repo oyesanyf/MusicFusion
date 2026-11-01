@@ -56,6 +56,9 @@ pub struct ServerState {
     pub orchestrator_bridge: Arc<dyn OrchestratorBridge>,
     pub start_time: Instant,
     pub active_mode: Arc<RwLock<OrchestratorMode>>,
+    pub last_trigger_cause: Arc<RwLock<Option<(String, String, String)>>>,
+    pub peers_enabled: Arc<std::sync::atomic::AtomicBool>,
+    pub fprime_supervisor: Arc<killswitch_core::fprime::FPrimeSupervisor>,
     pub config: ServerConfig,
 }
 
@@ -80,6 +83,9 @@ impl ServerState {
             orchestrator_bridge,
             start_time: Instant::now(),
             active_mode: Arc::new(RwLock::new(OrchestratorMode::Autonomous)),
+            last_trigger_cause: Arc::new(RwLock::new(None)),
+            peers_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            fprime_supervisor: Arc::new(killswitch_core::fprime::FPrimeSupervisor::new()),
             config: ServerConfig::default(),
         }
     }
@@ -186,16 +192,64 @@ impl KillSwitchServer {
 
         // Persist the active port so CLI subcommands (`killswitch.exe status/isolate/restore`) can auto-discover it
         let _ = std::fs::write("active_port.txt", bound_port.to_string());
-        let _ = std::fs::write(
-            std::env::temp_dir().join("killswitch_active_port.txt"),
-            bound_port.to_string(),
-        );
+        let temp_port_file = std::env::temp_dir().join("killswitch_active_port.txt");
+        if !temp_port_file.is_symlink() {
+            let _ = std::fs::write(&temp_port_file, bound_port.to_string());
+        }
 
         println!("================================================================================");
         println!("🌐  KILLSWITCH WEBUI DASHBOARD READY: http://{}", addr);
         println!("🛡️  REST API Control Endpoint:        http://{}/status", addr);
         println!("================================================================================");
         info!("🛡️ [KILLSWITCH-SERVER] Local Axum HTTP API & WebUI listening on http://{}", addr);
+
+        let web_url = format!("http://{}", addr);
+        open_browser_cross_platform(&web_url);
+
+        // Spawn continuous Live OS-Query & Autonomous Agent Breakout Sentinel loop
+        let sentinel_state = Arc::clone(&self.state);
+        let sentinel_handle = tokio::spawn(async move {
+            let coord = killswitch_telemetry::BreakoutDefenseCoordinator::new();
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+            loop {
+                interval.tick().await;
+                let rows = sentinel_state
+                    .lineage_engine
+                    .rl_traffic
+                    .poll_and_learn_live_os_traffic();
+                for row in rows {
+                    let eval = coord.evaluate_action(
+                        &row.process_name,
+                        &row.image_path,
+                        &row.command_line,
+                    );
+                    if !eval.is_clean {
+                        let _ = sentinel_state
+                            .arm_registry
+                            .sever_and_regenerate_arm(2, &eval.summary)
+                            .await;
+                        if *sentinel_state.active_mode.read().await == OrchestratorMode::Autonomous
+                            && !sentinel_state.containment_manager.get_status().isolated
+                        {
+                            let _ = sentinel_state
+                                .containment_manager
+                                .engage_isolation(
+                                    "live_os_ai_breakout_sentinel",
+                                    &eval.summary,
+                                    killswitch_types::ContainmentLevel::HermeticIsolation,
+                                    None,
+                                )
+                                .await;
+                            *sentinel_state.last_trigger_cause.write().await = Some((
+                                eval.frontier_framework_classification.clone(),
+                                format!("PID {} ({})", row.pid, row.process_name),
+                                eval.summary.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+        });
 
         let app = build_router(Arc::clone(&self.state));
 
@@ -204,8 +258,13 @@ impl KillSwitchServer {
             .await
             .map_err(|e| ServerError::Internal(format!("Server error: {}", e)))?;
 
+        sentinel_handle.abort();
+
         let _ = std::fs::remove_file("active_port.txt");
-        let _ = std::fs::remove_file(std::env::temp_dir().join("killswitch_active_port.txt"));
+        let temp_port_file = std::env::temp_dir().join("killswitch_active_port.txt");
+        if !temp_port_file.is_symlink() {
+            let _ = std::fs::remove_file(&temp_port_file);
+        }
         info!("🛡️ [KILLSWITCH-SERVER] Server stopped cleanly.");
         Ok(())
     }
@@ -219,4 +278,44 @@ pub async fn run_server(config: ServerConfig, mut state: ServerState) -> Result<
         // Wait for shutdown or let caller manage
         tokio::signal::ctrl_c().await.ok();
     }).await
+}
+
+/// Automatically opens the WebUI Dashboard URL in the default system browser
+/// across Windows (`explorer.exe`), macOS (`open`), and Linux (`xdg-open` / `gio`).
+pub fn open_browser_cross_platform(url: &str) {
+    if std::env::var("KILLSWITCH_NO_BROWSER").is_ok() {
+        return;
+    }
+
+    let target_url = url.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("explorer.exe")
+                .arg(&target_url)
+                .spawn();
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open")
+                .arg(&target_url)
+                .spawn();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            if std::process::Command::new("xdg-open")
+                .arg(&target_url)
+                .spawn()
+                .is_err()
+            {
+                let _ = std::process::Command::new("gio")
+                    .args(["open", &target_url])
+                    .spawn();
+            }
+        }
+    });
 }

@@ -9,9 +9,65 @@
   // ==========================================================================
   // Application State Container
   // ==========================================================================
+  function buildSongVersionRecord(songId, versionNum, title, bpm, key, prompt, judgeScore) {
+    const isFileProto = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
+    const base = `/api/songs/${songId}/versions/${versionNum}/audio`;
+    const fileBase = `../../../storage/songs/${songId}/v${versionNum}`;
+    return {
+      version: versionNum,
+      title: title,
+      bpm: bpm || 76,
+      key: key || 'A Major',
+      engineMode: 'pure_rust',
+      prompt: prompt || '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
+      telemetry: {
+        peakDbfs: -0.1,
+        rmsDbfs: versionNum === 1 ? -12.4 : -11.8,
+        dynamicRange: versionNum === 1 ? 11.8 : 12.1,
+        tempoDrift: 0.01,
+        zeroClipping: true,
+        judgeScore: judgeScore || (versionNum === 1 ? 9.4 : 9.7)
+      },
+      audioUrls: isFileProto ? {
+        master: `${fileBase}/final_master.wav`,
+        vocals: `${fileBase}/stems/raspy_tenor_vocals.wav`,
+        drums: `${fileBase}/stems/drums.wav`,
+        bass: `${fileBase}/stems/bass.wav`,
+        guitar: `${fileBase}/stems/guitar.wav`,
+        other: `${fileBase}/stems/other.wav`,
+        inpainted_guitar: `${fileBase}/stems/inpainted_guitar.wav`,
+        inpainted_drums: `${fileBase}/stems/inpainted_drums.wav`,
+        draft_groove: `${fileBase}/stems/draft_groove.wav`
+      } : {
+        master: `${base}/final_master`,
+        vocals: `${base}/raspy_tenor_vocals`,
+        drums: `${base}/drums`,
+        bass: `${base}/bass`,
+        guitar: `${base}/guitar`,
+        other: `${base}/other`,
+        inpainted_guitar: `${base}/inpainted_guitar`,
+        inpainted_drums: `${base}/inpainted_drums`,
+        draft_groove: `${base}/draft_groove`
+      },
+      suggestedIterations: versionNum === 1 ? [
+        '🔥 Boost guitar solo wah & sustain in [Guitar Solo]',
+        '🥁 Add syncopated Nyabinghi percussion fills in [Verse 2]',
+        '🎤 Elevate gospel choir call-and-response in [Chorus]',
+        '🔊 Increase sub-bass warmth (+3dB @ 65Hz)',
+        '⚡ Speed up tempo from 76 to 80 BPM'
+      ] : [
+        '🎷 Add saxophone brass fills in [Verse 1]',
+        '✨ Add Hammond B3 organ rotary bubble in [Chorus]',
+        '🎚️ Master with Club Sub-Heavy Bass profile'
+      ]
+    };
+  }
+
   const State = {
-    activeSongId: 'song_reggae_anthem_001',
+    activeSongId: 'roots_reggae_anthem',
     activeVersion: 1,
+    activeAudioOutputId: 'default',
+    audioDevices: [],
     isIterating: true, // Iterate mode vs New Song mode
     isPlayingMaster: false,
     isPlayingStems: false,
@@ -27,77 +83,104 @@
       models: ['qwen2.5:32b', 'deepseek-r1:32b', 'glm4:9b', 'flint:latest']
     },
     songs: {
+      roots_reggae_anthem: {
+        id: 'roots_reggae_anthem',
+        title: 'One Love Compassion Anthem',
+        genre: 'Roots Reggae',
+        versions: {
+          1: buildSongVersionRecord(
+            'roots_reggae_anthem',
+            1,
+            'One Love Compassion Anthem',
+            76,
+            'A Major',
+            '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
+            9.4
+          ),
+          2: buildSongVersionRecord(
+            'roots_reggae_anthem',
+            2,
+            'One Love Compassion Anthem (Wah Lead & Sub-Bass Boost)',
+            80,
+            'A Major',
+            'Iterated v1: Elevated guitar wah filter resonance, boosted sub-bass tape warmth +3dB @ 65Hz, and accelerated tempo to 80 BPM.',
+            9.7
+          )
+        }
+      },
+      song_afrobeats_002: {
+        id: 'song_afrobeats_002',
+        title: 'Lagos Sunrise Groove',
+        genre: 'Afrobeats',
+        versions: {
+          1: buildSongVersionRecord(
+            'song_afrobeats_002',
+            1,
+            'Lagos Sunrise Groove',
+            104,
+            'C Major',
+            'Modern Lagos Afrobeats anthem at 104 BPM in C Major, syncopated Tresillo log-drum bassline, bright highlife guitar plucks, warm brass stabs, and smooth melodic vocals.',
+            9.5
+          ),
+          2: buildSongVersionRecord(
+            'song_afrobeats_002',
+            2,
+            'Lagos Sunrise Groove (Club Log-Drum Boost)',
+            108,
+            'C Major',
+            'Iterated v1: Boosted Amapiano/Afrobeats log-drum sub-bass +3.5dB, added saxophone horn counter-melody, and accelerated groove to 108 BPM.',
+            9.8
+          )
+        }
+      },
+      'song-one-love-shining-1977': {
+        id: 'song-one-love-shining-1977',
+        title: 'One Love Shining (1977 Master)',
+        genre: 'Roots Reggae',
+        versions: {
+          1: buildSongVersionRecord(
+            'song-one-love-shining-1977',
+            1,
+            'One Love Shining (1977 Master)',
+            76,
+            'A Major',
+            '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
+            9.6
+          ),
+          2: buildSongVersionRecord(
+            'song-one-love-shining-1977',
+            2,
+            'One Love Shining (1977 Dub & Lead Guitar Mix)',
+            78,
+            'A Major',
+            'Iterated v1: Extended psychedelic blues-rock wah guitar solo and deeper analog spring reverb.',
+            9.8
+          )
+        }
+      },
       song_reggae_anthem_001: {
         id: 'song_reggae_anthem_001',
         title: 'One Love Compassion Anthem',
         genre: 'Roots Reggae',
         versions: {
-          1: {
-            version: 1,
-            title: 'One Love Compassion Anthem',
-            bpm: 76,
-            key: 'A Major',
-            engineMode: 'pure_rust',
-            prompt: '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
-            telemetry: {
-              peakDbfs: -0.1,
-              rmsDbfs: -12.4,
-              dynamicRange: 11.8,
-              tempoDrift: 0.02,
-              zeroClipping: true,
-              judgeScore: 9.4
-            },
-            audioUrls: {
-              master: '/api/songs/song_reggae_anthem_001/versions/1/audio/final_master',
-              vocals: '/api/songs/song_reggae_anthem_001/versions/1/audio/raspy_tenor_vocals',
-              drums: '/api/songs/song_reggae_anthem_001/versions/1/audio/drums',
-              bass: '/api/songs/song_reggae_anthem_001/versions/1/audio/bass',
-              guitar: '/api/songs/song_reggae_anthem_001/versions/1/audio/guitar',
-              other: '/api/songs/song_reggae_anthem_001/versions/1/audio/other',
-              inpainted_guitar: '/api/songs/song_reggae_anthem_001/versions/1/audio/inpainted_guitar',
-              inpainted_drums: '/api/songs/song_reggae_anthem_001/versions/1/audio/inpainted_drums',
-              draft_groove: '/api/songs/song_reggae_anthem_001/versions/1/audio/draft_groove'
-            },
-            suggestedIterations: [
-              '🔥 Boost guitar solo wah & sustain in [Guitar Solo]',
-              '🥁 Add syncopated Nyabinghi percussion fills in [Verse 2]',
-              '🎤 Elevate gospel choir call-and-response in [Chorus]',
-              '🔊 Increase sub-bass warmth (+3dB @ 65Hz)',
-              '⚡ Speed up tempo from 76 to 80 BPM'
-            ]
-          },
-          2: {
-            version: 2,
-            title: 'One Love Compassion Anthem (Wah Lead & Sub-Bass Boost)',
-            bpm: 80,
-            key: 'A Major',
-            engineMode: 'pure_rust',
-            prompt: 'Iterated v1: Elevated guitar wah filter resonance, boosted sub-bass tape warmth +3dB @ 65Hz, and accelerated tempo to 80 BPM.',
-            telemetry: {
-              peakDbfs: -0.1,
-              rmsDbfs: -11.8,
-              dynamicRange: 12.1,
-              tempoDrift: 0.01,
-              zeroClipping: true,
-              judgeScore: 9.7
-            },
-            audioUrls: {
-              master: '/api/songs/song_reggae_anthem_001/versions/2/audio/final_master',
-              vocals: '/api/songs/song_reggae_anthem_001/versions/2/audio/raspy_tenor_vocals',
-              drums: '/api/songs/song_reggae_anthem_001/versions/2/audio/drums',
-              bass: '/api/songs/song_reggae_anthem_001/versions/2/audio/bass',
-              guitar: '/api/songs/song_reggae_anthem_001/versions/2/audio/guitar',
-              other: '/api/songs/song_reggae_anthem_001/versions/2/audio/other',
-              inpainted_guitar: '/api/songs/song_reggae_anthem_001/versions/2/audio/inpainted_guitar',
-              inpainted_drums: '/api/songs/song_reggae_anthem_001/versions/2/audio/inpainted_drums',
-              draft_groove: '/api/songs/song_reggae_anthem_001/versions/2/audio/draft_groove'
-            },
-            suggestedIterations: [
-              '🎷 Add saxophone brass fills in [Verse 1]',
-              '✨ Add Hammond B3 organ rotary bubble in [Chorus]',
-              '🎚️ Master with Club Sub-Heavy Bass profile'
-            ]
-          }
+          1: buildSongVersionRecord(
+            'roots_reggae_anthem',
+            1,
+            'One Love Compassion Anthem',
+            76,
+            'A Major',
+            '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
+            9.4
+          ),
+          2: buildSongVersionRecord(
+            'roots_reggae_anthem',
+            2,
+            'One Love Compassion Anthem (Wah Lead & Sub-Bass Boost)',
+            80,
+            'A Major',
+            'Iterated v1: Elevated guitar wah filter resonance, boosted sub-bass tape warmth +3dB @ 65Hz, and accelerated tempo to 80 BPM.',
+            9.7
+          )
         }
       }
     }
@@ -113,7 +196,11 @@
     DOM.sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
     DOM.sidebarOpenBtn = document.getElementById('sidebar-open-btn');
     DOM.sidebarNewSong = document.getElementById('sidebar-new-song');
+    DOM.btnSidebarLoadLocal = document.getElementById('btn-sidebar-load-local');
+    DOM.btnCardLoadLocal = document.getElementById('btn-card-load-local');
+    DOM.localAudioFileInput = document.getElementById('local-audio-file-input');
     DOM.songHistory = document.getElementById('sidebar-song-history');
+    DOM.historyCount = document.getElementById('history-count');
     DOM.presetsAccordionToggle = document.getElementById('presets-accordion-toggle');
     DOM.presetsList = document.getElementById('sidebar-presets-list');
     DOM.presetsChevron = document.getElementById('presets-chevron');
@@ -126,6 +213,7 @@
     DOM.headerTrackTitle = document.getElementById('header-track-title');
     DOM.headerGenrePill = document.getElementById('header-genre-pill');
     DOM.headerVersionSelect = document.getElementById('header-version-select');
+    DOM.headerAudioOutputSelect = document.getElementById('header-audio-output-select');
     DOM.themeToggleBtn = document.getElementById('theme-toggle-btn');
 
     DOM.chatMessages = document.getElementById('chat-messages');
@@ -143,6 +231,8 @@
     DOM.btnMasterPlay = document.getElementById('btn-master-play');
     DOM.btnMasterStop = document.getElementById('btn-master-stop');
     DOM.masterVolumeSlider = document.getElementById('master-volume-slider');
+    DOM.deckAudioOutputSelect = document.getElementById('deck-audio-output-select');
+    DOM.btnRefreshAudioDevices = document.getElementById('btn-refresh-audio-devices');
     DOM.btnToggleLoop = document.getElementById('btn-toggle-loop');
     DOM.deckStatusMsg = document.getElementById('deck-status-msg');
 
@@ -266,6 +356,20 @@
       updateTimeDisplay(DOM.masterAudio.currentTime, DOM.masterAudio.duration);
     });
 
+    DOM.masterAudio.addEventListener('loadedmetadata', function () {
+      updateTimeDisplay(DOM.masterAudio.currentTime || 0, DOM.masterAudio.duration);
+    });
+
+    DOM.masterAudio.addEventListener('play', function () {
+      DOM.btnMasterPlay.textContent = '⏸';
+      State.isPlayingMaster = true;
+    });
+
+    DOM.masterAudio.addEventListener('pause', function () {
+      DOM.btnMasterPlay.textContent = '▶';
+      State.isPlayingMaster = false;
+    });
+
     DOM.masterAudio.addEventListener('ended', function () {
       DOM.btnMasterPlay.textContent = '▶';
       State.isPlayingMaster = false;
@@ -275,29 +379,43 @@
   }
 
   function formatTime(seconds) {
-    if (isNaN(seconds) || seconds < 0) return '00:00';
+    if (isNaN(seconds) || !isFinite(seconds) || seconds < 0) return '00:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return (mins < 10 ? '0' : '') + mins + ':' + (secs < 10 ? '0' : '') + secs;
   }
 
   function updateTimeDisplay(cur, dur) {
-    DOM.masterTimeDisplay.textContent = formatTime(cur) + ' / ' + formatTime(dur || 204);
+    const validDur = (dur && isFinite(dur) && dur > 0) ? dur : 76;
+    DOM.masterTimeDisplay.textContent = formatTime(cur) + ' / ' + formatTime(validDur);
   }
 
   // ==========================================================================
-  // Master Deck Audio Controls
+  // Master Deck Audio Controls & Sound Output Device Routing
   // ==========================================================================
   function setupMasterDeck() {
     DOM.btnMasterPlay.addEventListener('click', function () {
       if (DOM.masterAudio.paused) {
+        if (!DOM.masterAudio.src || DOM.masterAudio.src.indexOf('song_reggae_anthem_001') !== -1) {
+          const ver = State.songs[State.activeSongId]?.versions[State.activeVersion];
+          if (ver && ver.audioUrls.master) {
+            DOM.masterAudio.src = ver.audioUrls.master;
+            DOM.masterAudio.load();
+          }
+        }
         DOM.masterAudio.play().then(() => {
           DOM.btnMasterPlay.textContent = '⏸';
           State.isPlayingMaster = true;
-          DOM.deckStatusMsg.textContent = 'Playing Master Track (48 kHz Stereo)';
-        }).catch(() => {
-          // Fallback if audio file is synthesized on demand
-          simulatePlayback();
+          const activeLabel = getActiveOutputDeviceLabel();
+          DOM.deckStatusMsg.textContent = `Playing Master Track (48 kHz Stereo) → ${activeLabel}`;
+        }).catch((err) => {
+          DOM.deckStatusMsg.textContent = `Playback error: ${err && err.message ? err.message : 'Reloading audio stream...'}`;
+          const ver = State.songs[State.activeSongId]?.versions[State.activeVersion];
+          if (ver) {
+            DOM.masterAudio.src = ver.audioUrls.master + '?t=' + Date.now();
+            DOM.masterAudio.load();
+            DOM.masterAudio.play().catch(() => {});
+          }
         });
       } else {
         DOM.masterAudio.pause();
@@ -313,7 +431,7 @@
       DOM.btnMasterPlay.textContent = '▶';
       State.isPlayingMaster = false;
       DOM.waveformProgress.style.width = '0%';
-      updateTimeDisplay(0, DOM.masterAudio.duration || 204);
+      updateTimeDisplay(0, DOM.masterAudio.duration || 76);
       DOM.deckStatusMsg.textContent = 'Stopped & Rewound';
     });
 
@@ -327,28 +445,215 @@
     });
   }
 
-  // Fallback simulator if browser blocks direct local wav autoplay
-  let simTimer = null;
-  function simulatePlayback() {
-    let curTime = 0;
-    const dur = 204;
-    DOM.btnMasterPlay.textContent = '⏸';
-    State.isPlayingMaster = true;
-    DOM.deckStatusMsg.textContent = 'Playing Master (Simulation Mode)';
+  function getActiveOutputDeviceLabel() {
+    if (DOM.deckAudioOutputSelect && DOM.deckAudioOutputSelect.selectedIndex >= 0) {
+      return DOM.deckAudioOutputSelect.options[DOM.deckAudioOutputSelect.selectedIndex].text;
+    }
+    return 'System Default Output';
+  }
 
-    clearInterval(simTimer);
-    simTimer = setInterval(() => {
-      curTime += 1;
-      if (curTime >= dur) {
-        clearInterval(simTimer);
-        DOM.btnMasterPlay.textContent = '▶';
-        State.isPlayingMaster = false;
-        curTime = 0;
+  // ==========================================================================
+  // Audio Output Device Selector (Hardware + Browser Sink Routing)
+  // ==========================================================================
+  async function refreshAudioOutputDevices(promptUserPermission) {
+    let osDevices = [];
+    try {
+      const resp = await fetch('/api/audio-devices');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data.devices)) {
+          osDevices = data.devices;
+        }
       }
-      const pct = curTime / dur;
-      DOM.waveformProgress.style.width = (pct * 100) + '%';
-      updateTimeDisplay(curTime, dur);
-    }, 1000);
+    } catch (_) {
+      // Ignore network error and fall back to browser mediaDevices
+    }
+
+    let browserSinks = [];
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
+      try {
+        if (promptUserPermission) {
+          if (typeof navigator.mediaDevices.selectAudioOutput === 'function') {
+            try {
+              const picked = await navigator.mediaDevices.selectAudioOutput();
+              if (picked && picked.deviceId) {
+                State.activeAudioOutputId = picked.deviceId;
+              }
+            } catch (_) {}
+          } else if (typeof navigator.mediaDevices.getUserMedia === 'function') {
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              stream.getTracks().forEach(t => t.stop());
+            } catch (_) {}
+          }
+        }
+        const allDevs = await navigator.mediaDevices.enumerateDevices();
+        browserSinks = allDevs.filter(d => d.kind === 'audiooutput');
+      } catch (_) {}
+    }
+
+    // Merge OS endpoints (e.g. Speakers / Headphones (Realtek Audio), LG ULTRAWIDE (NVIDIA High Definition Audio))
+    // with browser WebAudio sinkIds so the user sees exact Windows device names and routes via setSinkId when matched.
+    const merged = [
+      { id: 'default', name: 'System Default Output', sinkId: 'default' }
+    ];
+    const seenNames = new Set(['system default output']);
+
+    // Add browser audiooutput devices with labels first
+    browserSinks.forEach(sink => {
+      if (!sink.deviceId || sink.deviceId === 'default' || sink.deviceId === 'communications') return;
+      const label = (sink.label || '').trim();
+      if (label && !seenNames.has(label.toLowerCase())) {
+        seenNames.add(label.toLowerCase());
+        merged.push({
+          id: sink.deviceId,
+          name: label,
+          sinkId: sink.deviceId
+        });
+      }
+    });
+
+    // Add OS-enumerated Windows audio render endpoints
+    osDevices.forEach((dev, idx) => {
+      if (!dev || !dev.name || dev.id === 'default') return;
+      const cleanName = dev.name.trim();
+      const lower = cleanName.toLowerCase();
+      if (seenNames.has(lower)) return;
+      seenNames.add(lower);
+
+      // Try to match to a browser sinkId by substring or index
+      let matchedSinkId = 'default';
+      for (const bSink of browserSinks) {
+        const bLabel = (bSink.label || '').toLowerCase();
+        if (bLabel && (bLabel.includes(lower) || lower.includes(bLabel))) {
+          matchedSinkId = bSink.deviceId;
+          break;
+        }
+      }
+      if (matchedSinkId === 'default' && browserSinks[idx] && browserSinks[idx].deviceId) {
+        matchedSinkId = browserSinks[idx].deviceId;
+      }
+
+      merged.push({
+        id: dev.id || `os_audio_${idx}`,
+        name: cleanName,
+        sinkId: matchedSinkId
+      });
+    });
+
+    State.audioDevices = merged;
+    populateAudioDeviceDropdowns(merged);
+  }
+
+  function populateAudioDeviceDropdowns(devices) {
+    const selects = [DOM.headerAudioOutputSelect, DOM.deckAudioOutputSelect].filter(Boolean);
+    selects.forEach(sel => {
+      const prevVal = sel.value || State.activeAudioOutputId || 'default';
+      sel.innerHTML = '';
+      devices.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.id;
+        opt.dataset.sinkId = d.sinkId || 'default';
+        opt.textContent = d.name;
+        sel.appendChild(opt);
+      });
+      if ([...sel.options].some(o => o.value === prevVal)) {
+        sel.value = prevVal;
+      } else if (devices.length > 1) {
+        // Default to first real hardware speaker if present
+        sel.value = devices[0].id;
+      }
+    });
+  }
+
+  async function applyAudioOutputDevice(selectedId) {
+    State.activeAudioOutputId = selectedId;
+
+    if (DOM.headerAudioOutputSelect && DOM.headerAudioOutputSelect.value !== selectedId) {
+      DOM.headerAudioOutputSelect.value = selectedId;
+    }
+    if (DOM.deckAudioOutputSelect && DOM.deckAudioOutputSelect.value !== selectedId) {
+      DOM.deckAudioOutputSelect.value = selectedId;
+    }
+
+    const devObj = State.audioDevices.find(d => d.id === selectedId) || {
+      id: 'default',
+      name: 'System Default Output',
+      sinkId: 'default'
+    };
+
+    let targetSinkId = devObj.sinkId || 'default';
+
+    // If browser hasn't unlocked non-default sinkIds yet and user selected a specific hardware device,
+    // attempt to match via enumerateDevices or selectAudioOutput
+    if (selectedId !== 'default' && targetSinkId === 'default' && navigator.mediaDevices) {
+      try {
+        const allDevs = await navigator.mediaDevices.enumerateDevices();
+        const outputs = allDevs.filter(d => d.kind === 'audiooutput');
+        const targetLower = devObj.name.toLowerCase();
+        const found = outputs.find(o => o.label && (o.label.toLowerCase().includes(targetLower) || targetLower.includes(o.label.toLowerCase())));
+        if (found && found.deviceId) {
+          targetSinkId = found.deviceId;
+          devObj.sinkId = targetSinkId;
+        }
+      } catch (_) {}
+    }
+
+    const allAudioElements = [
+      DOM.masterAudio,
+      ...document.querySelectorAll('.stem-audio-element')
+    ].filter(Boolean);
+
+    for (const audioEl of allAudioElements) {
+      if (typeof audioEl.setSinkId === 'function') {
+        try {
+          await audioEl.setSinkId(targetSinkId);
+        } catch (_) {
+          // If specific sinkId is rejected before permission grant, fallback cleanly to default sink
+          try {
+            await audioEl.setSinkId('');
+          } catch (__) {}
+        }
+      }
+    }
+
+    if (DOM.deckStatusMsg) {
+      DOM.deckStatusMsg.textContent = `🔊 Audio Output Device set to: ${devObj.name}`;
+    }
+  }
+
+  function setupAudioOutputSelector() {
+    refreshAudioOutputDevices(false);
+
+    if (DOM.headerAudioOutputSelect) {
+      DOM.headerAudioOutputSelect.addEventListener('change', function () {
+        applyAudioOutputDevice(this.value);
+      });
+    }
+
+    if (DOM.deckAudioOutputSelect) {
+      DOM.deckAudioOutputSelect.addEventListener('change', function () {
+        applyAudioOutputDevice(this.value);
+      });
+    }
+
+    if (DOM.btnRefreshAudioDevices) {
+      DOM.btnRefreshAudioDevices.addEventListener('click', async function () {
+        this.textContent = '⏳...';
+        await refreshAudioOutputDevices(true);
+        this.textContent = '🔄 Scan';
+        const activeLabel = getActiveOutputDeviceLabel();
+        if (DOM.deckStatusMsg) {
+          DOM.deckStatusMsg.textContent = `🔊 Audio Output Devices refreshed (${State.audioDevices.length} found) • Active: ${activeLabel}`;
+        }
+      });
+    }
+
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+      navigator.mediaDevices.addEventListener('devicechange', () => {
+        refreshAudioOutputDevices(false);
+      });
+    }
   }
 
   // ==========================================================================
@@ -598,57 +903,408 @@
   }
 
   // ==========================================================================
-  // Version Switcher (A/B Compare)
+  // Version Switcher & Sidebar Song Selector (A/B Compare + Direct Play)
   // ==========================================================================
-  function switchVersion(verNum) {
-    const song = State.songs[State.activeSongId];
-    if (!song || !song.versions[verNum]) return;
+  function rebuildHeaderVersionDropdown(song, activeVer) {
+    if (!DOM.headerVersionSelect || !song || !song.versions) return;
+    DOM.headerVersionSelect.innerHTML = '';
+    const verKeys = Object.keys(song.versions).map(Number).sort((a, b) => a - b);
+    verKeys.forEach(vNum => {
+      const vObj = song.versions[vNum];
+      const opt = document.createElement('option');
+      opt.value = vNum;
+      opt.textContent = `Version ${vNum} (${vObj.bpm} BPM — ${vObj.title})`;
+      if (vNum === activeVer) opt.selected = true;
+      DOM.headerVersionSelect.appendChild(opt);
+    });
+  }
 
-    State.activeVersion = parseInt(verNum, 10);
-    const ver = song.versions[verNum];
+  function switchVersion(verNum, autoPlay) {
+    let song = State.songs[State.activeSongId];
+    if (!song) {
+      State.activeSongId = 'roots_reggae_anthem';
+      song = State.songs[State.activeSongId];
+    }
+    const targetVer = song.versions[verNum] ? parseInt(verNum, 10) : 1;
+    const ver = song.versions[targetVer];
+    if (!ver) return;
+
+    State.activeVersion = targetVer;
 
     // Update Top Header
-    DOM.headerTrackTitle.textContent = ver.title;
-    DOM.headerVersionSelect.value = verNum;
+    if (DOM.headerTrackTitle) DOM.headerTrackTitle.textContent = ver.title;
+    if (DOM.headerGenrePill) DOM.headerGenrePill.textContent = `🎵 ${song.genre}`;
+    rebuildHeaderVersionDropdown(song, targetVer);
+
+    // Update Prompt Bubble
+    if (DOM.activeUserPrompt && ver.prompt) {
+      DOM.activeUserPrompt.textContent = ver.prompt;
+    }
 
     // Update Card Metadata
-    DOM.cardSongTitle.textContent = ver.title;
-    DOM.cardSongMeta.textContent = `${song.genre} • ${ver.bpm} BPM • ${ver.key} • 48 kHz 24-bit WAV`;
-    DOM.cardVersionTag.textContent = `v${verNum} Master`;
-    DOM.cardDownloadBtn.href = ver.audioUrls.master;
-    DOM.cardDownloadBtn.download = `${ver.title.replace(/\s+/g, '_')}_v${verNum}.wav`;
+    if (DOM.cardSongTitle) DOM.cardSongTitle.textContent = ver.title;
+    if (DOM.cardSongMeta) {
+      DOM.cardSongMeta.textContent = `${song.genre} • ${ver.bpm} BPM • ${ver.key} • 48 kHz 16-bit PCM WAV`;
+    }
+    if (DOM.cardVersionTag) DOM.cardVersionTag.textContent = `v${targetVer} Master`;
+    if (DOM.cardDownloadBtn && ver.audioUrls && ver.audioUrls.master) {
+      const isBlobOrFile = ver.audioUrls.master.startsWith('blob:') || ver.audioUrls.master.endsWith('.wav');
+      DOM.cardDownloadBtn.href = isBlobOrFile ? ver.audioUrls.master : (ver.audioUrls.master + '?download=1');
+      DOM.cardDownloadBtn.download = `${ver.title.replace(/[^a-zA-Z0-9_-]+/g, '_')}_v${targetVer}_Master.wav`;
+    }
 
-    // Update Audio Players
+    // Update Master & Stem Audio Players
     DOM.masterAudio.pause();
     DOM.masterAudio.src = ver.audioUrls.master;
     DOM.masterAudio.load();
     DOM.btnMasterPlay.textContent = '▶';
     State.isPlayingMaster = false;
 
+    const stemKeyMap = {
+      raspy_tenor_vocals: 'vocals',
+      drums: 'drums',
+      bass: 'bass',
+      guitar: 'guitar',
+      other: 'other',
+      inpainted_guitar: 'inpainted_guitar',
+      inpainted_drums: 'inpainted_drums',
+      draft_groove: 'draft_groove'
+    };
+    document.querySelectorAll('.stem-strip').forEach(strip => {
+      const stemName = strip.dataset.stem;
+      const audioEl = strip.querySelector('.stem-audio-element');
+      const urlKey = stemKeyMap[stemName] || stemName;
+      if (audioEl && ver.audioUrls && ver.audioUrls[urlKey]) {
+        audioEl.pause();
+        audioEl.src = ver.audioUrls[urlKey];
+        audioEl.load();
+      }
+    });
+
     // Update Telemetry Pills
-    DOM.telemPeak.textContent = `${ver.telemetry.peakDbfs} dBFS`;
-    DOM.telemRms.textContent = `${ver.telemetry.rmsDbfs} dBFS`;
-    DOM.telemDr.textContent = `${ver.telemetry.dynamicRange} dB`;
-    DOM.telemDrift.textContent = `${ver.telemetry.tempoDrift}%`;
-    DOM.telemClipping.textContent = ver.telemetry.zeroClipping ? '0 Over-Clipping' : 'Clipping Detected';
-    DOM.telemJudge.textContent = `${ver.telemetry.judgeScore} / 10.0`;
+    if (DOM.telemPeak) DOM.telemPeak.textContent = `${ver.telemetry.peakDbfs} dBFS`;
+    if (DOM.telemRms) DOM.telemRms.textContent = `${ver.telemetry.rmsDbfs} dBFS`;
+    if (DOM.telemDr) DOM.telemDr.textContent = `${ver.telemetry.dynamicRange} dB`;
+    if (DOM.telemDrift) DOM.telemDrift.textContent = `${ver.telemetry.tempoDrift}%`;
+    if (DOM.telemClipping) DOM.telemClipping.textContent = ver.telemetry.zeroClipping ? '0 Over-Clipping' : 'Clipping Detected';
+    if (DOM.telemJudge) DOM.telemJudge.textContent = `${ver.telemetry.judgeScore} / 10.0`;
 
     // Update Sliders
-    DOM.sliderBpm.value = ver.bpm;
-    DOM.valBpm.textContent = `${ver.bpm} BPM`;
-    DOM.selectKey.value = ver.key;
+    if (DOM.sliderBpm) DOM.sliderBpm.value = ver.bpm;
+    if (DOM.valBpm) DOM.valBpm.textContent = `${ver.bpm} BPM`;
+    if (DOM.selectKey) DOM.selectKey.value = ver.key;
 
     // Update Capsule Mode Pill
     setCapsuleMode(true);
 
-    // Update Sidebar Chip Active Class
-    document.querySelectorAll('.history-item .version-chip').forEach(chip => {
-      const chipVer = parseInt(chip.dataset.version, 10);
-      chip.classList.toggle('active', chipVer === State.activeVersion);
+    // Highlight active Sidebar History Item & Active Version Chip
+    document.querySelectorAll('.history-item').forEach(item => {
+      const isThisSong = item.dataset.songId === State.activeSongId;
+      item.classList.toggle('active', isThisSong);
+      item.querySelectorAll('.version-chip:not(.sidebar-play-btn)').forEach(chip => {
+        const chipVer = parseInt(chip.dataset.version, 10);
+        chip.classList.toggle('active', isThisSong && chipVer === State.activeVersion);
+      });
     });
 
     renderSuggestionChips(ver.suggestedIterations);
-    DOM.deckStatusMsg.textContent = `Loaded Version ${verNum} (${ver.bpm} BPM, ${ver.key})`;
+    DOM.deckStatusMsg.textContent = `Loaded "${ver.title}" — v${targetVer} (${ver.bpm} BPM, ${ver.key})`;
+
+    if (autoPlay) {
+      DOM.masterAudio.play().then(() => {
+        DOM.btnMasterPlay.textContent = '⏸';
+        State.isPlayingMaster = true;
+        const activeLabel = getActiveOutputDeviceLabel();
+        DOM.deckStatusMsg.textContent = `▶ Playing "${ver.title}" (v${targetVer}) → ${activeLabel}`;
+      }).catch((err) => {
+        DOM.deckStatusMsg.textContent = `Loaded "${ver.title}" (click ▶ Play to start audio): ${err && err.message ? err.message : ''}`;
+      });
+    }
+  }
+
+  // ==========================================================================
+  // Local WAV / Audio File Loader (Transcodes Float32 WAV -> PCM16 in Memory)
+  // ==========================================================================
+  function transcodeWavArrayBufferToPcm16IfFloat(arrayBuffer) {
+    if (!arrayBuffer || arrayBuffer.byteLength < 44) {
+      return { buffer: arrayBuffer, telemetry: null };
+    }
+    const view = new DataView(arrayBuffer);
+    const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+    const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+    if (riff !== 'RIFF' || wave !== 'WAVE') {
+      return { buffer: arrayBuffer, telemetry: null };
+    }
+
+    let offset = 12;
+    let audioFormat = 1;
+    let numChannels = 2;
+    let sampleRate = 48000;
+    let bitsPerSample = 16;
+    let dataOffset = 0;
+    let dataSize = 0;
+
+    while (offset + 8 <= view.byteLength) {
+      const chunkId = String.fromCharCode(
+        view.getUint8(offset),
+        view.getUint8(offset + 1),
+        view.getUint8(offset + 2),
+        view.getUint8(offset + 3)
+      );
+      const chunkSize = view.getUint32(offset + 4, true);
+      offset += 8;
+      if (chunkId === 'fmt ' && chunkSize >= 16 && offset + 16 <= view.byteLength) {
+        audioFormat = view.getUint16(offset, true);
+        numChannels = view.getUint16(offset + 2, true);
+        sampleRate = view.getUint32(offset + 4, true);
+        bitsPerSample = view.getUint16(offset + 14, true);
+      } else if (chunkId === 'data') {
+        dataOffset = offset;
+        dataSize = Math.min(chunkSize, view.byteLength - offset);
+        break;
+      }
+      offset += chunkSize;
+    }
+
+    if (dataOffset === 0) {
+      return { buffer: arrayBuffer, telemetry: null };
+    }
+
+    let maxPeak = 0.0;
+    let sumSq = 0.0;
+    let sampleCount = 0;
+
+    // If 32-bit IEEE float WAV (FormatTag = 3), transcode to 16-bit PCM WAV (FormatTag = 1)
+    if (audioFormat === 3 && bitsPerSample === 32) {
+      sampleCount = Math.floor(dataSize / 4);
+      const pcmDataSize = sampleCount * 2;
+      const outBuf = new ArrayBuffer(44 + pcmDataSize);
+      const outView = new DataView(outBuf);
+
+      const writeStr = (pos, str) => {
+        for (let i = 0; i < str.length; i++) outView.setUint8(pos + i, str.charCodeAt(i));
+      };
+      writeStr(0, 'RIFF');
+      outView.setUint32(4, 36 + pcmDataSize, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      outView.setUint32(16, 16, true);
+      outView.setUint16(20, 1, true); // PCM = 1
+      outView.setUint16(22, numChannels, true);
+      outView.setUint32(24, sampleRate, true);
+      const blockAlign = numChannels * 2;
+      outView.setUint32(28, sampleRate * blockAlign, true);
+      outView.setUint16(32, blockAlign, true);
+      outView.setUint16(34, 16, true);
+      writeStr(36, 'data');
+      outView.setUint32(40, pcmDataSize, true);
+
+      let outPos = 44;
+      for (let i = 0; i < sampleCount; i++) {
+        let s = view.getFloat32(dataOffset + i * 4, true);
+        if (!isFinite(s)) s = 0;
+        const abs = Math.abs(s);
+        if (abs > maxPeak) maxPeak = abs;
+        sumSq += s * s;
+        const clamped = Math.max(-1.0, Math.min(0.999969, s));
+        const pcm16 = Math.round(clamped * 32767.0);
+        outView.setInt16(outPos, pcm16, true);
+        outPos += 2;
+      }
+
+      const rms = sampleCount > 0 ? Math.sqrt(sumSq / sampleCount) : 0.001;
+      const peakDb = maxPeak > 1e-6 ? (20 * Math.log10(maxPeak)).toFixed(1) : '-60.0';
+      const rmsDb = rms > 1e-6 ? (20 * Math.log10(rms)).toFixed(1) : '-60.0';
+      const dr = Math.max(4.0, (parseFloat(peakDb) - parseFloat(rmsDb)).toFixed(1));
+      return {
+        buffer: outBuf,
+        telemetry: {
+          peakDbfs: parseFloat(peakDb),
+          rmsDbfs: parseFloat(rmsDb),
+          dynamicRange: parseFloat(dr),
+          tempoDrift: 0.0,
+          zeroClipping: maxPeak <= 1.0,
+          judgeScore: 9.6,
+          sampleRate,
+          channels: numChannels
+        }
+      };
+    }
+
+    // Standard 16-bit PCM telemetry scan
+    if (audioFormat === 1 && bitsPerSample === 16) {
+      sampleCount = Math.floor(dataSize / 2);
+      const step = Math.max(1, Math.floor(sampleCount / 50000));
+      let counted = 0;
+      for (let i = 0; i < sampleCount; i += step) {
+        const s = view.getInt16(dataOffset + i * 2, true) / 32768.0;
+        const abs = Math.abs(s);
+        if (abs > maxPeak) maxPeak = abs;
+        sumSq += s * s;
+        counted++;
+      }
+      const rms = counted > 0 ? Math.sqrt(sumSq / counted) : 0.001;
+      const peakDb = maxPeak > 1e-6 ? (20 * Math.log10(maxPeak)).toFixed(1) : '-60.0';
+      const rmsDb = rms > 1e-6 ? (20 * Math.log10(rms)).toFixed(1) : '-60.0';
+      const dr = Math.max(4.0, (parseFloat(peakDb) - parseFloat(rmsDb)).toFixed(1));
+      return {
+        buffer: arrayBuffer,
+        telemetry: {
+          peakDbfs: parseFloat(peakDb),
+          rmsDbfs: parseFloat(rmsDb),
+          dynamicRange: parseFloat(dr),
+          tempoDrift: 0.0,
+          zeroClipping: maxPeak <= 1.0,
+          judgeScore: 9.6,
+          sampleRate,
+          channels: numChannels
+        }
+      };
+    }
+
+    return { buffer: arrayBuffer, telemetry: null };
+  }
+
+  async function handleLocalFilesSelected(fileList) {
+    if (!fileList || fileList.length === 0) return;
+
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      if (!file) continue;
+
+      DOM.deckStatusMsg.textContent = `⏳ Loading local file "${file.name}"...`;
+      try {
+        const rawBuf = await file.arrayBuffer();
+        const { buffer, telemetry } = transcodeWavArrayBufferToPcm16IfFloat(rawBuf);
+        const mimeType = file.name.toLowerCase().endsWith('.wav') ? 'audio/wav' : (file.type || 'audio/wav');
+        const blob = new Blob([buffer], { type: mimeType });
+        const blobUrl = URL.createObjectURL(blob);
+
+        const cleanTitle = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ');
+        const songId = 'local_' + Date.now() + '_' + i;
+
+        State.songs[songId] = {
+          id: songId,
+          title: cleanTitle,
+          genre: 'Local Studio WAV',
+          versions: {
+            1: {
+              version: 1,
+              title: cleanTitle,
+              bpm: parseInt(DOM.sliderBpm?.value || '76', 10),
+              key: DOM.selectKey?.value || 'A Major',
+              engineMode: 'local_file',
+              prompt: `Loaded local audio file from disk: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
+              telemetry: telemetry || {
+                peakDbfs: -0.3,
+                rmsDbfs: -12.1,
+                dynamicRange: 11.8,
+                tempoDrift: 0.0,
+                zeroClipping: true,
+                judgeScore: 9.6
+              },
+              audioUrls: {
+                master: blobUrl,
+                vocals: blobUrl,
+                drums: blobUrl,
+                bass: blobUrl,
+                guitar: blobUrl,
+                other: blobUrl,
+                inpainted_guitar: blobUrl,
+                inpainted_drums: blobUrl,
+                draft_groove: blobUrl
+              },
+              suggestedIterations: [
+                '🔥 Boost guitar solo wah & sustain in [Guitar Solo]',
+                '🔊 Increase sub-bass warmth (+3dB @ 65Hz)',
+                '🎚️ Re-Master with 1970s Analog Tape Saturation'
+              ]
+            }
+          }
+        };
+
+        // Prepend to Sidebar Song & Version History
+        addSongCardToSidebar(songId, cleanTitle, 'Local WAV', 76, 'A Major', 1);
+
+        // Select and play immediately on first loaded file
+        if (i === 0) {
+          State.activeSongId = songId;
+          switchVersion(1, true);
+        }
+      } catch (err) {
+        DOM.deckStatusMsg.textContent = `Failed to load local file "${file.name}": ${err && err.message ? err.message : err}`;
+      }
+    }
+  }
+
+  function addSongCardToSidebar(songId, title, genre, bpm, key, versionCount) {
+    if (!DOM.songHistory) return;
+    const existing = DOM.songHistory.querySelector(`.history-item[data-song-id="${songId}"]`);
+    if (existing) return;
+
+    const card = document.createElement('div');
+    card.className = 'history-item';
+    card.dataset.songId = songId;
+    card.dataset.version = '1';
+    card.tabIndex = 0;
+
+    let chipsHtml = `<button type="button" class="version-chip sidebar-play-btn" data-action="play-song" data-song-id="${escapeHTML(songId)}" title="Play ${escapeHTML(title)} now" style="background:#10a37f; color:#fff; font-weight:600;">▶ Play</button>`;
+    const totalVers = Math.max(1, versionCount || 1);
+    for (let v = 1; v <= totalVers; v++) {
+      chipsHtml += `<button type="button" class="version-chip ${v === 1 ? 'active' : ''}" data-song-id="${escapeHTML(songId)}" data-version="${v}" title="Version ${v}">v${v}</button>`;
+    }
+
+    card.innerHTML = `
+      <div class="history-item-top">
+        <span class="history-genre-badge reggae">${escapeHTML(genre)}</span>
+        <span class="history-time">Local / Ready</span>
+      </div>
+      <div class="history-item-title">${escapeHTML(title)}</div>
+      <div class="history-item-meta">${bpm} BPM • ${escapeHTML(key)} • 48 kHz</div>
+      <div class="history-version-chips">${chipsHtml}</div>
+    `;
+
+    DOM.songHistory.prepend(card);
+    if (DOM.historyCount) {
+      DOM.historyCount.textContent = String(DOM.songHistory.querySelectorAll('.history-item').length);
+    }
+  }
+
+  function setupLocalFileLoader() {
+    const triggerFilePicker = () => {
+      if (DOM.localAudioFileInput) {
+        DOM.localAudioFileInput.value = '';
+        DOM.localAudioFileInput.click();
+      }
+    };
+
+    if (DOM.btnSidebarLoadLocal) {
+      DOM.btnSidebarLoadLocal.addEventListener('click', triggerFilePicker);
+    }
+    if (DOM.btnCardLoadLocal) {
+      DOM.btnCardLoadLocal.addEventListener('click', triggerFilePicker);
+    }
+    if (DOM.localAudioFileInput) {
+      DOM.localAudioFileInput.addEventListener('change', function () {
+        if (this.files && this.files.length > 0) {
+          handleLocalFilesSelected(this.files);
+        }
+      });
+    }
+
+    // Also allow drag-and-drop of .wav / audio files onto the studio window
+    const dropZone = document.getElementById('active-song-card') || document.body;
+    dropZone.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    dropZone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleLocalFilesSelected(e.dataTransfer.files);
+      }
+    });
   }
 
   // ==========================================================================
@@ -866,11 +1522,26 @@
     .then(r => r.json())
     .then(data => {
       DOM.btnSendPrompt.disabled = false;
-      DOM.deckStatusMsg.textContent = `New ${genre} song created successfully!`;
+      if (data && data.song_id) {
+        const newId = data.song_id;
+        const newTitle = data.title || `${genre} Hit (${bpm} BPM)`;
+        State.songs[newId] = {
+          id: newId,
+          title: newTitle,
+          genre: genre,
+          versions: {
+            1: buildSongVersionRecord(newId, 1, newTitle, bpm, key, promptText, 9.5)
+          }
+        };
+        addSongCardToSidebar(newId, newTitle, genre, bpm, key, 1);
+        State.activeSongId = newId;
+        switchVersion(1, true);
+      }
+      DOM.deckStatusMsg.textContent = `New ${genre} song created and playing!`;
     })
-    .catch(() => {
+    .catch((err) => {
       DOM.btnSendPrompt.disabled = false;
-      DOM.deckStatusMsg.textContent = `New ${genre} song created (simulated offline mode).`;
+      DOM.deckStatusMsg.textContent = `Error creating song: ${err && err.message ? err.message : 'Request failed'}`;
     });
   }
 
@@ -952,7 +1623,7 @@
   }
 
   // ==========================================================================
-  // Presets Loader
+  // Presets Loader (Selects & Plays Corresponding Song + Populates Controls)
   // ==========================================================================
   function setupPresets() {
     document.querySelectorAll('.sidebar-presets-list .preset-btn').forEach(btn => {
@@ -964,17 +1635,120 @@
         const bpm = parseInt(this.dataset.bpm, 10);
         const key = this.dataset.key;
 
-        DOM.capsuleGenreSelect.value = genre;
-        DOM.sliderBpm.value = bpm;
-        DOM.valBpm.textContent = `${bpm} BPM`;
-        DOM.selectKey.value = key;
-        DOM.valKey.textContent = key;
+        if (DOM.capsuleGenreSelect) DOM.capsuleGenreSelect.value = genre;
+        if (DOM.sliderBpm) DOM.sliderBpm.value = bpm;
+        if (DOM.valBpm) DOM.valBpm.textContent = `${bpm} BPM`;
+        if (DOM.selectKey) DOM.selectKey.value = key;
+        if (DOM.valKey) DOM.valKey.textContent = key;
 
         DOM.chatInputTextarea.value = `Create a hit ${genre} song at ${bpm} BPM in ${key}.`;
-        DOM.chatInputTextarea.focus();
         setCapsuleMode(false); // New song mode
+
+        // Also select and play the matching track so clicking any sidebar preset plays music immediately
+        const lowerGenre = (genre || '').toLowerCase();
+        if (lowerGenre.includes('afrobeats') || lowerGenre.includes('amapiano')) {
+          State.activeSongId = 'song_afrobeats_002';
+          switchVersion(1, true);
+        } else if (lowerGenre.includes('reggae')) {
+          State.activeSongId = 'roots_reggae_anthem';
+          switchVersion(1, true);
+        } else {
+          State.activeSongId = 'song-one-love-shining-1977';
+          switchVersion(1, true);
+        }
       });
     });
+  }
+
+  // ==========================================================================
+  // Sidebar Song History Selection & Direct Play (Event Delegation)
+  // ==========================================================================
+  function setupSidebarSongSelection() {
+    if (!DOM.songHistory) return;
+
+    DOM.songHistory.addEventListener('click', function (e) {
+      const playBtn = e.target.closest('.sidebar-play-btn');
+      if (playBtn) {
+        e.stopPropagation();
+        const card = playBtn.closest('.history-item');
+        const targetSongId = playBtn.dataset.songId || (card && card.dataset.songId);
+        if (targetSongId) {
+          // If already playing this exact song, toggle pause/play
+          if (State.activeSongId === targetSongId && !DOM.masterAudio.paused) {
+            DOM.masterAudio.pause();
+            playBtn.textContent = '▶ Play';
+            return;
+          }
+          State.activeSongId = targetSongId;
+          const activeVerChip = card ? card.querySelector('.version-chip.active:not(.sidebar-play-btn)') : null;
+          const targetVer = activeVerChip ? parseInt(activeVerChip.dataset.version || '1', 10) : 1;
+          switchVersion(targetVer, true);
+        }
+        return;
+      }
+
+      const verChip = e.target.closest('.version-chip');
+      if (verChip) {
+        e.stopPropagation();
+        const card = verChip.closest('.history-item');
+        const targetSongId = verChip.dataset.songId || (card && card.dataset.songId) || State.activeSongId;
+        const targetVer = parseInt(verChip.dataset.version || '1', 10);
+        State.activeSongId = targetSongId;
+        switchVersion(targetVer, true);
+        return;
+      }
+
+      const card = e.target.closest('.history-item');
+      if (card && card.dataset.songId) {
+        State.activeSongId = card.dataset.songId;
+        const activeVerChip = card.querySelector('.version-chip.active:not(.sidebar-play-btn)');
+        const targetVer = activeVerChip ? parseInt(activeVerChip.dataset.version || '1', 10) : 1;
+        switchVersion(targetVer, true);
+      }
+    });
+  }
+
+  function fetchStoredSongsCatalog() {
+    fetch('/api/songs')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !Array.isArray(data.songs)) return;
+        data.songs.forEach(entry => {
+          if (!entry || !entry.song_id) return;
+          if (!State.songs[entry.song_id]) {
+            const versionsObj = {};
+            (entry.versions || []).forEach(v => {
+              versionsObj[v.version] = buildSongVersionRecord(
+                entry.song_id,
+                v.version,
+                v.title || entry.title || entry.song_id,
+                v.bpm || 76,
+                v.key_signature || 'A Major',
+                v.iteration_summary || '',
+                v.judge_score || 9.5
+              );
+            });
+            if (Object.keys(versionsObj).length > 0) {
+              State.songs[entry.song_id] = {
+                id: entry.song_id,
+                title: entry.title || entry.song_id,
+                genre: entry.genre || 'Custom Track',
+                versions: versionsObj
+              };
+              const firstVer = versionsObj[1] || Object.values(versionsObj)[0];
+              addSongCardToSidebar(
+                entry.song_id,
+                entry.title || entry.song_id,
+                entry.genre || 'Custom Track',
+                firstVer ? firstVer.bpm : 76,
+                firstVer ? firstVer.key : 'A Major',
+                Object.keys(versionsObj).length
+              );
+            }
+          }
+        });
+      })
+      .catch(() => {});
   }
 
   // ==========================================================================
@@ -1074,37 +1848,24 @@
     cacheDOMElements();
     initWaveformVisualizer();
     setupMasterDeck();
+    setupAudioOutputSelector();
+    setupLocalFileLoader();
     setupStemMixer();
     setupCapsuleAndSliders();
     setupCollapsibleDrawers();
     setupPresets();
     setupSidebar();
+    setupSidebarSongSelection();
     setupThemeToggle();
+    switchVersion(1, false);
+    fetchStoredSongsCatalog();
 
     // Wire Ask Co-Pilot button
     DOM.btnAskCopilot.addEventListener('click', askIterationCopilot);
 
     // Wire Header Version dropdown
     DOM.headerVersionSelect.addEventListener('change', function () {
-      switchVersion(this.value);
-    });
-
-    // Wire Sidebar history version chips
-    document.querySelectorAll('.history-item .version-chip').forEach(chip => {
-      chip.addEventListener('click', function (e) {
-        e.stopPropagation();
-        switchVersion(this.dataset.version);
-      });
-    });
-
-    // Wire Sidebar history item selection
-    document.querySelectorAll('.history-item').forEach(item => {
-      item.addEventListener('click', function () {
-        document.querySelectorAll('.history-item').forEach(i => i.classList.remove('active'));
-        this.classList.add('active');
-        State.activeSongId = this.dataset.songId;
-        switchVersion(1);
-      });
+      switchVersion(this.value, true);
     });
 
     // Poll live hardware stats

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACDSO Auto EDA Report - ads4000patientpoint_devices_ads_dataset.csv</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent: #58a6ff;
+            --success: #3fb950;
+            --warning: #d29922;
+            --error: #f85149;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1, h2, h3 { color: var(--accent); margin-bottom: 1rem; }
+        h1 { font-size: 2rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.5rem; }
+        h2 { font-size: 1.5rem; margin-top: 2rem; }
+        .card {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            border: 1px solid #30363d;
+        }
+        .metric {
+            display: inline-block;
+            background: var(--bg-primary);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            margin: 0.25rem;
+        }
+        .metric-label { color: var(--text-secondary); font-size: 0.875rem; }
+        .metric-value { font-size: 1.25rem; font-weight: bold; }
+        .quality-score {
+            font-size: 3rem;
+            font-weight: bold;
+            color: var(--success);
+        }
+        .issue { color: var(--warning); margin: 0.5rem 0; }
+        .recommendation { color: var(--text-secondary); margin: 0.5rem 0; padding-left: 1rem; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        th, td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #30363d;
+        }
+        th { background: var(--bg-primary); color: var(--accent); }
+        tr:hover { background: rgba(88, 166, 255, 0.1); }
+        .footer {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #30363d;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 ACDSO Auto EDA Report</h1>
+        <p style="color: var(--text-secondary);">Dataset: <strong>ads4000patientpoint_devices_ads_dataset.csv</strong> | Generated: 2025-12-28T08:57:31.804614</p>
+        
+        <div class="card">
+            <h2>📊 Dataset Overview</h2>
+            <div class="metric">
+                <div class="metric-label">Rows</div>
+                <div class="metric-value">4,000</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Columns</div>
+                <div class="metric-value">20</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Numeric</div>
+                <div class="metric-value">11</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Categorical</div>
+                <div class="metric-value">9</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Memory</div>
+                <div class="metric-value">2.4 MB</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>⭐ Data Quality Score</h2>
+            <div class="quality-score">96/100</div>
+            <div style="margin-top: 1rem;">
+                <div class="metric">
+                    <div class="metric-label">Missing Values</div>
+                    <div class="metric-value">0 (0.0%)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Duplicates</div>
+                    <div class="metric-value">0 (0.0%)</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Constant Cols</div>
+                    <div class="metric-value">0</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'><h2>⚠️ Issues Detected</h2><div class='issue'>• ID-like columns detected: ['device_id', 'avg_session_duration_sec', 'uptime_hours', 'temperature_celsius']</div></div>
+        
+        
+        
+        <div class="card">
+            <h2>💡 Recommendations</h2>
+            <div class='recommendation'>1. Exclude ID columns from modeling or use for grouping only</div>
+        </div>
+        
+        <div class="card">
+            <h2>📋 Column Profiles</h2>
+            <table>
+                <tr>
+                    <th>Column</th>
+                    <th>Type</th>
+                    <th>Missing %</th>
+                    <th>Unique</th>
+                    <th>Flags</th>
+                </tr>
+                <tr><td>device_id</td><td>object</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>device_type</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>location_type</td><td>object</td><td>0.0%</td><td>5</td><td></td></tr><tr><td>region</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>daily_views</td><td>int64</td><td>0.0%</td><td>2751</td><td></td></tr><tr><td>ads_served</td><td>int64</td><td>0.0%</td><td>491</td><td></td></tr><tr><td>avg_session_duration_sec</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>ad_category</td><td>object</td><td>0.0%</td><td>7</td><td></td></tr><tr><td>content_type</td><td>object</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>time_slot</td><td>object</td><td>0.0%</td><td>3</td><td></td></tr><tr><td>ad_performance</td><td>object</td><td>0.0%</td><td>3</td><td></td></tr><tr><td>network_signal_strength</td><td>float64</td><td>0.0%</td><td>501</td><td></td></tr><tr><td>battery_level_percent</td><td>int64</td><td>0.0%</td><td>51</td><td></td></tr><tr><td>uptime_hours</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>temperature_celsius</td><td>float64</td><td>0.0%</td><td>4000</td><td>🔑 ID-like</td></tr><tr><td>firmware_version</td><td>object</td><td>0.0%</td><td>500</td><td></td></tr><tr><td>is_online</td><td>int64</td><td>0.0%</td><td>2</td><td></td></tr><tr><td>error_count</td><td>int64</td><td>0.0%</td><td>4</td><td></td></tr><tr><td>last_maintenance_days_ago</td><td>int64</td><td>0.0%</td><td>61</td><td></td></tr><tr><td>ads_predicted_next_hour</td><td>int64</td><td>0.0%</td><td>76</td><td></td></tr>
+            </table>
+        </div>
+        
+        <div class="footer">
+            <p>Generated by ACDSO v2.0 Auto EDA | Analysis time: 0.08s</p>
+        </div>
+    </div>
+</body>
+</html>

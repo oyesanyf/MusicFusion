@@ -1,0 +1,129 @@
+{
+  "timestamp": "2025-12-27T10:13:18.340356",
+  "acdso_version": "3.0",
+  "mode": "benchmark",
+  "console_output": "\n================================================================================\n=                                                                              =\n=            ACDSO BENCHMARK: Comparison with Other AutoML Systems             =\n=                                                                              =\n================================================================================\n\n  Running Smart Column Analysis...\n  Auto-detected problematic columns: ['device_id', 'avg_session_duration_sec', 'time_slot', 'uptime_hours', 'last_maintenance_days_ago']\n    - device_id: ID-like column (mostly unique values)\n    - avg_session_duration_sec: Potential time-based leakage (target 'ads_predicted_next_hour' is time-related)\n    - time_slot: Potential time-based leakage (target 'ads_predicted_next_hour' is time-related)\n    - uptime_hours: Potential time-based leakage (target 'ads_predicted_next_hour' is time-related)\n    - last_maintenance_days_ago: Potential time-based leakage (target 'ads_predicted_next_hour' is time-related)\n\n  Custom dataset loaded: ads4000patientpoint_devices_ads_dataset.csv (4000 samples, 14 features, target: ads_predicted_next_hour)\n  Task: regression\n  Excluded columns: ['device_id', 'avg_session_duration_sec', 'last_maintenance_days_ago', 'uptime_hours', 'time_slot']\n\n  AUTOML COMPARISON RESULTS:\n  ----------------------------------------------------------------------------\n  System               Score         F1    Time(s)  Latency(ms)                Model\n  ----------------------------------------------------------------------------\n  FLAML               0.0012          -       70.4        0.041                  N/A\n  H2O                 0.0001          -       93.1        0.612                  N/A\n  TPOT            ERROR  TPOT 1.0+ requires >=120s budget and >=200 samples (got 6...\n  AutoGluon          -0.0000          -       77.5        0.113                  N/A\n  ACDSO              -0.0133          -       87.8        0.235 RandomForestRegressor\n  ----------------------------------------------------------------------------\n\n  WINNER BY METRIC:\n  ----------------------------------------\n    Test Score                -> FLAML\n    Fit Time S                -> FLAML\n    Latency Ms Per Row        -> FLAML\n    Peak Memory Mb            -> H2O\n    Cv Score Std              -> FLAML\n    Risk Detection            -> ACDSO\n    Audit Trail               -> ACDSO\n\n  LEAKAGE DETECTION CAPABILITY:\n  ----------------------------------------\n    ACDSO           [X] NOT DETECTED\n    TPOT            [X] NOT DETECTED\n    FLAML           [X] NOT DETECTED\n\n  PRODUCTION READINESS:\n  ----------------------------------------\n    ACDSO           Risk Report: [OK]  Audit Trail: [OK]\n    TPOT            Risk Report: [X]  Audit Trail: [X]\n    FLAML           Risk Report: [X]  Audit Trail: [X]\n    AutoGluon       Risk Report: [X]  Audit Trail: [X]\n    H2O             Risk Report: [X]  Audit Trail: [X]\n\n  ============================================================================\n  JSON REPORT: C:\\harfile\\acdso\\reports\\benchmark_ads4000patientpoint_devices_ads_dataset_20251227_100745.json\n  HTML REPORT: C:\\harfile\\acdso\\reports\\benchmark_ads4000patientpoint_devices_ads_dataset_20251227_100745.html\n  ============================================================================\n\n  View Commands:\n    JSON: type \"C:\\harfile\\acdso\\reports\\benchmark_ads4000patientpoint_devices_ads_dataset_20251227_100745.json\"\n    HTML: start \"C:\\harfile\\acdso\\reports\\benchmark_ads4000patientpoint_devices_ads_dataset_20251227_100745.html\"\n\n********************************************************************************\n\n\n  ----------------------------------------\n  GENERATING COMBINED BENCHMARK REPORT...\n  ----------------------------------------",
+  "configuration": {
+    "time_budget": 60,
+    "datasets": null,
+    "custom_file": "c:\\dataset\\ads4000patientpoint_devices_ads_dataset.csv",
+    "target": "ads_predicted_next_hour",
+    "task": "regression",
+    "exclude": null
+  },
+  "benchmark_summary": {
+    "systems_tested": [
+      "ACDSO",
+      "TPOT",
+      "FLAML",
+      "AutoGluon",
+      "H2O"
+    ],
+    "datasets_tested": [
+      "ads4000patientpoint_devices_ads_dataset"
+    ],
+    "time_budget_s": 60,
+    "timestamp": "2025-12-27T10:13:18.317757"
+  },
+  "benchmark_results": [
+    {
+      "system": "ACDSO",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": -0.01329155067144594,
+      "test_f1": null,
+      "fit_time_s": 87.80308938026428,
+      "latency_ms_per_row": 0.23474395275115967,
+      "peak_memory_mb": 3.4089250564575195,
+      "model_name": "RandomForestRegressor",
+      "has_risk_report": true,
+      "has_audit_trail": true,
+      "error": null
+    },
+    {
+      "system": "TPOT",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": 0.0,
+      "test_f1": null,
+      "fit_time_s": 0.0,
+      "latency_ms_per_row": 0.0,
+      "peak_memory_mb": 0.0,
+      "model_name": null,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "error": "TPOT 1.0+ requires >=120s budget and >=200 samples (got 60s, 3200 samples)"
+    },
+    {
+      "system": "FLAML",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": 0.0012449939465535298,
+      "test_f1": null,
+      "fit_time_s": 70.43402814865112,
+      "latency_ms_per_row": 0.040834248065948486,
+      "peak_memory_mb": 21.61647605895996,
+      "model_name": null,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "error": null
+    },
+    {
+      "system": "AutoGluon",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": -4.017353057861328e-05,
+      "test_f1": null,
+      "fit_time_s": 77.50766658782959,
+      "latency_ms_per_row": 0.11339813470840454,
+      "peak_memory_mb": 87.23472785949707,
+      "model_name": null,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "error": null
+    },
+    {
+      "system": "H2O",
+      "dataset": "ads4000patientpoint_devices_ads_dataset",
+      "task": "regression",
+      "test_score": 5.249556352893148e-05,
+      "test_f1": null,
+      "fit_time_s": 93.09472250938416,
+      "latency_ms_per_row": 0.6124016642570496,
+      "peak_memory_mb": 1.8282060623168945,
+      "model_name": null,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "error": null
+    }
+  ],
+  "winners_by_metric": {
+    "test_score": "FLAML",
+    "fit_time_s": "FLAML",
+    "latency_ms_per_row": "FLAML",
+    "peak_memory_mb": "H2O",
+    "cv_score_std": "FLAML",
+    "risk_detection": "ACDSO",
+    "audit_trail": "ACDSO"
+  },
+  "leakage_tests": [
+    {
+      "system": "ACDSO",
+      "detected": false,
+      "leakage_type": "proxy"
+    },
+    {
+      "system": "TPOT",
+      "detected": false,
+      "leakage_type": "proxy"
+    },
+    {
+      "system": "FLAML",
+      "detected": false,
+      "leakage_type": "proxy"
+    }
+  ],
+  "statistical_tests": {},
+  "benchmark_json_path": "C:\\harfile\\acdso\\reports\\benchmark_ads4000patientpoint_devices_ads_dataset_20251227_100745.json",
+  "benchmark_html_path": "C:\\harfile\\acdso\\reports\\benchmark_ads4000patientpoint_devices_ads_dataset_20251227_100745.html"
+}

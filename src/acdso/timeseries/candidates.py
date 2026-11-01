@@ -174,6 +174,118 @@ class ExponentialSmoothingForecaster(BaseEstimator, RegressorMixin):
         return np.full(n, self._smoothed_value)
 
 
+# Loaded model checkpoints are cached at the class level, keyed by
+# checkpoint id, so cross-validation folds don't re-download/re-load the
+# pretrained weights on every fit -- that would make TimesFM by far the
+# slowest candidate for no benefit, since the weights don't change per fold.
+_TIMESFM_MODEL_CACHE: Dict[str, Any] = {}
+
+
+class TimesFMForecaster(BaseEstimator, RegressorMixin):
+    """
+    Adapter for Google's TimesFM pretrained time-series foundation model
+    (https://github.com/google-research/timesfm).
+
+    Zero-shot: ``fit`` just stores the context (the training series) and
+    lazily loads the pretrained checkpoint; ``predict`` calls the model's
+    own forecasting API for ``len(X)`` steps ahead, matching the same
+    "predict(X) uses len(X) as the horizon" convention as the other
+    baseline forecasters in this module.
+
+    Parameters
+    ----------
+    checkpoint : str, default="google/timesfm-2.5-200m-pytorch"
+        Hugging Face checkpoint id to load. Defaults to a 2.5 checkpoint
+        deliberately: TimesFM's source code is Apache-2.0, and pretrained
+        weights **up to 2.5** are Apache-2.0, but **3.0's weights are
+        licensed non-commercial/non-production only**
+        (timesfm-non-commercial-license-v1.0). Only pass a 3.0 checkpoint
+        if non-commercial use is confirmed for this deployment.
+    min_context_length : int, default=64
+        TimesFM is a foundation model built for long-context zero-shot
+        inference; on very short series (the common case for this
+        project's own Forecast card, e.g. a dozen monthly aggregates) it
+        has no real advantage over a two-line trend method and just adds
+        a heavy dependency and load time for nothing. This is enforced by
+        the candidate generator (see ``include_timesfm``/``n_samples`` on
+        ``TimeSeriesCandidateGenerator``), not by this class itself, so
+        directly instantiating it bypasses the guard intentionally.
+    device : str, default="cpu"
+        "cpu" or "cuda". GPU inference is much faster but not required.
+
+    Notes
+    -----
+    Cannot run in a network environment where huggingface.co is blocked
+    by policy: ``ModelConfig(checkpoint_path=...)`` fetches the pretrained
+    weights from the Hugging Face Hub at load time, and there is no local-
+    weights fallback wired up here. This is a hard requirement of TimesFM
+    itself, not something this adapter can work around -- if your network
+    policy blocks Hugging Face, this candidate will always fail on its
+    first ``predict()`` call (model loading is lazy, so ``fit()`` alone
+    succeeds; the generator's ImportError-only availability check won't
+    catch this either, since the package import itself succeeds) and
+    there is no point enabling ``include_timesfm`` at all.
+
+    The exact ``timesfm`` Python API also differs between model versions
+    (2.5 vs 3.0 ship different top-level modules/classes), and this
+    adapter was written against the *documented* 3.0 API
+    (``timesfm3.TimesFM3Evaluator`` / ``ModelConfig``) since that's what's
+    publicly documented with code examples at the time of writing. It has
+    not been run against a real installation in an environment with both
+    package-install and Hugging Face access -- confirm the 2.5 checkpoint
+    loads through the same evaluator class before relying on this.
+    """
+
+    def __init__(
+        self,
+        checkpoint: str = "google/timesfm-2.5-200m-pytorch",
+        min_context_length: int = 64,
+        device: str = "cpu",
+        per_core_batch_size: int = 8,
+    ):
+        self.checkpoint = checkpoint
+        self.min_context_length = min_context_length
+        self.device = device
+        self.per_core_batch_size = per_core_batch_size
+        self._context: np.ndarray = np.array([])
+
+    def _load_model(self):
+        cached = _TIMESFM_MODEL_CACHE.get(self.checkpoint)
+        if cached is not None:
+            return cached
+
+        try:
+            from timesfm3 import ModelConfig, TimesFM3Evaluator
+        except ImportError as exc:
+            raise ImportError(
+                "TimesFM is not installed. Install with: pip install timesfm[torch]"
+            ) from exc
+
+        config = ModelConfig(
+            checkpoint_path=self.checkpoint,
+            per_core_batch_size=self.per_core_batch_size,
+            device=self.device,
+        )
+        model = TimesFM3Evaluator(config)
+        _TIMESFM_MODEL_CACHE[self.checkpoint] = model
+        return model
+
+    def fit(self, X, y):
+        self._context = np.asarray(y, dtype=np.float32)
+        return self
+
+    def predict(self, X):
+        horizon = len(X)
+        model = self._load_model()
+        outputs = list(
+            model.predict_batch(
+                [self._context], horizon=horizon, return_quantiles=False,
+                use_symmetric_averaging=False,
+            )
+        )
+        return np.asarray(outputs[0].forecast, dtype=np.float64)
+
+
 class TimeSeriesRegressor(BaseEstimator, RegressorMixin):
     """
     Wrapper that handles time series feature engineering with proper X/y alignment.
@@ -440,8 +552,17 @@ class TimeSeriesCandidateGenerator:
         Whether to include boosting models.
     include_statistical : bool
         Whether to include statistical models (requires statsmodels).
+    include_timesfm : bool
+        Whether to include Google's TimesFM pretrained foundation model
+        (requires ``pip install timesfm[torch]``). Off by default: it's a
+        heavy optional dependency, and only helps once there's enough
+        history to matter -- see ``n_samples``.
+    n_samples : int, optional
+        Length of the training series. Only used to gate ``include_timesfm``
+        against ``TimesFMForecaster.min_context_length`` -- irrelevant to
+        every other candidate family.
     """
-    
+
     def __init__(
         self,
         target_col: str,
@@ -453,6 +574,8 @@ class TimeSeriesCandidateGenerator:
         include_trees: bool = True,
         include_boosting: bool = True,
         include_statistical: bool = False,
+        include_timesfm: bool = False,
+        n_samples: Optional[int] = None,
     ):
         self.target_col = target_col
         self.datetime_col = datetime_col
@@ -463,38 +586,44 @@ class TimeSeriesCandidateGenerator:
         self.include_trees = include_trees
         self.include_boosting = include_boosting
         self.include_statistical = include_statistical
-    
+        self.include_timesfm = include_timesfm
+        self.n_samples = n_samples
+
     def generate(self) -> List[ForecastingCandidate]:
         """
         Generate all candidate pipelines.
-        
+
         Returns
         -------
         list of ForecastingCandidate
             All candidate models.
         """
         candidates = []
-        
+
         # Baseline models
         if self.include_baselines:
             candidates.extend(self._generate_baselines())
-        
+
         # Linear models
         if self.include_linear:
             candidates.extend(self._generate_linear())
-        
+
         # Tree models
         if self.include_trees:
             candidates.extend(self._generate_trees())
-        
+
         # Boosting models
         if self.include_boosting:
             candidates.extend(self._generate_boosting())
-        
+
         # Statistical models
         if self.include_statistical:
             candidates.extend(self._generate_statistical())
-        
+
+        # TimesFM (pretrained foundation model, opt-in, needs real history)
+        if self.include_timesfm:
+            candidates.extend(self._generate_timesfm())
+
         return candidates
     
     def _generate_baselines(self) -> List[ForecastingCandidate]:
@@ -743,8 +872,29 @@ class TimeSeriesCandidateGenerator:
             ))
         except ImportError:
             pass
-        
+
         return candidates
+
+    def _generate_timesfm(self) -> List[ForecastingCandidate]:
+        """Generate the TimesFM candidate, if installed and there's enough history."""
+        min_len = TimesFMForecaster().min_context_length
+        if self.n_samples is not None and self.n_samples < min_len:
+            return []
+
+        try:
+            import timesfm3  # noqa: F401 -- availability check only; loaded lazily on fit
+        except ImportError:
+            return []
+
+        return [
+            ForecastingCandidate(
+                name="TimesFM (2.5, pretrained)",
+                pipeline=TimesFMForecaster(),
+                family="foundation",
+                complexity="complex",
+                handles_seasonality=True,
+            )
+        ]
 
 
 def get_default_candidates(
@@ -752,10 +902,12 @@ def get_default_candidates(
     datetime_col: Optional[str] = None,
     seasonality: Optional[int] = None,
     complexity: str = 'all',
+    include_timesfm: bool = False,
+    n_samples: Optional[int] = None,
 ) -> List[ForecastingCandidate]:
     """
     Get default candidate pipelines.
-    
+
     Parameters
     ----------
     target_col : str
@@ -766,7 +918,12 @@ def get_default_candidates(
         Seasonal period.
     complexity : str
         'simple', 'medium', 'complex', or 'all'.
-    
+    include_timesfm : bool
+        Whether to include Google's TimesFM pretrained model, if installed
+        and there's enough history. Off by default (heavy dependency).
+    n_samples : int, optional
+        Training series length, used only to gate ``include_timesfm``.
+
     Returns
     -------
     list
@@ -777,8 +934,10 @@ def get_default_candidates(
         datetime_col=datetime_col,
         seasonality=seasonality,
         include_statistical=(complexity in ['complex', 'all']),
+        include_timesfm=include_timesfm,
+        n_samples=n_samples,
     )
-    
+
     candidates = generator.generate()
     
     if complexity != 'all':

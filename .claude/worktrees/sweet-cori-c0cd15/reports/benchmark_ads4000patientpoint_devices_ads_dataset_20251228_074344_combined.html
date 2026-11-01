@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACDSO 3.0 Report - Benchmark</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #3b82f6;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --info: #0891b2;
+            --bg: #0f172a;
+            --bg-card: #1e293b;
+            --bg-highlight: #334155;
+            --text: #e2e8f0;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, var(--bg) 0%, #1a1a2e 100%);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem;
+            min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(139, 92, 246, 0.1));
+            border-radius: 16px;
+            border: 1px solid var(--border);
+        }
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        h2 { color: var(--primary-light); margin: 1.5rem 0 1rem 0; font-size: 1.5rem; }
+        h3 { color: var(--primary-light); margin: 1rem 0 0.5rem 0; font-size: 1.2rem; }
+        .subtitle { color: var(--text-muted); margin-bottom: 0.5rem; }
+        
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: rgba(37, 99, 235, 0.15);
+            font-weight: 600;
+            color: var(--primary-light);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        tr:hover { background: rgba(255, 255, 255, 0.03); }
+        .model-name { color: var(--success); font-weight: 600; }
+        .success { color: var(--success); }
+        .error { color: var(--danger); }
+        .selected-model { background: rgba(22, 163, 74, 0.15); border-left: 3px solid var(--success); }
+        .selected-model:hover { background: rgba(22, 163, 74, 0.25); }
+        .models-table { font-size: 0.9rem; }
+        .models-table th { position: sticky; top: 0; z-index: 10; }
+        .info-text { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem; font-style: italic; }
+        
+        /* Code/Console Output */
+        .console-output {
+            background: #000;
+            color: #0f0;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .badge-success { background: rgba(22, 163, 74, 0.2); color: var(--success); }
+        .badge-danger { background: rgba(220, 38, 38, 0.2); color: var(--danger); }
+        .badge-info { background: rgba(8, 145, 178, 0.2); color: var(--info); }
+        
+        /* Summary Grid */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .summary-item {
+            background: rgba(0,0,0,0.2);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .summary-value {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--primary-light);
+        }
+        .summary-label {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ACDSO 3.0 Report</h1>
+            <div class="subtitle">Mode: Benchmark</div>
+            <div class="subtitle">Generated: 2025-12-28T07:47:35.875735</div>
+        </div>
+
+        <div class="card">
+            <h2>Configuration</h2>
+            <table>
+                <tr><th>time_budget</th><td>60</td></tr>
+                <tr><th>custom_file</th><td>c:\dataset\ads4000patientpoint_devices_ads_dataset.csv</td></tr>
+                <tr><th>target</th><td>ads_served</td></tr>
+                <tr><th>task</th><td>regression</td></tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Benchmark Results - Selected Models & Code Examples</h2>
+            <p class="info-text">Final selected model for each AutoML system in the benchmark with code examples.</p>
+            <table>
+                <tr><th>System</th><th>Dataset</th><th>Score</th><th>F1</th><th>Time (s)</th><th>Latency (ms)</th><th>Selected Model</th></tr>
+                <tr><td>ACDSO</td><td>ads4000patientpoint_devices_ads_dataset</td><td>-0.0280</td><td>N/A</td><td>59.29</td><td>0.092</td><td class='model-name'>RandomForestRegressor</td></tr>
+                <tr><td>TPOT</td><td>ads4000patientpoint_devices_ads_dataset</td><td>0.0000</td><td>N/A</td><td>0.00</td><td>0.000</td><td class='model-name'>None</td></tr>
+                <tr><td>FLAML</td><td>ads4000patientpoint_devices_ads_dataset</td><td>-0.0107</td><td>N/A</td><td>60.33</td><td>0.022</td><td class='model-name'>None</td></tr>
+                <tr><td>AutoGluon</td><td>ads4000patientpoint_devices_ads_dataset</td><td>-0.0154</td><td>N/A</td><td>66.81</td><td>0.702</td><td class='model-name'>None</td></tr>
+                <tr><td>H2O</td><td>ads4000patientpoint_devices_ads_dataset</td><td>-0.0020</td><td>N/A</td><td>41.76</td><td>0.328</td><td class='model-name'>None</td></tr>
+            </table>
+
+            <h3>Actual Execution Code for Each Framework</h3>
+            <p class="info-text">The following code blocks show the actual code that was executed during benchmarking, with real file paths, parameters, and results.</p>
+        </div>
+
+        <div class="card">
+            <h2>Console Output (65 lines)</h2>
+            <div class="console-output">
+================================================================================
+=                                                                              =
+=            ACDSO BENCHMARK: Comparison with Other AutoML Systems             =
+=                                                                              =
+================================================================================
+
+  Running Smart Column Analysis...
+  Auto-detected problematic columns: ['device_id']
+    - device_id: ID-like column (mostly unique values)
+
+  Custom dataset loaded: ads4000patientpoint_devices_ads_dataset.csv (4000 samples, 18 features, target: ads_served)
+  Task: regression
+  Excluded columns: ['device_id']
+
+  AUTOML COMPARISON RESULTS:
+  ----------------------------------------------------------------------------
+  System               Score         F1    Time(s)  Latency(ms)                Model
+  ----------------------------------------------------------------------------
+  TPOT            ERROR  TPOT 1.0+ requires >=120s budget and >=200 samples (got 6...
+  H2O                -0.0020          -       41.8        0.328                  N/A
+  FLAML              -0.0107          -       60.3        0.022                  N/A
+  AutoGluon          -0.0154          -       66.8        0.702                  N/A
+  ACDSO              -0.0280          -       59.3        0.092 RandomForestRegressor
+  ----------------------------------------------------------------------------
+
+  WINNER BY METRIC:
+  ----------------------------------------
+    Test Score                -> H2O
+    Fit Time S                -> H2O
+    Latency Ms Per Row        -> FLAML
+    Peak Memory Mb            -> H2O
+    Cv Score Std              -> FLAML
+    Risk Detection            -> ACDSO
+    Audit Trail               -> ACDSO
+
+  LEAKAGE DETECTION CAPABILITY:
+  ----------------------------------------
+    ACDSO           [X] NOT DETECTED
+    TPOT            [X] NOT DETECTED
+    FLAML           [X] NOT DETECTED
+
+  PRODUCTION READINESS:
+  ----------------------------------------
+    ACDSO           Risk Report: [OK]  Audit Trail: [OK]
+    TPOT            Risk Report: [X]  Audit Trail: [X]
+    FLAML           Risk Report: [X]  Audit Trail: [X]
+    AutoGluon       Risk Report: [X]  Audit Trail: [X]
+    H2O             Risk Report: [X]  Audit Trail: [X]
+
+  ============================================================================
+  JSON REPORT: C:\harfile\acdso\reports\benchmark_ads4000patientpoint_devices_ads_dataset_20251228_074344.json
+  HTML REPORT: C:\harfile\acdso\reports\benchmark_ads4000patientpoint_devices_ads_dataset_20251228_074344.html
+  ============================================================================
+
+  View Commands:
+    JSON: type "C:\harfile\acdso\reports\benchmark_ads4000patientpoint_devices_ads_dataset_20251228_074344.json"
+    HTML: start "C:\harfile\acdso\reports\benchmark_ads4000patientpoint_devices_ads_dataset_20251228_074344.html"
+
+********************************************************************************
+
+
+  ----------------------------------------
+  GENERATING COMBINED BENCHMARK REPORT...
+  ----------------------------------------</div>
+        </div>
+
+    </div>
+</body>
+</html>

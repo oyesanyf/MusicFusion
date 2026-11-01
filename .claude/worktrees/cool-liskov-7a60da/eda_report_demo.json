@@ -1,0 +1,349 @@
+{
+  "dataset_name": "iris_dataset",
+  "n_rows": 244,
+  "n_cols": 7,
+  "analysis_timestamp": "2025-12-25T07:43:41.974578",
+  "column_profiles": [
+    {
+      "name": "total_bill",
+      "dtype": "float64",
+      "n_unique": 229,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 19.785943,
+      "std": 8.902412,
+      "min_val": 3.07,
+      "max_val": 50.81,
+      "median": 17.795,
+      "q25": 13.3475,
+      "q75": 24.1275,
+      "skewness": 1.1262,
+      "kurtosis": 1.1692,
+      "n_zeros": 0,
+      "n_negative": 0,
+      "n_outliers_iqr": 9,
+      "n_outliers_zscore": 4,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": true
+    },
+    {
+      "name": "tip",
+      "dtype": "float64",
+      "n_unique": 123,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 2.998279,
+      "std": 1.383638,
+      "min_val": 1.0,
+      "max_val": 10.0,
+      "median": 2.9,
+      "q25": 2.0,
+      "q75": 3.5625,
+      "skewness": 1.4564,
+      "kurtosis": 3.5496,
+      "n_zeros": 0,
+      "n_negative": 0,
+      "n_outliers_iqr": 9,
+      "n_outliers_zscore": 3,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": true
+    },
+    {
+      "name": "sex",
+      "dtype": "category",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": null,
+      "std": null,
+      "min_val": null,
+      "max_val": null,
+      "median": null,
+      "q25": null,
+      "q75": null,
+      "skewness": null,
+      "kurtosis": null,
+      "n_zeros": null,
+      "n_negative": null,
+      "n_outliers_iqr": null,
+      "n_outliers_zscore": null,
+      "top_value": "Male",
+      "top_value_count": 157,
+      "top_value_pct": 64.34,
+      "cardinality_ratio": 0.0082,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "smoker",
+      "dtype": "category",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": null,
+      "std": null,
+      "min_val": null,
+      "max_val": null,
+      "median": null,
+      "q25": null,
+      "q75": null,
+      "skewness": null,
+      "kurtosis": null,
+      "n_zeros": null,
+      "n_negative": null,
+      "n_outliers_iqr": null,
+      "n_outliers_zscore": null,
+      "top_value": "No",
+      "top_value_count": 151,
+      "top_value_pct": 61.89,
+      "cardinality_ratio": 0.0082,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "day",
+      "dtype": "category",
+      "n_unique": 4,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": null,
+      "std": null,
+      "min_val": null,
+      "max_val": null,
+      "median": null,
+      "q25": null,
+      "q75": null,
+      "skewness": null,
+      "kurtosis": null,
+      "n_zeros": null,
+      "n_negative": null,
+      "n_outliers_iqr": null,
+      "n_outliers_zscore": null,
+      "top_value": "Sat",
+      "top_value_count": 87,
+      "top_value_pct": 35.66,
+      "cardinality_ratio": 0.0164,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "time",
+      "dtype": "category",
+      "n_unique": 2,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": null,
+      "std": null,
+      "min_val": null,
+      "max_val": null,
+      "median": null,
+      "q25": null,
+      "q75": null,
+      "skewness": null,
+      "kurtosis": null,
+      "n_zeros": null,
+      "n_negative": null,
+      "n_outliers_iqr": null,
+      "n_outliers_zscore": null,
+      "top_value": "Dinner",
+      "top_value_count": 176,
+      "top_value_pct": 72.13,
+      "cardinality_ratio": 0.0082,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": false
+    },
+    {
+      "name": "size",
+      "dtype": "int64",
+      "n_unique": 6,
+      "n_missing": 0,
+      "missing_pct": 0.0,
+      "mean": 2.569672,
+      "std": 0.9511,
+      "min_val": 1.0,
+      "max_val": 6.0,
+      "median": 2.0,
+      "q25": 2.0,
+      "q75": 3.0,
+      "skewness": 1.439,
+      "kurtosis": 1.6719,
+      "n_zeros": 0,
+      "n_negative": 0,
+      "n_outliers_iqr": 9,
+      "n_outliers_zscore": 4,
+      "top_value": null,
+      "top_value_count": null,
+      "top_value_pct": null,
+      "cardinality_ratio": null,
+      "is_constant": false,
+      "is_id_like": false,
+      "is_highly_skewed": false,
+      "has_outliers": true
+    }
+  ],
+  "data_quality": {
+    "n_rows": 244,
+    "n_cols": 7,
+    "n_numeric": 3,
+    "n_categorical": 4,
+    "n_datetime": 0,
+    "total_missing": 0,
+    "total_missing_pct": 0.0,
+    "cols_with_missing": 0,
+    "cols_all_missing": 0,
+    "n_duplicate_rows": 1,
+    "duplicate_pct": 0.41,
+    "n_constant_cols": 0,
+    "constant_cols": [],
+    "n_id_like_cols": 0,
+    "id_like_cols": [],
+    "memory_mb": 0.01,
+    "quality_score": 99.8,
+    "issues": [],
+    "recommendations": []
+  },
+  "high_correlations": [],
+  "correlation_matrix": {
+    "total_bill": {
+      "total_bill": 1.0,
+      "tip": 0.6757341092113648,
+      "size": 0.5983151309049014
+    },
+    "tip": {
+      "total_bill": 0.6757341092113648,
+      "tip": 1.0,
+      "size": 0.48929877523035714
+    },
+    "size": {
+      "total_bill": 0.5983151309049014,
+      "tip": 0.48929877523035714,
+      "size": 1.0
+    }
+  },
+  "anomalies": [
+    {
+      "row_index": 170,
+      "anomaly_score": 5.06,
+      "anomaly_type": "extreme_value",
+      "affected_columns": [
+        "tip"
+      ],
+      "description": "Value 10 is 5.1 std from mean"
+    },
+    {
+      "row_index": 212,
+      "anomaly_score": 4.34,
+      "anomaly_type": "extreme_value",
+      "affected_columns": [
+        "tip"
+      ],
+      "description": "Value 9 is 4.3 std from mean"
+    }
+  ],
+  "statistical_summary": {
+    "numeric_features": {
+      "count": 3,
+      "total_missing": 0,
+      "avg_missing_pct": 0.0,
+      "n_with_zeros": 0,
+      "n_with_negatives": 0,
+      "n_with_outliers": 3,
+      "n_highly_skewed": 0
+    },
+    "categorical_features": {
+      "count": 4,
+      "total_unique_values": 10,
+      "avg_cardinality": 2.5,
+      "n_high_cardinality": 0
+    },
+    "constants_and_ids": {
+      "n_constant": 0,
+      "n_id_like": 0
+    }
+  },
+  "insights": [],
+  "recommendations": [
+    "Investigate 2 detected anomalies before modeling"
+  ],
+  "total_analysis_time_s": 0.05,
+  "pareto_front": [
+    {
+      "name": "column_profiling",
+      "analysis_type": "profiling",
+      "quality_score": 0.95,
+      "compute_time_s": 0.03297853469848633,
+      "coverage": 1.0,
+      "insight_count": 3,
+      "objectives": [
+        0.95,
+        1.0,
+        3,
+        -0.03297853469848633
+      ],
+      "results": {
+        "n_profiles": 7
+      },
+      "meta": {}
+    },
+    {
+      "name": "statistical_summary",
+      "analysis_type": "statistics",
+      "quality_score": 0.9,
+      "compute_time_s": 7.2479248046875e-05,
+      "coverage": 1.0,
+      "insight_count": 13,
+      "objectives": [
+        0.9,
+        1.0,
+        10,
+        -7.2479248046875e-05
+      ],
+      "results": {
+        "numeric_features": {
+          "count": 3,
+          "total_missing": 0,
+          "avg_missing_pct": 0.0,
+          "n_with_zeros": 0,
+          "n_with_negatives": 0,
+          "n_with_outliers": 3,
+          "n_highly_skewed": 0
+        },
+        "categorical_features": {
+          "count": 4,
+          "total_unique_values": 10,
+          "avg_cardinality": 2.5,
+          "n_high_cardinality": 0
+        },
+        "constants_and_ids": {
+          "n_constant": 0,
+          "n_id_like": 0
+        }
+      },
+      "meta": {}
+    }
+  ],
+  "selected_analyses": [
+    "column_profiling",
+    "statistical_summary"
+  ]
+}

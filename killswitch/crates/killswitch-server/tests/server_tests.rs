@@ -254,7 +254,7 @@ fn scan_dir_recursive(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>
             let path = entry.path();
             if path.is_dir() {
                 scan_dir_recursive(&path, files);
-            } else if path.extension().map_or(false, |ext| ext == "rs") {
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
                 files.push(path);
             }
         }
@@ -279,4 +279,185 @@ fn test_zero_os_subprocess_spawning_in_server() {
         assert!(!content.contains("Command::new(\"sc.exe"), "Forbidden sc.exe command in {:?}", path);
     }
     assert!(!files.is_empty(), "Must scan at least one .rs file in killswitch-server");
+}
+
+#[tokio::test]
+async fn test_research_ingest_live_regression_probes() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    let ingest_body = serde_json::json!({
+        "extractions": [
+            {
+                "arxiv_id": "2603.02277",
+                "title": "Container Escape Probe",
+                "attack_vector": "Docker daemon socket escape",
+                "target_boundary": "container"
+            },
+            {
+                "arxiv_id": "2610.09167",
+                "title": "Conformal Jailbreak Defense",
+                "attack_vector": "Multi-turn adversarial prompt inject",
+                "target_boundary": "prompt"
+            },
+            {
+                "arxiv_id": "2609.99999",
+                "title": "Cloud IMDS SSRF Exploit",
+                "attack_vector": "AWS metadata exfiltration",
+                "target_boundary": "network_ssrf"
+            }
+        ]
+    });
+
+    let req = Request::builder()
+        .uri("/api/research/ingest")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&ingest_body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let res: ResearchIngestResponse = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(res.success);
+    assert_eq!(res.ingested_count, 3);
+    assert!(res.all_live_probes_executed);
+    assert_eq!(res.coverage_percentage, 100.0);
+    assert_eq!(res.containment_coverage.len(), 3);
+    for report in &res.containment_coverage {
+        assert!(report.live_probe_executed);
+        assert!(report.live_probe_blocked);
+        assert!(report.covered_by_killswitch);
+        assert!(!report.target_crate_enhancement.is_empty());
+    }
+    assert!(!res.containment_coverage[1].is_novel_to_codebase);
+    assert!(res.containment_coverage[0].is_novel_to_codebase);
+    assert!(res.containment_coverage[2].is_novel_to_codebase);
+    assert_eq!(res.novel_enhancement_count, 2);
+    assert!(res.calibrated_sources_total >= 6);
+}
+
+#[tokio::test]
+async fn test_research_menu_user_approval_gate_and_code_enforcement() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. Verify WebUI renders the Research Menu with User Approval controls
+    let ui_req = Request::builder()
+        .uri("/ui")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+    let ui_resp = app.clone().oneshot(ui_req).await.unwrap();
+    assert_eq!(ui_resp.status(), StatusCode::OK);
+    let ui_html = String::from_utf8(body_to_bytes(ui_resp.into_body()).await.to_vec()).unwrap();
+    assert!(ui_html.contains("ArXiv &amp; LangExtract Security Research Menu (Mandatory User Approval Gate)"));
+    assert!(ui_html.contains("approveSelectedResearch('approve', this)"));
+
+    // 2. Discover/stage a new candidate in PendingApproval
+    let discover_body = serde_json::json!({
+        "arxiv_id": "2610.77777",
+        "title": "Shadow Speculative Tool Execution Escape",
+        "attack_vector": "Speculative tool pre-invocation sandbox bypass",
+        "target_boundary": "mcp_tool_registry",
+        "source_quote": "speculative pre-invocation shadow tool execution bypass",
+        "target_crate_enhancement": "killswitch-telemetry"
+    });
+    let disc_req = Request::builder()
+        .uri("/api/research/discover")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&discover_body).unwrap()))
+        .unwrap();
+    let disc_resp = app.clone().oneshot(disc_req).await.unwrap();
+    assert_eq!(disc_resp.status(), StatusCode::OK);
+    let menu: ResearchMenuResponse =
+        serde_json::from_slice(&body_to_bytes(disc_resp.into_body()).await).unwrap();
+    assert!(menu.user_approval_required);
+    assert!(menu.candidates.iter().any(|c| c.arxiv_id == "2610.77777" && c.status == "PendingApproval"));
+
+    // 3. Approve the staged candidate via POST /api/research/approve
+    let approve_body = serde_json::json!({
+        "candidate_id": "cand-2610-77777",
+        "arxiv_id": "2610.77777",
+        "decision": "approve",
+        "operator": "secops_lead"
+    });
+    let app_req = Request::builder()
+        .uri("/api/research/approve")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&approve_body).unwrap()))
+        .unwrap();
+    let app_resp = app.oneshot(app_req).await.unwrap();
+    assert_eq!(app_resp.status(), StatusCode::OK);
+    let app_res: ResearchApproveResponse =
+        serde_json::from_slice(&body_to_bytes(app_resp.into_body()).await).unwrap();
+    assert!(app_res.success);
+    assert_eq!(app_res.candidate.status, "Approved");
+    assert_eq!(app_res.candidate.approved_by.as_deref(), Some("secops_lead"));
+    assert!(app_res.candidate.approval_seal_blake3.is_some());
+    assert!(app_res.live_probe_verified);
+
+    // 4. Verify the Rust ContinuousDefenseEngine actively blocks the newly approved research vector
+    let verdict = killswitch_telemetry::global_continuous_defense().inspect_boundary(
+        "mcp_invoke",
+        "mcp_tool_registry",
+        "attempting speculative pre-invocation shadow tool execution bypass on host",
+        None,
+        1,
+    );
+    assert!(!verdict.is_clean, "Approved research vector must be actively blocked by Rust code");
+}
+
+
+#[tokio::test]
+async fn test_edr_behavioral_lineage_ioa_and_baseline_narrative_endpoints() {
+    let state = setup_test_server_state();
+    let app = build_router(state);
+
+    // 1. Trigger LotL Word -> cmd -> encoded PowerShell -> external IP chain
+    let req_lotl = Request::builder()
+        .method("POST")
+        .uri("/api/edr/behavioral/ingest")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "scenario": "lotl_word_powershell"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_lotl = app.clone().oneshot(req_lotl).await.unwrap();
+    assert_eq!(resp_lotl.status(), StatusCode::OK);
+    let body_lotl = axum::body::to_bytes(resp_lotl.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_lotl: serde_json::Value = serde_json::from_slice(&body_lotl).unwrap();
+    assert_eq!(json_lotl["success"].as_bool(), Some(true));
+    assert!(!json_lotl["narratives_emitted"].as_array().unwrap().is_empty());
+
+    // 2. Trigger 3-anomaly statistical baseline correlation (service account recon + temp unsigned DLL + 3-sigma egress spike)
+    let req_base = Request::builder()
+        .method("POST")
+        .uri("/api/edr/behavioral/ingest")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "scenario": "baseline_correlation"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp_base = app.clone().oneshot(req_base).await.unwrap();
+    assert_eq!(resp_base.status(), StatusCode::OK);
+    let body_base = axum::body::to_bytes(resp_base.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json_base: serde_json::Value = serde_json::from_slice(&body_base).unwrap();
+    let narratives = json_base["narratives_emitted"].as_array().unwrap();
+    let final_nar = narratives.last().unwrap();
+    assert!(final_nar["composite_risk_score"].as_f64().unwrap() >= 0.85);
 }

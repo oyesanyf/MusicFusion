@@ -1,0 +1,78 @@
+{
+  "risk_report": {
+    "task": "classification",
+    "target_type": "binary",
+    "n_rows": 244,
+    "n_cols": 8,
+    "n_numeric": 8,
+    "n_categorical": 0,
+    "missing_ratio": 0.0,
+    "leakage_proxy_features": [],
+    "leakage_proxy_score_max": 0.6639064538793535,
+    "temporal_leakage_gap": null,
+    "class_imbalance_max_ratio": 0.6188524590163934,
+    "imbalance_severity": 0.23770491803278682,
+    "vif_max": 11.647771783071619,
+    "vif_features": [
+      "day_Sat",
+      "day_Sun"
+    ],
+    "cv_score_std": 0.0603937568831001,
+    "notes": [
+      "High multicollinearity: VIF max=11.6."
+    ]
+  },
+  "constraints": {
+    "max_train_time_s": null,
+    "max_peak_mem_mb": null,
+    "max_latency_ms_per_row": null
+  },
+  "candidates_evaluated": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.6840811000702599,
+      "train_time_s": 0.05296659469604492,
+      "peak_mem_mb": 0.1796875,
+      "latency_ms_per_row": 0.0546028216679891,
+      "risk_penalty": 0.23742761430498707,
+      "cv_scores": [
+        0.7682926829268293,
+        0.6296296296296297,
+        0.654320987654321
+      ],
+      "cv_score_std": 0.0603937568831001,
+      "stress_worst_drop": 0.02083333333333337,
+      "stress_tests": [
+        {
+          "name": "label_noise_2pct",
+          "stressed_metric": 0.6875,
+          "delta": 0.02083333333333337
+        }
+      ]
+    }
+  ],
+  "pareto_front": [
+    {
+      "name": "LogisticRegression",
+      "metric": 0.6840811000702599,
+      "train_time_s": 0.05296659469604492,
+      "peak_mem_mb": 0.1796875,
+      "latency_ms_per_row": 0.0546028216679891,
+      "risk_penalty": 0.23742761430498707
+    }
+  ],
+  "pruned_or_failed": [],
+  "selected": {
+    "name": "LogisticRegression",
+    "metric": 0.6840811000702599,
+    "train_time_s": 0.05296659469604492,
+    "peak_mem_mb": 0.1796875,
+    "latency_ms_per_row": 0.0546028216679891,
+    "risk_penalty": 0.23742761430498707,
+    "stress_worst_drop": 0.02083333333333337
+  },
+  "risk_calibrator": {
+    "type": null,
+    "used": false
+  }
+}

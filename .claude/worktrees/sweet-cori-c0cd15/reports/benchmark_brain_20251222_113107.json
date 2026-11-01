@@ -1,0 +1,131 @@
+{
+  "timestamp": "2025-12-22T11:35:26.877199",
+  "systems_tested": [
+    "ACDSO",
+    "TPOT",
+    "FLAML"
+  ],
+  "datasets_tested": [
+    "brain"
+  ],
+  "time_budget_s": 60,
+  "results": [
+    {
+      "system": "ACDSO",
+      "dataset": "brain",
+      "task": "classification",
+      "test_score": 0.7675675675675676,
+      "test_f1": 0.7627550130775937,
+      "test_precision": 0.7832070420305715,
+      "test_recall": 0.7675675675675676,
+      "test_rmse": null,
+      "test_mae": null,
+      "fit_time_s": 34.715651512145996,
+      "predict_time_s": 0.12131357192993164,
+      "latency_ms_per_row": 0.65574903745909,
+      "peak_memory_mb": 0.0,
+      "cv_score_mean": 0.0,
+      "cv_score_std": 0.022715872920775,
+      "has_risk_report": true,
+      "has_audit_trail": true,
+      "detected_leakage": true,
+      "detected_multicollinearity": false,
+      "risk_penalty": 0.019674355495250984,
+      "pareto_front_size": 2,
+      "n_train": 737,
+      "n_test": 185,
+      "n_features": 63,
+      "time_budget_s": 60,
+      "error": null
+    },
+    {
+      "system": "TPOT",
+      "dataset": "brain",
+      "task": "classification",
+      "test_score": 0.0,
+      "test_f1": null,
+      "test_precision": null,
+      "test_recall": null,
+      "test_rmse": null,
+      "test_mae": null,
+      "fit_time_s": 0.0,
+      "predict_time_s": 0.0,
+      "latency_ms_per_row": 0.0,
+      "peak_memory_mb": 0.0,
+      "cv_score_mean": 0.0,
+      "cv_score_std": 0.0,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "detected_leakage": false,
+      "detected_multicollinearity": false,
+      "risk_penalty": null,
+      "pareto_front_size": null,
+      "n_train": 737,
+      "n_test": 185,
+      "n_features": 63,
+      "time_budget_s": 60,
+      "error": "No individuals could be evaluated in the initial population as the max_eval_mins time limit was reached before any individuals could be evaluated."
+    },
+    {
+      "system": "FLAML",
+      "dataset": "brain",
+      "task": "classification",
+      "test_score": 0.572972972972973,
+      "test_f1": 0.48933502215414,
+      "test_precision": 0.7737773487773487,
+      "test_recall": 0.572972972972973,
+      "test_rmse": null,
+      "test_mae": null,
+      "fit_time_s": 109.93136167526245,
+      "predict_time_s": 0.09780740737915039,
+      "latency_ms_per_row": 0.5286886885359481,
+      "peak_memory_mb": 23.798577308654785,
+      "cv_score_mean": 0.0,
+      "cv_score_std": 0.0,
+      "has_risk_report": false,
+      "has_audit_trail": false,
+      "detected_leakage": false,
+      "detected_multicollinearity": false,
+      "risk_penalty": null,
+      "pareto_front_size": null,
+      "n_train": 737,
+      "n_test": 185,
+      "n_features": 63,
+      "time_budget_s": 60,
+      "error": null
+    }
+  ],
+  "leakage_tests": [
+    {
+      "system": "ACDSO",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": null
+    },
+    {
+      "system": "TPOT",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": "not_supported"
+    },
+    {
+      "system": "FLAML",
+      "leakage_type": "proxy",
+      "injected": true,
+      "detected": false,
+      "detection_method": "not_supported"
+    }
+  ],
+  "winner_by_metric": {
+    "test_score": "ACDSO",
+    "fit_time_s": "ACDSO",
+    "latency_ms_per_row": "FLAML",
+    "peak_memory_mb": "ACDSO",
+    "cv_score_std": "FLAML",
+    "risk_detection": "ACDSO",
+    "audit_trail": "ACDSO"
+  },
+  "statistical_tests": {}
+}

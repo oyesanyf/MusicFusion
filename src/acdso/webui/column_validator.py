@@ -157,11 +157,31 @@ def _rule_based_validate(df: pd.DataFrame, roles: dict[str, list]) -> Validation
                 continue
             s = df[col]
             col_lower = col.lower()
-            if any(w in col_lower for w in id_like_words) and s.nunique() > 0.9 * len(s):
+            n = len(s)
+            nunique = s.nunique()
+            if any(w in col_lower for w in id_like_words) and nunique > 0.9 * n:
                 issues.append(ColumnIssue(
                     column=col, role=role, severity="warn",
                     message=f"'{col}' looks like an identifier column (mostly unique values) "
                             f"-- unusual choice for a {ROLE_LABELS[role]}.",
+                ))
+            elif (
+                str(s.dtype) in ("object", "category")
+                and n > 0
+                and (nunique > 50 or nunique / n > 0.3)
+            ):
+                # Not necessarily ID-named (an ID-like name is already caught
+                # above), but a categorical column with this many distinct
+                # values has almost nothing repeated per class -- a wasted,
+                # hours-long run rather than a real classification target
+                # (e.g. a per-row app/service name in network logs). Blocks
+                # rather than warns because the earlier warn-only version of
+                # this check let exactly this run to completion uselessly.
+                issues.append(ColumnIssue(
+                    column=col, role=role, severity="block",
+                    message=f"'{col}' has {nunique} distinct values ({nunique / n:.0%} of rows) -- "
+                            f"this looks like a categorical identifier or dimension (e.g. an "
+                            f"app/service name), not a genuine {ROLE_LABELS[role]}.",
                 ))
             elif _is_datetime_like(s) and not pd.api.types.is_numeric_dtype(s):
                 issues.append(ColumnIssue(

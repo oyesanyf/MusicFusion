@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>RFCHunt - Protocol Research & Terminator Engine Dashboard</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card-bg: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-heading: #58a6ff;
+            --pass: #238636;
+            --warn: #d29922;
+            --fail: #da3633;
+            --accent: #1f6feb;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 24px;
+        }
+        .header {
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 16px;
+            margin-bottom: 24px;
+        }
+        h1 { margin: 0; color: #f0f6fc; font-size: 24px; }
+        .meta { color: #8b949e; font-size: 14px; margin-top: 6px; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px;
+        }
+        .card-title { font-size: 13px; color: #8b949e; text-transform: uppercase; font-weight: 600; }
+        .card-value { font-size: 28px; font-weight: 700; color: #f0f6fc; margin-top: 8px; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-pass { background: rgba(35, 134, 54, 0.2); color: #3fb950; border: 1px solid #238636; }
+        .badge-warn { background: rgba(210, 153, 34, 0.2); color: #e3b341; border: 1px solid #d29922; }
+        .badge-fail { background: rgba(218, 54, 51, 0.2); color: #f85149; border: 1px solid #da3633; }
+        .badge-rfc { background: rgba(31, 111, 235, 0.2); color: #58a6ff; border: 1px solid #1f6feb; }
+        .merkle-box {
+            background: #090d13;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #79c0ff;
+            word-break: break-all;
+            margin-top: 8px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            margin-top: 12px;
+        }
+        th, td {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        th { color: #8b949e; font-weight: 600; background: #0d1117; }
+        tr:hover { background-color: rgba(255, 255, 255, 0.02); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>RFCHunt // Protocol Research & Autonomous Terminator Engine</h1>
+        <div class="meta">
+            Target Endpoint: <strong>127.0.0.1:5006</strong> |
+            Generated: 2026-10-18 21:39:48 UTC |
+            Engines: PortSwigger HTTP Terminator (James Kettle) &amp; RAPTOR Framework (Gadi Evron, Daniel Cuthbert, Halvar Flake)
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px; border-left: 4px solid #58a6ff;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div>
+                <div class="card-title" style="color:#58a6ff;">RAPTOR Autonomous Security Framework Integration</div>
+                <div style="font-size:14px; margin-top:4px; color:#f0f6fc;">
+                    <strong>Core Authors:</strong> Gadi Evron &bull; Daniel Cuthbert (ORCID: 0009-0000-6443-0251) &bull; Thomas Dullien (&ldquo;Halvar Flake&rdquo;)
+                </div>
+            </div>
+            <div>
+                <span class="badge" style="background:rgba(88, 166, 255, 0.15); color:#58a6ff; border:1px solid #1f6feb;">danielcuthbert/raptor:latest</span>
+                <span class="badge" style="background:rgba(35, 134, 54, 0.2); color:#3fb950; border:1px solid #238636;">Local AI Triage (Foundation-Sec)</span>
+            </div>
+        </div>
+        <div style="font-size:13px; margin-top:10px; color:#8b949e; line-height:1.5;">
+            Seamlessly unites wire-layer protocol desynchronization research with source-code static analysis (Semgrep, Coccinelle, CodeQL) and dynamic web application scanning (<code>raptor.py web</code>). Findings are normalized into <code>terminator.db</code> and protected by the Merkle audit trail.
+            <div style="margin-top:6px;">
+                <a href="https://github.com/gadievron/raptor" target="_blank" style="color:#58a6ff; text-decoration:none; font-weight:600;">&rarr; https://github.com/gadievron/raptor</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-title">Wire Probes Executed</div>
+            <div class="card-value">20</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Conformant Probes</div>
+            <div class="card-value" style="color:#3fb950;">18 <span style="font-size:14px; color:#8b949e;">(90.0%)</span></div>
+        </div>
+        <div class="card">
+            <div class="card-title">Parser Anomalies</div>
+            <div class="card-value" style="color:#e3b341;">2 <span style="font-size:14px; color:#8b949e;">(10.0%)</span></div>
+        </div>
+        <div class="card">
+            <div class="card-title">Confirmed Flaws</div>
+            <div class="card-value" style="color:#f85149;">0 <span style="font-size:14px; color:#8b949e;">(0.0%)</span></div>
+        </div>
+        <div class="card">
+            <div class="card-title">Arm 106 & 107 Defenses</div>
+            <div class="card-value" style="color:#58a6ff;">12 / 12</div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom:24px;">
+        <div class="card-title">Cryptographic Merkle Audit Trail (RFC 6962 Tamper-Evident Proof)</div>
+        <div style="font-size:13px; margin-top:8px; color:#8b949e;">
+            Total Merkle Leaves: <strong>0</strong> | Verification Invariant: <strong>Multi-Trial Stability Enforced</strong>
+        </div>
+        <div class="merkle-box">SHA-256 Merkle Root: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Confirmed Protocol Vulnerabilities & Research Findings</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Index</th>
+                    <th>Specification</th>
+                    <th>Vulnerability Class</th>
+                    <th>Evidence / Behavior</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan='5' style='text-align:center; color:#888;'>No confirmed desynchronization flaws detected. Target is conformant.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

@@ -88,6 +88,12 @@ neuralprophet>=0.7.0
 # Darts - Time series library with many models
 darts>=0.26.0
 
+# TimesFM - Google's pretrained time-series foundation model (heavy: pulls
+# in torch). Source and weights up to 2.5 are Apache-2.0; the default
+# checkpoint ACDSO uses is 2.5 -- TimesFM 3.0's pretrained weights are
+# restricted to non-commercial/non-production use. Uncomment to use:
+# timesfm[torch]>=3.0.0
+
 # statsmodels - Statistical modeling (for decomposition, etc.)
 statsmodels>=0.14.0
 

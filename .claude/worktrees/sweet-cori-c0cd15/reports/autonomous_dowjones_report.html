@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ACDSO Analysis: dowjones.csv</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { text-align: center; padding: 30px; background: linear-gradient(135deg, #0f3460, #1a1a2e); border-radius: 10px; margin-bottom: 20px; }
+        .header h1 { color: #00d9ff; margin: 0; }
+        .section { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 20px; margin: 15px 0; }
+        .section h2 { color: #00d9ff; border-bottom: 2px solid #0f3460; padding-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #0f3460; }
+        th { background: #0f3460; color: #00d9ff; }
+        .success { color: #28a745; }
+        .failed { color: #dc3545; }
+        .skipped { color: #ffc107; }
+        .metric { font-size: 2em; font-weight: bold; color: #00d9ff; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .card { background: rgba(0,217,255,0.1); padding: 20px; border-radius: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ACDSO v3.0 Analysis Report</h1>
+            <p>File: c:\dataset\dowjones.csv</p>
+            <p>Generated: 2025-12-25 08:21:45</p>
+        </div>
+        
+        <div class="cards">
+            <div class="card">
+                <div class="metric">649</div>
+                <div>Rows</div>
+            </div>
+            <div class="card">
+                <div class="metric">2</div>
+                <div>Columns</div>
+            </div>
+            <div class="card">
+                <div class="metric">43%</div>
+                <div>Success Rate</div>
+            </div>
+            <div class="card">
+                <div class="metric">547.7s</div>
+                <div>Total Time</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Dataset Information</h2>
+            <table>
+                <tr><td>Target Column</td><td><strong>Price</strong></td></tr>
+                <tr><td>Task Type</td><td>regression</td></tr>
+                <tr><td>Datetime Column</td><td>Date</td></tr>
+                <tr><td>Features</td><td>1</td></tr>
+            </table>
+        </div>
+        
+        <div class="section">
+            <h2>Analysis Phases</h2>
+            <table>
+                <thead><tr><th>Phase</th><th>Status</th><th>Duration</th></tr></thead>
+                <tbody>
+<tr><td>Data Loading</td><td class="success">SUCCESS</td><td>0.0s</td></tr>
+<tr><td>Target Detection</td><td class="success">SUCCESS</td><td>7.4s</td></tr>
+<tr><td>Auto EDA</td><td class="failed">FAILED: 'ACDSOAutoEDA' object has no attribute 'fit'</td><td>0.0s</td></tr>
+<tr><td>Risk Analysis</td><td class="skipped">SKIPPED: No features</td><td>0.0s</td></tr>
+<tr><td>AutoML</td><td class="skipped">SKIPPED: Time-series-only dataset</td><td>0.0s</td></tr>
+<tr><td>Time Series</td><td class="success">SUCCESS</td><td>540.3s</td></tr>
+<tr><td>Benchmark</td><td class="skipped">SKIPPED: Use --benchmark flag</td><td>0.0s</td></tr>
+
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Generated Files</h2>
+            <ul>
+                <li>This report: reports/autonomous_*_report.html</li>
+                <li>EDA report: reports/eda_*.html</li>
+                <li>Audit trail: reports/audit_*.json</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
