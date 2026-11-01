@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use log::info;
 
 use music_core::state::{
-    MusicProductionState, STEM_BASS, STEM_DRUMS, STEM_GUITAR, STEM_INPAINTED_DRUMS,
+    MusicProductionState, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_GUITAR, STEM_INPAINTED_DRUMS,
     STEM_INPAINTED_GUITAR, STEM_OTHER, STEM_YUE_INSTRUMENTALS,
 };
 use music_dsp::crossfader::splice_stem;
@@ -150,16 +150,22 @@ impl VirtuosoStemInpaintingNode {
         let mut bass_filter = StemFilter::lowpass(220.0, 0.707, channels, sr);
         // 2. Guitar filter: Bandpass 250 Hz - 3500 Hz (center 1200 Hz)
         let mut guitar_bp = StemFilter::bandpass(1200.0, 1.2, channels, sr);
-        // 3. Drums: Highpass at 3500 Hz + punch band
-        let mut drums_hp = StemFilter::highpass(3500.0, 0.707, channels, sr);
+        // 3. Drums: Wide-band percussion filter covering low punch (80-220 Hz),
+        // mid percussion snap/body (400-2500 Hz), and high sizzle (> 2500 Hz)
+        let mut drums_punch = StemFilter::bandpass(120.0, 1.0, channels, sr);
+        let mut drums_mid = StemFilter::bandpass(1100.0, 1.2, channels, sr);
+        let mut drums_hp = StemFilter::highpass(2500.0, 0.707, channels, sr);
 
         for f in 0..frames {
             for c in 0..channels {
                 let s = mix.samples[f * channels + c];
                 let b = bass_filter.process_sample(c, s) * 1.1;
                 let g = guitar_bp.process_sample(c, s) * 0.95;
-                let d = drums_hp.process_sample(c, s) * 0.9;
-                let o = (s - (b + g + d)).clamp(-1.0, 1.0) * 0.85;
+                let d_punch = drums_punch.process_sample(c, s);
+                let d_mid = drums_mid.process_sample(c, s);
+                let d_high = drums_hp.process_sample(c, s);
+                let d = (d_punch * 0.65 + d_mid * 0.55 + d_high * 0.85).clamp(-1.0, 1.0) * 0.9;
+                let o = (s - (b * 0.6 + g * 0.6 + d * 0.6)).clamp(-1.0, 1.0) * 0.85;
 
                 bass.samples[f * channels + c] = b.clamp(-1.0, 1.0);
                 guitar.samples[f * channels + c] = g.clamp(-1.0, 1.0);
@@ -208,13 +214,36 @@ impl VirtuosoStemInpaintingNode {
         let memory = SystemMemory::detect_live();
         let use_dsp = memory.should_use_dsp(PipelineStageKind::Stage4Inpainting, &state.engine_mode);
 
-        let (drums_buf, bass_buf, guitar_buf, other_buf) = if !use_dsp && state.is_hf_hybrid() {
+        let (mut drums_buf, bass_buf, guitar_buf, other_buf) = if !use_dsp && state.is_hf_hybrid() {
             // HF Demucs subprocess path (with fallback to pure-Rust DSP)
             info!("Attempting external Demucs subprocess separation...");
             self.separate_stems_pure_rust(&base_inst)
         } else {
             self.separate_stems_pure_rust(&base_inst)
         };
+
+        // Blend active groove buffer draft_groove (e.g. 0.85 * draft_groove)
+        // to preserve authentic percussion transients (Amapiano log drum, clave, shakers, one-drop kick)
+        if let Some(groove_path) = state.get_stem(STEM_DRAFT_GROOVE)
+            .or_else(|| state.get_stem("draft_groove"))
+            .cloned()
+        {
+            if let Ok(groove_buf) = AudioBuffer::from_wav_file(&groove_path) {
+                let g_frames = groove_buf.frame_count();
+                let g_chans = groove_buf.channels as usize;
+                let d_frames = drums_buf.frame_count();
+                let d_chans = drums_buf.channels as usize;
+                let blend_frames = d_frames.min(g_frames);
+                for f in 0..blend_frames {
+                    for c in 0..d_chans {
+                        let gc = c.min(g_chans - 1);
+                        let s_d = drums_buf.samples[f * d_chans + c];
+                        let s_g = groove_buf.samples[f * g_chans + gc];
+                        drums_buf.samples[f * d_chans + c] = (s_d * 0.35 + s_g * 0.85).clamp(-1.0, 1.0);
+                    }
+                }
+            }
+        }
 
         let total_bars = ((base_inst.duration_secs() * state.bpm as f32) / (4.0 * 60.0)).floor() as u32;
         let mut start_bar = self.resolve_solo_start_bar(state);

@@ -35,8 +35,8 @@ def main():
     try:
         import torch
         import soundfile as sf
-    except ImportError as e:
-        sys.stderr.write(f"Missing required neural dependencies: {e}\n")
+    except Exception as e:
+        sys.stderr.write(f"Missing or broken neural dependencies: {e}\n")
         sys.exit(2)
 
     # Check CUDA device availability if requested
