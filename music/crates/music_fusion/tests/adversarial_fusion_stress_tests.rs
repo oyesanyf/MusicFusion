@@ -625,3 +625,149 @@ async fn test_stress_producer_panel_offline_fallback_multi_genre() {
         assert_eq!(state.bpm, expected_bpm);
     }
 }
+
+// ============================================================================
+// PART 6: EMPIRICAL CHALLENGER VERIFICATION (BUILDER ERGONOMICS & STATE ISOLATION)
+// ============================================================================
+
+#[test]
+fn test_empirical_challenger_force_dsp_across_all_stages_and_gpu_tiers() {
+    let stages = [
+        PipelineStageKind::OllamaPanel,
+        PipelineStageKind::Stage1Groove,
+        PipelineStageKind::Stage2YuE,
+        PipelineStageKind::Stage3VoiceConversion,
+        PipelineStageKind::Stage4Inpainting,
+        PipelineStageKind::Stage5Mastering,
+        PipelineStageKind::GrooveFoundation,
+        PipelineStageKind::YuESynthesis,
+        PipelineStageKind::VoiceConversion,
+        PipelineStageKind::StemSeparationAndInpainting,
+        PipelineStageKind::Mastering,
+    ];
+
+    let gpu_vram_tiers = [
+        (0.0, 0.0, None),                                 // 0 GB (No GPU)
+        (8.0, 8.0, Some("RTX 3060 8GB".to_string())),     // 8 GB
+        (24.0, 24.0, Some("RTX 4090 24GB".to_string())),  // 24 GB
+        (48.0, 48.0, Some("RTX 6000 Ada".to_string())),   // 48 GB
+        (80.0, 80.0, Some("NVIDIA A100 80GB".to_string())), // 80 GB Data center
+    ];
+
+    let engine_modes = ["auto", "pure_rust", "hf_hybrid", "custom_experimental"];
+
+    for (total_vram, free_vram, gpu_name) in &gpu_vram_tiers {
+        let base_mem = SystemMemory::simulated(
+            128.0,
+            96.0,
+            32,
+            gpu_name.clone(),
+            *total_vram,
+            *free_vram,
+        );
+
+        // Builder call ergonomics: with_force_dsp(true)
+        let forced_mem = base_mem.clone().with_force_dsp(true);
+
+        // 1. Verify state isolation: base instance unchanged
+        assert!(!base_mem.force_dsp, "Base memory force_dsp must remain false");
+        assert!(forced_mem.force_dsp, "Forced memory force_dsp must be true");
+
+        // 2. Verify all stages and engine modes route to PureRustDsp
+        for stage in &stages {
+            for mode in &engine_modes {
+                let route = forced_mem.route_stage(*stage, mode);
+                assert_eq!(
+                    route,
+                    ExecutionRoute::PureRustDsp,
+                    "Stage {:?} with mode {} under {} GB VRAM did not route to PureRustDsp with force_dsp(true)",
+                    stage, mode, free_vram
+                );
+                assert!(
+                    forced_mem.should_use_dsp(*stage, mode),
+                    "should_use_dsp must return true for {:?} under mode {}",
+                    stage, mode
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_empirical_challenger_force_hf_routes_to_gpu_when_vram_sufficient() {
+    let stages = [
+        (PipelineStageKind::OllamaPanel, 2.0),
+        (PipelineStageKind::Stage1Groove, 6.0),
+        (PipelineStageKind::Stage2YuE, 8.0),
+        (PipelineStageKind::Stage3VoiceConversion, 4.0),
+        (PipelineStageKind::Stage4Inpainting, 8.0),
+        (PipelineStageKind::Stage5Mastering, 4.0),
+    ];
+
+    // High VRAM: 24 GB and 48 GB free VRAM (budgets 20.4 GB and 40.8 GB >= 8.0 GB required)
+    let high_vram_tiers = [
+        (24.0, 24.0, "RTX 4090"),
+        (48.0, 48.0, "RTX 6000 Ada"),
+    ];
+
+    for (total, free, name) in &high_vram_tiers {
+        let base_mem = SystemMemory::simulated(
+            64.0,
+            48.0,
+            16,
+            Some(name.to_string()),
+            *total,
+            *free,
+        );
+
+        let forced_hf_mem = base_mem.clone().with_force_hf(true);
+
+        // State isolation check
+        assert!(!base_mem.force_hf);
+        assert!(forced_hf_mem.force_hf);
+
+        // When free VRAM is sufficient, route_stage must return HuggingFaceGpu
+        for (stage, req_vram) in &stages {
+            assert!(
+                forced_hf_mem.gpu_budget_gb() >= *req_vram,
+                "GPU budget should exceed requirement"
+            );
+            assert_eq!(
+                forced_hf_mem.route_stage(*stage, "auto"),
+                ExecutionRoute::HuggingFaceGpu,
+                "Stage {:?} should route to HuggingFaceGpu under {} GB VRAM",
+                stage, free
+            );
+            assert_eq!(
+                forced_hf_mem.route_stage(*stage, "hf_hybrid"),
+                ExecutionRoute::HuggingFaceGpu,
+                "Stage {:?} should route to HuggingFaceGpu under hf_hybrid with {} GB VRAM",
+                stage, free
+            );
+        }
+    }
+
+    // Mid VRAM: 8.0 GB free VRAM (budget 8.0 * 0.85 = 6.8 GB)
+    // Stage1 (6.0), Stage3 (4.0), Stage5 (4.0) have sufficient VRAM -> HuggingFaceGpu
+    let mid_mem = SystemMemory::simulated(
+        64.0,
+        48.0,
+        16,
+        Some("RTX 3070 8GB".into()),
+        8.0,
+        8.0,
+    ).with_force_hf(true);
+
+    assert_eq!(mid_mem.route_stage(PipelineStageKind::Stage1Groove, "auto"), ExecutionRoute::HuggingFaceGpu);
+    assert_eq!(mid_mem.route_stage(PipelineStageKind::Stage3VoiceConversion, "auto"), ExecutionRoute::HuggingFaceGpu);
+    assert_eq!(mid_mem.route_stage(PipelineStageKind::Stage5Mastering, "auto"), ExecutionRoute::HuggingFaceGpu);
+
+    // Conflict resolution test: when both force_dsp AND force_hf are set, fail-closed pure-Rust DSP takes precedence
+    let conflicting_mem = mid_mem.clone().with_force_dsp(true);
+    assert_eq!(
+        conflicting_mem.route_stage(PipelineStageKind::Stage1Groove, "auto"),
+        ExecutionRoute::PureRustDsp,
+        "Conflicting flags must fail closed to PureRustDsp"
+    );
+}
+
