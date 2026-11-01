@@ -20,14 +20,42 @@ use tantivy::{Index, IndexReader, IndexWriter, TantivyDocument, Term};
 
 use crate::error::StorageError;
 
+/// Verification criteria applied during reader synchronization to ensure
+/// read-your-writes coherence for specific operations.
+#[derive(Debug, Clone, Copy)]
+enum SyncCheck<'a> {
+    /// General synchronization (verifies commit sequence and metadata parity).
+    None,
+    /// Verifies that a specific chunk_id is present and searchable.
+    DocPresent { chunk_id: &'a str },
+    /// Verifies that a specific chunk_id has been purged / marked deleted.
+    DocAbsent { chunk_id: &'a str },
+    /// Verifies that all documents with the specified file_path have been purged.
+    FilePathAbsent { file_path: &'a str },
+    /// Verifies that all documents have been cleared (`num_docs == 0`).
+    AllCleared,
+}
+
+/// Helper to parse the monotonic commit sequence number embedded in Tantivy's `IndexMeta.payload`.
+fn parse_commit_seq(meta: &tantivy::IndexMeta) -> u64 {
+    if let Some(ref p) = meta.payload {
+        if let Some(val) = p.strip_prefix("seq:") {
+            if let Ok(seq) = val.parse::<u64>() {
+                return seq;
+            }
+        }
+    }
+    0
+}
+
 /// Tantivy inverted index providing BM25 keyword search with access-tier filtering.
 pub(crate) struct TantivyFtsIndex {
     index: Index,
     reader: IndexReader,
-    writer: Mutex<IndexWriter<TantivyDocument>>,
+    writer: Mutex<Option<IndexWriter<TantivyDocument>>>,
     last_commit_opstamp: AtomicU64,
-    commit_generation: AtomicU64,
-    synced_generation: AtomicU64,
+    last_commit_seq: AtomicU64,
+    synced_seq: AtomicU64,
     field_chunk_id: Field,
     field_document_id: Field,
     field_file_path: Field,
@@ -42,13 +70,50 @@ pub(crate) struct TantivyFtsIndex {
 }
 
 impl TantivyFtsIndex {
-    /// Helper to instantiate a new IndexWriter configured with NoMergePolicy.
+    /// Helper to instantiate a new IndexWriter configured with NoMergePolicy, retrying on transient Windows file lock delays.
     fn create_writer_inner(index: &Index) -> Result<IndexWriter<TantivyDocument>, StorageError> {
-        let writer = index
-            .writer_with_num_threads::<TantivyDocument>(1, 50_000_000)
-            .map_err(|e| StorageError::Tantivy(format!("Failed to create Tantivy writer: {}", e)))?;
-        writer.set_merge_policy(Box::new(NoMergePolicy));
-        Ok(writer)
+        let mut attempts = 0;
+        loop {
+            match index.writer_with_num_threads::<TantivyDocument>(1, 50_000_000) {
+                Ok(writer) => {
+                    writer.set_merge_policy(Box::new(NoMergePolicy));
+                    return Ok(writer);
+                }
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= 25 {
+                        return Err(StorageError::Tantivy(format!(
+                            "Failed to create Tantivy writer after {} attempts: {}", attempts, e
+                        )));
+                    }
+                    std::thread::yield_now();
+                    std::thread::sleep(std::time::Duration::from_millis(10 * attempts as u64));
+                }
+            }
+        }
+    }
+
+    /// Accesses the active writer, instantiating one if currently None.
+    fn get_or_recreate_writer<'a>(
+        index: &Index,
+        guard: &'a mut Option<IndexWriter<TantivyDocument>>,
+    ) -> Result<&'a mut IndexWriter<TantivyDocument>, StorageError> {
+        if guard.is_none() {
+            *guard = Some(Self::create_writer_inner(index)?);
+        }
+        Ok(guard.as_mut().expect("writer initialized"))
+    }
+
+    /// Drops any existing IndexWriter to release `.tantivy-writer.lock` before creating a fresh writer.
+    fn recreate_writer(
+        index: &Index,
+        guard: &mut Option<IndexWriter<TantivyDocument>>,
+    ) -> Result<(), StorageError> {
+        *guard = None;
+        std::thread::yield_now();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        *guard = Some(Self::create_writer_inner(index)?);
+        Ok(())
     }
 
     /// Opens or creates the Tantivy index at `path`.
@@ -84,19 +149,24 @@ impl TantivyFtsIndex {
             .try_into()
             .map_err(|e| StorageError::Tantivy(format!("Failed to create Tantivy reader: {}", e)))?;
 
-        let last_commit_opstamp = AtomicU64::new(
-            index.load_metas().map(|m| m.opstamp).unwrap_or(0),
-        );
-        let commit_generation = AtomicU64::new(0);
-        let synced_generation = AtomicU64::new(0);
+        let (initial_opstamp, initial_seq) = match index.load_metas() {
+            Ok(m) => {
+                let seq = parse_commit_seq(&m);
+                (m.opstamp, seq)
+            }
+            Err(_) => (0, 0),
+        };
+        let last_commit_opstamp = AtomicU64::new(initial_opstamp);
+        let last_commit_seq = AtomicU64::new(initial_seq);
+        let synced_seq = AtomicU64::new(initial_seq);
 
         Ok(Self {
             index,
             reader,
-            writer: Mutex::new(writer),
+            writer: Mutex::new(Some(writer)),
             last_commit_opstamp,
-            commit_generation,
-            synced_generation,
+            last_commit_seq,
+            synced_seq,
             field_chunk_id,
             field_document_id,
             field_file_path,
@@ -143,79 +213,86 @@ impl TantivyFtsIndex {
             return Ok(0);
         }
 
-        let mut writer = self
+        let mut writer_guard = self
             .writer
             .lock()
             .map_err(|_| StorageError::Tantivy("Tantivy index writer mutex poisoned".into()))?;
 
         let mut recovery_attempts = 0;
-        const MAX_RECOVERIES: usize = 3;
+        const MAX_RECOVERIES: usize = 10;
 
         'batch_attempt: loop {
-            let mut crash_occurred = false;
-            for c in chunks {
-                let doc = self.chunk_to_doc(c);
-                if let Err(e) = writer.add_document(doc) {
-                    let msg = e.to_string();
-                    if msg.contains("index writer was killed") || msg.contains("panicked") {
-                        tracing::warn!(
-                            "Tantivy writer was killed during add_document; re-creating and replaying batch: {}",
-                            msg
-                        );
-                        recovery_attempts += 1;
-                        if recovery_attempts > MAX_RECOVERIES {
-                            return Err(StorageError::Tantivy(format!(
-                                "Exceeded maximum writer recoveries ({}) during add_document: {}",
-                                MAX_RECOVERIES, msg
-                            )));
-                        }
-                        *writer = Self::create_writer_inner(&self.index)?;
-                        crash_occurred = true;
+            let add_err = {
+                let writer = Self::get_or_recreate_writer(&self.index, &mut writer_guard)?;
+
+                let mut err = None;
+                for c in chunks {
+                    let doc = self.chunk_to_doc(c);
+                    if let Err(e) = writer.add_document(doc) {
+                        err = Some(e);
                         break;
-                    } else {
-                        return Err(StorageError::Tantivy(format!("Add document error: {}", e)));
                     }
                 }
-            }
+                err
+            };
 
-            if crash_occurred {
+            if let Some(e) = add_err {
+                tracing::warn!(
+                    "Tantivy writer failed during add_document (attempt {} of {}); re-creating and replaying batch: {}",
+                    recovery_attempts + 1,
+                    MAX_RECOVERIES,
+                    e
+                );
+                recovery_attempts += 1;
+                if recovery_attempts > MAX_RECOVERIES {
+                    return Err(StorageError::Tantivy(format!(
+                        "Exceeded maximum writer recoveries ({}) during add_document: {}",
+                        MAX_RECOVERIES, e
+                    )));
+                }
+                Self::recreate_writer(&self.index, &mut writer_guard)?;
                 // Replay the full batch from index 0 on the fresh writer
                 continue 'batch_attempt;
             }
 
-            match commit_with_retry(&mut writer) {
+            let next_seq = self.last_commit_seq.fetch_add(1, Ordering::SeqCst) + 1;
+            let commit_res = {
+                let writer = Self::get_or_recreate_writer(&self.index, &mut writer_guard)?;
+                commit_single(writer, Some(&format!("seq:{}", next_seq)))
+            };
+
+            match commit_res {
                 Ok(op) => {
-                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
                     self.last_commit_opstamp.store(op, Ordering::Release);
                 }
                 Err(e) => {
-                    let msg = e.to_string();
-                    if msg.contains("index writer was killed") || msg.contains("panicked") {
-                        tracing::warn!(
-                            "Tantivy writer killed during commit; re-creating and replaying batch: {}",
-                            msg
-                        );
-                        recovery_attempts += 1;
-                        if recovery_attempts > MAX_RECOVERIES {
-                            return Err(StorageError::Tantivy(format!(
-                                "Exceeded maximum writer recoveries ({}) during commit: {}",
-                                MAX_RECOVERIES, msg
-                            )));
-                        }
-                        *writer = Self::create_writer_inner(&self.index)?;
-                        // Replay the full batch from index 0 on the fresh writer
-                        continue 'batch_attempt;
-                    } else {
-                        return Err(e);
+                    tracing::warn!(
+                        "Tantivy writer failed during commit (attempt {} of {}); re-creating and replaying batch: {}",
+                        recovery_attempts + 1,
+                        MAX_RECOVERIES,
+                        e
+                    );
+                    recovery_attempts += 1;
+                    if recovery_attempts > MAX_RECOVERIES {
+                        return Err(StorageError::Tantivy(format!(
+                            "Exceeded maximum writer recoveries ({}) during commit: {}",
+                            MAX_RECOVERIES, e
+                        )));
                     }
+                    Self::recreate_writer(&self.index, &mut writer_guard)?;
+                    // Replay the full batch from index 0 on the fresh writer
+                    continue 'batch_attempt;
                 }
             }
 
             break 'batch_attempt;
         }
 
-        drop(writer);
-        self.reload_with_retry()?;
+        drop(writer_guard);
+
+        // Verify that the first chunk is discoverable before returning
+        let first_chunk_id = &chunks[0].chunk_id;
+        self.reload_with_retry(SyncCheck::DocPresent { chunk_id: first_chunk_id })?;
 
         Ok(chunks.len())
     }
@@ -232,7 +309,7 @@ impl TantivyFtsIndex {
             return Ok(Vec::new());
         }
 
-        self.reload_with_retry()?;
+        self.reload_with_retry(SyncCheck::None)?;
         let searcher = self.reader.searcher();
         if searcher.num_docs() == 0 {
             return Ok(Vec::new());
@@ -295,7 +372,7 @@ impl TantivyFtsIndex {
 
     /// Checks if a chunk hash already exists in the Tantivy index.
     pub(crate) fn has_chunk_hash(&self, blake3_hash: &str) -> Result<bool, StorageError> {
-        self.reload_with_retry()?;
+        self.reload_with_retry(SyncCheck::None)?;
         let searcher = self.reader.searcher();
         let term = Term::from_field_text(self.field_blake3_hash, blake3_hash);
         let query = TermQuery::new(term, IndexRecordOption::Basic);
@@ -307,7 +384,7 @@ impl TantivyFtsIndex {
 
     /// Deletes all indexed documents matching the specified `file_path`.
     pub(crate) fn delete_by_file_path(&self, file_path: &str) -> Result<usize, StorageError> {
-        self.reload_with_retry()?;
+        self.reload_with_retry(SyncCheck::None)?;
         let term = Term::from_field_text(self.field_file_path, file_path);
         let query = TermQuery::new(term.clone(), IndexRecordOption::Basic);
         let searcher = self.reader.searcher();
@@ -319,61 +396,69 @@ impl TantivyFtsIndex {
             return Ok(0);
         }
 
-        let mut writer = self
+        let mut writer_guard = self
             .writer
             .lock()
             .map_err(|_| StorageError::Tantivy("Tantivy writer mutex poisoned".into()))?;
 
-        let _ = writer.delete_term(term.clone());
-        match commit_with_retry(&mut writer) {
-            Ok(op) => {
-                self.commit_generation.fetch_add(1, Ordering::SeqCst);
-                self.last_commit_opstamp.store(op, Ordering::Release);
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("index writer was killed") || msg.contains("panicked") {
-                    tracing::warn!("Tantivy writer killed during delete; recreating: {}", msg);
-                    *writer = Self::create_writer_inner(&self.index)?;
-                    let _ = writer.delete_term(term);
-                    let op = commit_with_retry(&mut writer)?;
-                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
+        let mut recovery_attempts = 0;
+        const MAX_RECOVERIES: usize = 10;
+        'delete_attempt: loop {
+            let next_seq = self.last_commit_seq.fetch_add(1, Ordering::SeqCst) + 1;
+            let delete_res = {
+                let writer = Self::get_or_recreate_writer(&self.index, &mut writer_guard)?;
+                let _ = writer.delete_term(term.clone());
+                commit_single(writer, Some(&format!("seq:{}", next_seq)))
+            };
+
+            match delete_res {
+                Ok(op) => {
                     self.last_commit_opstamp.store(op, Ordering::Release);
-                } else {
-                    return Err(e);
+                    break 'delete_attempt;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Tantivy delete_by_file_path failed during commit (attempt {} of {}); recreating writer: {}",
+                        recovery_attempts + 1,
+                        MAX_RECOVERIES,
+                        e
+                    );
+                    recovery_attempts += 1;
+                    if recovery_attempts > MAX_RECOVERIES {
+                        return Err(StorageError::Tantivy(format!(
+                            "Exceeded maximum writer recoveries ({}) during delete: {}",
+                            MAX_RECOVERIES, e
+                        )));
+                    }
+                    Self::recreate_writer(&self.index, &mut writer_guard)?;
+                    continue 'delete_attempt;
                 }
             }
         }
 
-        drop(writer);
-        self.reload_with_retry()?;
+        drop(writer_guard);
+        self.reload_with_retry(SyncCheck::FilePathAbsent { file_path })?;
 
         Ok(count)
     }
 
     /// Merges Tantivy index segments to reclaim deleted space and consolidate inverted indexes.
     pub(crate) fn compact(&self) -> Result<(), StorageError> {
-        let mut writer = self
+        let mut writer_guard = self
             .writer
             .lock()
             .map_err(|_| StorageError::Tantivy("Tantivy writer mutex poisoned".into()))?;
 
         // 1. Commit any pending uncommitted additions/deletions before merging
-        match commit_with_retry(&mut writer) {
-            Ok(op) => {
-                self.commit_generation.fetch_add(1, Ordering::SeqCst);
-                self.last_commit_opstamp.store(op, Ordering::Release);
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("index writer was killed") || msg.contains("panicked") {
-                    tracing::warn!("Tantivy writer killed during compact pre-commit; recreating: {}", msg);
-                    *writer = Self::create_writer_inner(&self.index)?;
-                    let op = commit_with_retry(&mut writer)?;
-                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
+        let pre_seq = self.last_commit_seq.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Ok(w) = Self::get_or_recreate_writer(&self.index, &mut writer_guard) {
+            match commit_single(w, Some(&format!("seq:{}", pre_seq))) {
+                Ok(op) => {
                     self.last_commit_opstamp.store(op, Ordering::Release);
-                } else {
-                    return Err(e);
+                }
+                Err(e) => {
+                    tracing::warn!("Tantivy writer error during compact pre-commit; recreating: {}", e);
+                    let _ = Self::recreate_writer(&self.index, &mut writer_guard);
                 }
             }
         }
@@ -392,39 +477,47 @@ impl TantivyFtsIndex {
             );
             let mut merge_attempts = 0;
             loop {
+                let writer = match Self::get_or_recreate_writer(&self.index, &mut writer_guard) {
+                    Ok(w) => w,
+                    Err(e) => {
+                        tracing::warn!("Failed to get writer during merge: {}", e);
+                        break;
+                    }
+                };
                 match writer.merge(&segment_ids).wait() {
                     Ok(_merged) => {
-                        let op = commit_with_retry(&mut writer)?;
-                        self.commit_generation.fetch_add(1, Ordering::SeqCst);
-                        self.last_commit_opstamp.store(op, Ordering::Release);
+                        let post_seq = self.last_commit_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                        if let Ok(w) = Self::get_or_recreate_writer(&self.index, &mut writer_guard) {
+                            match commit_single(w, Some(&format!("seq:{}", post_seq))) {
+                                Ok(op) => {
+                                    self.last_commit_opstamp.store(op, Ordering::Release);
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Commit after merge failed: {}", e);
+                                    let _ = Self::recreate_writer(&self.index, &mut writer_guard);
+                                }
+                            }
+                        }
                         break;
                     }
                     Err(e) => {
                         merge_attempts += 1;
-                        let msg = e.to_string();
-                        if msg.contains("index writer was killed") || msg.contains("panicked") {
-                            tracing::warn!("Tantivy writer killed during merge; recreating: {}", msg);
-                            *writer = Self::create_writer_inner(&self.index)?;
-                            let op = commit_with_retry(&mut writer)?;
-                            self.commit_generation.fetch_add(1, Ordering::SeqCst);
-                            self.last_commit_opstamp.store(op, Ordering::Release);
+                        tracing::warn!(attempt = merge_attempts, "Retrying segment merge after error: {}", e);
+                        let _ = Self::recreate_writer(&self.index, &mut writer_guard);
+                        if merge_attempts >= 5 {
                             break;
-                        } else if merge_attempts < 5 {
-                            tracing::warn!(attempt = merge_attempts, "Retrying segment merge after transient error: {}", e);
-                            std::thread::yield_now();
-                            std::thread::sleep(std::time::Duration::from_millis(20 * merge_attempts as u64));
-                        } else {
-                            return Err(StorageError::Tantivy(format!("Segment merge error: {}", e)));
                         }
+                        std::thread::yield_now();
+                        std::thread::sleep(std::time::Duration::from_millis(20 * merge_attempts as u64));
                     }
                 }
             }
         }
 
-        drop(writer);
+        drop(writer_guard);
 
         // 4. Final reader reload so searchers immediately pick up consolidated state
-        self.reload_with_retry()?;
+        self.reload_with_retry(SyncCheck::None)?;
 
         Ok(())
     }
@@ -501,7 +594,7 @@ impl TantivyFtsIndex {
 
     /// Scans all stored chunks in Tantivy.
     pub(crate) fn scan_all_chunks(&self) -> Result<Vec<DocumentChunk>, StorageError> {
-        self.reload_with_retry()?;
+        self.reload_with_retry(SyncCheck::None)?;
         let searcher = self.reader.searcher();
         let query = tantivy::query::AllQuery;
         let num_docs = searcher.num_docs() as usize;
@@ -525,7 +618,7 @@ impl TantivyFtsIndex {
 
     /// Deletes a specific chunk by its chunk_id.
     pub(crate) fn delete_by_chunk_id(&self, chunk_id: &str) -> Result<usize, StorageError> {
-        self.reload_with_retry()?;
+        self.reload_with_retry(SyncCheck::None)?;
         let term = Term::from_field_text(self.field_chunk_id, chunk_id);
         let query = TermQuery::new(term.clone(), IndexRecordOption::Basic);
         let searcher = self.reader.searcher();
@@ -537,34 +630,48 @@ impl TantivyFtsIndex {
             return Ok(0);
         }
 
-        let mut writer = self
+        let mut writer_guard = self
             .writer
             .lock()
             .map_err(|_| StorageError::Tantivy("Tantivy writer mutex poisoned".into()))?;
 
-        let _ = writer.delete_term(term.clone());
-        match commit_with_retry(&mut writer) {
-            Ok(op) => {
-                self.commit_generation.fetch_add(1, Ordering::SeqCst);
-                self.last_commit_opstamp.store(op, Ordering::Release);
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("index writer was killed") || msg.contains("panicked") {
-                    tracing::warn!("Tantivy writer killed during delete; recreating: {}", msg);
-                    *writer = Self::create_writer_inner(&self.index)?;
-                    let _ = writer.delete_term(term);
-                    let op = commit_with_retry(&mut writer)?;
-                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
+        let mut recovery_attempts = 0;
+        const MAX_RECOVERIES: usize = 10;
+        'delete_attempt: loop {
+            let next_seq = self.last_commit_seq.fetch_add(1, Ordering::SeqCst) + 1;
+            let delete_res = {
+                let writer = Self::get_or_recreate_writer(&self.index, &mut writer_guard)?;
+                let _ = writer.delete_term(term.clone());
+                commit_single(writer, Some(&format!("seq:{}", next_seq)))
+            };
+
+            match delete_res {
+                Ok(op) => {
                     self.last_commit_opstamp.store(op, Ordering::Release);
-                } else {
-                    return Err(e);
+                    break 'delete_attempt;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Tantivy delete_by_chunk_id failed during commit (attempt {} of {}); recreating writer: {}",
+                        recovery_attempts + 1,
+                        MAX_RECOVERIES,
+                        e
+                    );
+                    recovery_attempts += 1;
+                    if recovery_attempts > MAX_RECOVERIES {
+                        return Err(StorageError::Tantivy(format!(
+                            "Exceeded maximum writer recoveries ({}) during delete: {}",
+                            MAX_RECOVERIES, e
+                        )));
+                    }
+                    Self::recreate_writer(&self.index, &mut writer_guard)?;
+                    continue 'delete_attempt;
                 }
             }
         }
 
-        drop(writer);
-        self.reload_with_retry()?;
+        drop(writer_guard);
+        self.reload_with_retry(SyncCheck::DocAbsent { chunk_id })?;
 
         Ok(count)
     }
@@ -572,61 +679,100 @@ impl TantivyFtsIndex {
     /// Clears all indexed documents from the Tantivy index.
     #[allow(dead_code)]
     pub(crate) fn clear(&self) -> Result<(), StorageError> {
-        let mut writer = self
+        let mut writer_guard = self
             .writer
             .lock()
             .map_err(|_| StorageError::Tantivy("Tantivy writer mutex poisoned".into()))?;
 
-        if let Err(e) = writer.delete_all_documents() {
-            let msg = e.to_string();
-            if msg.contains("index writer was killed") || msg.contains("panicked") {
-                tracing::warn!("Tantivy writer killed during clear; recreating: {}", msg);
-                *writer = Self::create_writer_inner(&self.index)?;
+        let mut recovery_attempts = 0;
+        const MAX_RECOVERIES: usize = 10;
+        'clear_attempt: loop {
+            let next_seq = self.last_commit_seq.fetch_add(1, Ordering::SeqCst) + 1;
+            let clear_res = {
+                let writer = Self::get_or_recreate_writer(&self.index, &mut writer_guard)?;
                 let _ = writer.delete_all_documents();
-            }
-        }
-        match commit_with_retry(&mut writer) {
-            Ok(op) => {
-                self.commit_generation.fetch_add(1, Ordering::SeqCst);
-                self.last_commit_opstamp.store(op, Ordering::Release);
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("index writer was killed") || msg.contains("panicked") {
-                    tracing::warn!("Tantivy writer killed during commit in clear; recreating: {}", msg);
-                    *writer = Self::create_writer_inner(&self.index)?;
-                    let _ = writer.delete_all_documents();
-                    let op = commit_with_retry(&mut writer)?;
-                    self.commit_generation.fetch_add(1, Ordering::SeqCst);
+                commit_single(writer, Some(&format!("seq:{}", next_seq)))
+            };
+
+            match clear_res {
+                Ok(op) => {
                     self.last_commit_opstamp.store(op, Ordering::Release);
-                } else {
-                    return Err(e);
+                    break 'clear_attempt;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Tantivy clear failed during commit (attempt {} of {}); recreating writer: {}",
+                        recovery_attempts + 1,
+                        MAX_RECOVERIES,
+                        e
+                    );
+                    recovery_attempts += 1;
+                    if recovery_attempts > MAX_RECOVERIES {
+                        return Err(StorageError::Tantivy(format!(
+                            "Exceeded maximum writer recoveries ({}) during clear: {}",
+                            MAX_RECOVERIES, e
+                        )));
+                    }
+                    Self::recreate_writer(&self.index, &mut writer_guard)?;
+                    continue 'clear_attempt;
                 }
             }
         }
 
-        drop(writer);
-        self.reload_with_retry()?;
+        drop(writer_guard);
+        self.reload_with_retry(SyncCheck::AllCleared)?;
 
         Ok(())
     }
 
     /// Reloads the Tantivy reader, retrying on transient Windows file lock errors
-    /// and ensuring the reader is synchronized to at least the last committed generation and opstamp.
-    fn reload_with_retry(&self) -> Result<(), StorageError> {
-        let target_gen = self.commit_generation.load(Ordering::Acquire);
+    /// and ensuring the reader is synchronized to at least the last committed sequence,
+    /// opstamp, and semantic invariant (e.g. document presence/absence).
+    fn reload_with_retry(&self, check: SyncCheck<'_>) -> Result<(), StorageError> {
+        let target_seq = self.last_commit_seq.load(Ordering::Acquire);
         let min_opstamp = self.last_commit_opstamp.load(Ordering::Acquire);
 
-        // Fast path: if reader is already synchronized to at least target_gen, no reload needed!
-        if self.synced_generation.load(Ordering::Acquire) >= target_gen && target_gen > 0 {
+        // Fast path: if reader is already synchronized to at least target_seq, no reload needed!
+        // But only if no specific semantic verification (e.g. DocPresent/DocAbsent) is required.
+        if target_seq > 0
+            && self.synced_seq.load(Ordering::Acquire) >= target_seq
+            && matches!(check, SyncCheck::None)
+        {
             return Ok(());
         }
 
-        const MAX_ATTEMPTS: usize = 200;
+        const MAX_ATTEMPTS: usize = 300;
         let mut last_err = String::new();
 
         for attempt in 1..=MAX_ATTEMPTS {
-            // Step 1: Reload reader
+            // Step 1: Inspect on-disk metadata to ensure the writer's commit has flushed to disk.
+            let meta = match self.index.load_metas() {
+                Ok(m) => m,
+                Err(e) => {
+                    last_err = format!("Failed to load metas: {}", e);
+                    std::thread::yield_now();
+                    if attempt > 10 {
+                        std::thread::sleep(std::time::Duration::from_micros(100));
+                    }
+                    continue;
+                }
+            };
+
+            let disk_seq = parse_commit_seq(&meta);
+            if target_seq > 0 && (disk_seq < target_seq || meta.opstamp < min_opstamp) {
+                last_err = format!(
+                    "On-disk metadata stale: seq {} < target {}, opstamp {} < min {}",
+                    disk_seq, target_seq, meta.opstamp, min_opstamp
+                );
+                std::thread::yield_now();
+                if attempt > 5 {
+                    let backoff = if attempt <= 20 { 100 } else if attempt <= 50 { 250 } else { 500 };
+                    std::thread::sleep(std::time::Duration::from_micros(backoff));
+                }
+                continue;
+            }
+
+            // Step 2: Reload reader from verified on-disk metadata
             if let Err(e) = self.reader.reload() {
                 last_err = format!("Reader reload failed: {}", e);
                 std::thread::yield_now();
@@ -636,85 +782,132 @@ impl TantivyFtsIndex {
                 continue;
             }
 
-            // Step 2: Verify against on-disk metadata
-            match self.index.load_metas() {
-                Ok(meta) => {
-                    // If target_gen > 0, disk metadata must reflect at least min_opstamp
-                    if target_gen == 0 || meta.opstamp >= min_opstamp {
-                        let disk_segments: BTreeSet<(SegmentId, Option<u64>)> = meta
-                            .segments
-                            .iter()
-                            .map(|s| (s.id(), s.delete_opstamp()))
-                            .collect();
-                        let searcher = self.reader.searcher();
-                        let searcher_segments: BTreeSet<(SegmentId, Option<u64>)> = searcher
-                            .segment_readers()
-                            .iter()
-                            .map(|r| (r.segment_id(), r.delete_opstamp()))
-                            .collect();
+            // Step 3: Verify reader's searcher reflects the commit
+            let searcher = self.reader.searcher();
+            let disk_segments: BTreeSet<(SegmentId, Option<u64>)> = meta
+                .segments
+                .iter()
+                .map(|s| (s.id(), s.delete_opstamp()))
+                .collect();
+            let searcher_segments: BTreeSet<(SegmentId, Option<u64>)> = searcher
+                .segment_readers()
+                .iter()
+                .map(|r| (r.segment_id(), r.delete_opstamp()))
+                .collect();
 
-                        if disk_segments == searcher_segments {
-                            // Successfully synchronized to target_gen!
-                            self.synced_generation.store(target_gen, Ordering::Release);
-                            return Ok(());
-                        } else {
-                            last_err = format!(
-                                "Segment mismatch between disk ({:?}) and searcher ({:?})",
-                                disk_segments, searcher_segments
-                            );
+            if disk_segments != searcher_segments {
+                last_err = format!(
+                    "Segment mismatch between disk ({:?}) and searcher ({:?})",
+                    disk_segments, searcher_segments
+                );
+                std::thread::yield_now();
+                if attempt > 5 {
+                    std::thread::sleep(std::time::Duration::from_micros(100));
+                }
+                continue;
+            }
+
+            // If disk metadata has segments, searcher must not have empty segments
+            if !meta.segments.is_empty() && searcher_segments.is_empty() {
+                last_err = "Disk has segments but searcher segment set is empty".to_string();
+                std::thread::yield_now();
+                if attempt > 5 {
+                    std::thread::sleep(std::time::Duration::from_micros(100));
+                }
+                continue;
+            }
+
+            // Step 4: Semantic verification based on SyncCheck
+            match check {
+                SyncCheck::None => {}
+                SyncCheck::DocPresent { chunk_id } => {
+                    let term = Term::from_field_text(self.field_chunk_id, chunk_id);
+                    let query = TermQuery::new(term, IndexRecordOption::Basic);
+                    let count = searcher.search(&query, &Count).unwrap_or(0);
+                    if count == 0 {
+                        last_err = format!("DocPresent verification failed for chunk_id {}", chunk_id);
+                        std::thread::yield_now();
+                        if attempt > 5 {
+                            let backoff = if attempt <= 20 { 100 } else if attempt <= 50 { 250 } else { 500 };
+                            std::thread::sleep(std::time::Duration::from_micros(backoff));
                         }
-                    } else {
-                        last_err = format!(
-                            "Disk opstamp {} is less than required min_opstamp {}",
-                            meta.opstamp, min_opstamp
-                        );
+                        continue;
                     }
                 }
-                Err(e) => {
-                    last_err = format!("Failed to load metas: {}", e);
+                SyncCheck::DocAbsent { chunk_id } => {
+                    let term = Term::from_field_text(self.field_chunk_id, chunk_id);
+                    let query = TermQuery::new(term, IndexRecordOption::Basic);
+                    let count = searcher.search(&query, &Count).unwrap_or(0);
+                    if count > 0 {
+                        last_err = format!("DocAbsent verification failed for chunk_id {} (count={})", chunk_id, count);
+                        std::thread::yield_now();
+                        if attempt > 5 {
+                            let backoff = if attempt <= 20 { 100 } else if attempt <= 50 { 250 } else { 500 };
+                            std::thread::sleep(std::time::Duration::from_micros(backoff));
+                        }
+                        continue;
+                    }
+                }
+                SyncCheck::FilePathAbsent { file_path } => {
+                    let term = Term::from_field_text(self.field_file_path, file_path);
+                    let query = TermQuery::new(term, IndexRecordOption::Basic);
+                    let count = searcher.search(&query, &Count).unwrap_or(0);
+                    if count > 0 {
+                        last_err = format!("FilePathAbsent verification failed for file_path {} (count={})", file_path, count);
+                        std::thread::yield_now();
+                        if attempt > 5 {
+                            let backoff = if attempt <= 20 { 100 } else if attempt <= 50 { 250 } else { 500 };
+                            std::thread::sleep(std::time::Duration::from_micros(backoff));
+                        }
+                        continue;
+                    }
+                }
+                SyncCheck::AllCleared => {
+                    if searcher.num_docs() > 0 {
+                        last_err = format!("AllCleared verification failed: num_docs={}", searcher.num_docs());
+                        std::thread::yield_now();
+                        if attempt > 5 {
+                            let backoff = if attempt <= 20 { 100 } else if attempt <= 50 { 250 } else { 500 };
+                            std::thread::sleep(std::time::Duration::from_micros(backoff));
+                        }
+                        continue;
+                    }
                 }
             }
 
-            // Yield CPU back to async executor/Tokio runtime
-            std::thread::yield_now();
-            if attempt > 5 {
-                let backoff_micros = if attempt <= 20 {
-                    100
-                } else if attempt <= 50 {
-                    250
-                } else if attempt <= 100 {
-                    500
-                } else {
-                    1000
-                };
-                std::thread::sleep(std::time::Duration::from_micros(backoff_micros));
+            // Step 5: All checks passed! Update synced sequence counter
+            if target_seq > 0 {
+                self.synced_seq.store(target_seq, Ordering::Release);
             }
+            return Ok(());
         }
 
         // Fail-closed invariant: Never return Ok(()) on attempt exhaustion!
         Err(StorageError::Tantivy(format!(
-            "Tantivy reader reload failed to synchronize with commit opstamp {} (target gen {}) after {} attempts. Last error: {}",
-            min_opstamp, target_gen, MAX_ATTEMPTS, last_err
+            "Tantivy reader reload failed to synchronize with commit opstamp {} (target seq {}) after {} attempts. Last error: {}",
+            min_opstamp, target_seq, MAX_ATTEMPTS, last_err
         )))
     }
 }
 
-/// Helper that retries Tantivy commit operations when encountering transient Windows file locks.
-fn commit_with_retry(writer: &mut IndexWriter<TantivyDocument>) -> Result<u64, StorageError> {
-    let mut attempts = 0;
-    loop {
-        match writer.commit() {
-            Ok(opstamp) => return Ok(opstamp),
-            Err(e) => {
-                attempts += 1;
-                if attempts >= 20 {
-                    return Err(StorageError::Tantivy(format!(
-                        "Tantivy commit error after {} attempts: {}", attempts, e
-                    )));
-                }
-                std::thread::yield_now();
-                std::thread::sleep(std::time::Duration::from_millis(5 * attempts));
-            }
-        }
+/// Helper that prepares and executes a single Tantivy commit with an optional payload message.
+///
+/// If `prepare_commit` or `commit` encounters an error, it fails fast and returns `Err`
+/// immediately to allow the caller's recovery loop to re-add uncommitted documents and
+/// replay the batch without losing documents.
+fn commit_single(
+    writer: &mut IndexWriter<TantivyDocument>,
+    payload: Option<&str>,
+) -> Result<u64, StorageError> {
+    let mut prepared = writer
+        .prepare_commit()
+        .map_err(|e| StorageError::Tantivy(format!("Tantivy prepare_commit error: {}", e)))?;
+
+    if let Some(msg) = payload {
+        prepared.set_payload(msg);
     }
+
+    prepared
+        .commit()
+        .map_err(|e| StorageError::Tantivy(format!("Tantivy commit error: {}", e)))
 }
