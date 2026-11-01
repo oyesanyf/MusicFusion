@@ -1,7 +1,8 @@
 use quorum_coordinator::{
     AgenticStateGraphRunner, AgenticTelemetryEvent, CoordinatorConfig, FederatedQueryCoordinator,
-    MockMeshDispatcher, MockRemotePeer, PeerAclManager, ScatterGatherEngine, StorageSearcher,
-    SynthesisModelFamily,
+    MockMeshDispatcher, MockRemotePeer, PeerAclManager, RrfCombiner, ScatterGatherEngine,
+    StorageSearcher, SynthesisModelFamily,
+    langextract::{ground_extraction, Extraction, LlmFusionConsensus},
 };
 use quorum_types::{CandidateChunkDto, DocumentChunk, ScoredChunk, VolatileRemoteChunk};
 use std::sync::Arc;
@@ -373,3 +374,358 @@ async fn challenge_agentic_loop_empty_retrieval_terminates() {
     );
     assert!(state.synthesized_response.is_some());
 }
+
+/// Adversarial Challenge 7: 1.25x Consensus Boost Math, Provenance Deduplication, & Tie-Breaking.
+#[test]
+fn challenge_rrf_combiner_consensus_boost_adversarial_math() {
+    let chunk_local = ScoredChunk::new(
+        DocumentChunk::new(
+            "chunk_multi",
+            "doc1",
+            "multi.rs",
+            1,
+            5,
+            0,
+            vec![1.0; 768],
+            "Multi peer chunk content",
+            None,
+        )
+        .unwrap(),
+        0.9,
+        "local",
+        false,
+    );
+
+    let chunk_single = ScoredChunk::new(
+        DocumentChunk::new(
+            "chunk_single",
+            "doc2",
+            "single.rs",
+            1,
+            5,
+            0,
+            vec![1.0; 768],
+            "Single peer chunk content",
+            None,
+        )
+        .unwrap(),
+        0.8,
+        "local",
+        false,
+    );
+
+    // chunk_multi present in local (rank 1), remote 1 (rank 1), and remote 2 (rank 1)
+    // chunk_single present in local only (rank 2)
+    // chunk_same_peer_dup present twice in remote 1 (rank 2 and rank 3) -> MUST NOT get 1.25x boost!
+    let local = vec![chunk_local, chunk_single];
+    let remote_peers = vec![
+        vec![
+            CandidateChunkDto {
+                chunk_id: "chunk_multi".to_string(),
+                file_path: "multi.rs".to_string(),
+                line_start: 1,
+                line_end: 5,
+                content: "Multi peer chunk content".to_string(),
+                score: 0.9,
+                access_tier: 0,
+            },
+            CandidateChunkDto {
+                chunk_id: "chunk_same_peer_dup".to_string(),
+                file_path: "dup.rs".to_string(),
+                line_start: 1,
+                line_end: 5,
+                content: "Duplicate in same peer".to_string(),
+                score: 0.7,
+                access_tier: 0,
+            },
+            CandidateChunkDto {
+                chunk_id: "chunk_same_peer_dup".to_string(),
+                file_path: "dup.rs".to_string(),
+                line_start: 1,
+                line_end: 5,
+                content: "Duplicate in same peer".to_string(),
+                score: 0.6,
+                access_tier: 0,
+            },
+        ],
+        vec![CandidateChunkDto {
+            chunk_id: "chunk_multi".to_string(),
+            file_path: "multi.rs".to_string(),
+            line_start: 1,
+            line_end: 5,
+            content: "Multi peer chunk content".to_string(),
+            score: 0.9,
+            access_tier: 0,
+        }],
+    ];
+
+    let fused = RrfCombiner::fuse_rankings(local, remote_peers, 60.0, 10);
+    assert_eq!(fused.len(), 3);
+
+    // 1. chunk_multi: 3 distinct peers (local=0, remote1=1, remote2=2)
+    // base_score = 1/(60+1) + 1/(60+1) + 1/(60+1) = 3 / 61
+    // 3 peers >= 2 -> boosted: (3.0 / 61.0) * 1.25
+    let expected_multi = (3.0 / 61.0) * 1.25;
+    assert_eq!(fused[0].chunk.chunk_id, "chunk_multi");
+    assert!(
+        (fused[0].score - expected_multi).abs() < 1e-5,
+        "Expected boosted score {:.6}, got {:.6}",
+        expected_multi,
+        fused[0].score
+    );
+
+    // 2. chunk_same_peer_dup: present at rank 2 and 3 of remote 1 ONLY (distinct peers = {1}, len = 1)
+    // base_score = 1/(60+2) + 1/(60+3) = 1/62 + 1/63
+    // MUST NOT be boosted (peers.len() == 1 < 2)!
+    let expected_dup = (1.0 / 62.0) + (1.0 / 63.0);
+    let dup_chunk = fused
+        .iter()
+        .find(|c| c.chunk.chunk_id == "chunk_same_peer_dup")
+        .expect("chunk_same_peer_dup must be present");
+    assert!(
+        (dup_chunk.score - expected_dup).abs() < 1e-5,
+        "Same-peer duplicate was incorrectly boosted! Expected {:.6}, got {:.6}",
+        expected_dup,
+        dup_chunk.score
+    );
+
+    // 3. chunk_single: local rank 2 -> base_score = 1/62, unboosted
+    let single_chunk = fused
+        .iter()
+        .find(|c| c.chunk.chunk_id == "chunk_single")
+        .expect("chunk_single must be present");
+    let expected_single = 1.0 / 62.0;
+    assert!(
+        (single_chunk.score - expected_single).abs() < 1e-5,
+        "Expected unboosted score {:.6}, got {:.6}",
+        expected_single,
+        single_chunk.score
+    );
+
+    // 4. Deterministic tie-breaking test:
+    let tie1 = ScoredChunk::new(
+        DocumentChunk::new(
+            "chunk_bravo",
+            "doc_b",
+            "b.rs",
+            1,
+            2,
+            0,
+            vec![1.0; 768],
+            "Tie content identical",
+            None,
+        )
+        .unwrap(),
+        0.5,
+        "local",
+        false,
+    );
+    // Both at rank 1 in their own isolated peer lists: tie1 in local, chunk_alpha in remote
+    let tie_fused = RrfCombiner::fuse_rankings(
+        vec![tie1],
+        vec![vec![CandidateChunkDto {
+            chunk_id: "chunk_alpha".to_string(),
+            file_path: "a.rs".to_string(),
+            line_start: 1,
+            line_end: 2,
+            content: "Tie content identical".to_string(),
+            score: 0.5,
+            access_tier: 0,
+        }]],
+        60.0,
+        2,
+    );
+    // Both have exact same score 1/61. Sort must place "chunk_alpha" before "chunk_bravo" alphabetically.
+    assert_eq!(tie_fused[0].chunk.chunk_id, "chunk_alpha");
+    assert_eq!(tie_fused[1].chunk.chunk_id, "chunk_bravo");
+}
+
+/// Adversarial Challenge 8: LangExtract Ungrounded Strings Cannot Fabricate Char Intervals.
+#[test]
+fn challenge_langextract_adversarial_grounding_and_hallucination_proofing() {
+    let source_text = "The QuorumRAG protocol verifies Ed25519 signatures with BLAKE3 hashes. \
+                       Привет мир! Multibyte UTF-8 span verification.";
+
+    // Attack 1: Candidate with pre-fabricated char_interval targeting ungrounded hallucination
+    let mut fabricated = Extraction::new("MaliciousConcept", "Fabricated hallucinated entity")
+        .with_interval(0, 30);
+    assert!(!ground_extraction(&mut fabricated, source_text));
+    assert!(
+        fabricated.char_interval.is_none(),
+        "ground_extraction must wipe fabricated char_interval to None!"
+    );
+
+    // Attack 2: Empty extraction text
+    let mut empty_ext = Extraction::new("EmptyConcept", "");
+    assert!(!ground_extraction(&mut empty_ext, source_text));
+    assert!(empty_ext.char_interval.is_none());
+
+    // Attack 3: Partial substring mismatch
+    let mut partial_ext = Extraction::new("PartialConcept", "Ed25519 signatures forged");
+    assert!(!ground_extraction(&mut partial_ext, source_text));
+    assert!(partial_ext.char_interval.is_none());
+
+    // Genuine Multibyte UTF-8 extraction: "Привет мир!" (starts at byte 71, length 20 bytes)
+    let mut utf8_ext = Extraction::new("Greeting", "Привет мир!");
+    assert!(ground_extraction(&mut utf8_ext, source_text));
+    assert!(utf8_ext.char_interval.is_some());
+    let (start, end) = utf8_ext.char_interval.unwrap();
+    assert!(source_text.is_char_boundary(start));
+    assert!(source_text.is_char_boundary(end));
+    assert_eq!(&source_text[start..end], "Привет мир!");
+
+    // Attack 4: 4-Arm Consensus must reject candidate list containing ungrounded or syntactically invalid items
+    let genuine_ext = Extraction::new("Crypto", "Ed25519");
+    let fake_ext = Extraction::new("Fake", "Completely absent hallucination");
+    let unbalanced_ext = Extraction::new("SyntaxError", "unbalanced (syntax [bracket");
+
+    let res = LlmFusionConsensus::evaluate_extractions(
+        source_text,
+        vec![genuine_ext.clone(), fake_ext, unbalanced_ext],
+        None,
+    );
+    assert!(
+        !res.consensus_passed,
+        "Consensus must fail when ungrounded or unbalanced candidates are injected"
+    );
+    assert_eq!(
+        res.verified_extractions.len(),
+        1,
+        "Only the 1 genuine extraction must pass counterfactual judge"
+    );
+    assert_eq!(res.verified_extractions[0].extraction_text, "Ed25519");
+}
+
+/// Adversarial Challenge 9: Batch VolatileRemoteChunk Drop Zeroizes All Buffers.
+#[test]
+fn challenge_volatile_remote_chunk_stress_zeroize_vectors() {
+    let mut raw_ptrs = Vec::new();
+
+    {
+        let mut chunks = Vec::new();
+        for i in 0..10 {
+            let secret = format!("VERY_SECRET_CANARY_PAYLOAD_CHUNK_INDEX_{:04}_DATA", i);
+            let ptr = secret.as_ptr();
+            let len = secret.len();
+            raw_ptrs.push((ptr, len));
+
+            chunks.push(VolatileRemoteChunk {
+                chunk_id: format!("c_{}", i),
+                peer_id: format!("peer_{}", i),
+                file_path: format!("file_{}.txt", i),
+                line_start: 1,
+                line_end: 10,
+                score: 0.9,
+                access_tier: 1,
+                content: secret,
+            });
+        }
+
+        // Verify chunks contain expected secrets before drop
+        for (i, c) in chunks.iter().enumerate() {
+            assert!(c.content().contains(&format!("INDEX_{:04}", i)));
+        }
+    } // chunks vector dropped here; all 10 chunks must have their memory zeroed
+
+    for (i, &(ptr, len)) in raw_ptrs.iter().enumerate() {
+        let slice = unsafe { std::slice::from_raw_parts(ptr, len) };
+        assert!(
+            slice.iter().all(|&b| b == 0),
+            "Memory buffer for chunk {} at pointer {:?} was not zeroed on drop!",
+            i,
+            ptr
+        );
+    }
+}
+
+/// Adversarial Challenge 10: Interleaved Fast and Slow Peers With Strict 400ms Deadline.
+#[tokio::test]
+async fn challenge_scatter_gather_interleaved_fast_and_slow_peers() {
+    let mut storage = MockStorage::default();
+    storage.chunks.push(
+        DocumentChunk::new(
+            "c_local",
+            "doc1",
+            "loc.rs",
+            1,
+            5,
+            0,
+            vec![1.0; 768],
+            "Interleaved test query",
+            None,
+        )
+        .unwrap(),
+    );
+
+    let dispatcher = MockMeshDispatcher::new();
+
+    // 6 peers interleaved: slow, fast, slow, fast, slow, fast
+    let peers = vec![
+        ("peer_slow_0", Duration::from_millis(700), "c_slow_0"),
+        ("peer_fast_1", Duration::from_millis(20), "c_fast_1"),
+        ("peer_slow_2", Duration::from_millis(800), "c_slow_2"),
+        ("peer_fast_3", Duration::from_millis(40), "c_fast_3"),
+        ("peer_slow_4", Duration::from_millis(900), "c_slow_4"),
+        ("peer_fast_5", Duration::from_millis(60), "c_fast_5"),
+    ];
+
+    for (pid, latency, cid) in peers {
+        dispatcher
+            .add_peer(MockRemotePeer {
+                peer_id: pid.to_string(),
+                latency,
+                max_access_tier: 0,
+                candidate_chunks: vec![CandidateChunkDto {
+                    chunk_id: cid.to_string(),
+                    file_path: format!("{}.rs", cid),
+                    line_start: 1,
+                    line_end: 5,
+                    content: "Interleaved test query remote".to_string(),
+                    score: 0.85,
+                    access_tier: 0,
+                }],
+            })
+            .await;
+    }
+
+    let engine = ScatterGatherEngine::new(
+        Arc::new(storage),
+        Arc::new(dispatcher),
+        Arc::new(RwLock::new(PeerAclManager::default())),
+        CoordinatorConfig {
+            timeout_ms: 400,
+            ..Default::default()
+        },
+        [0x22u8; 32],
+        "interleaved_sender".to_string(),
+    );
+
+    let (results, _volatile, duration_ms) =
+        engine.execute_query("Interleaved test query", &vec![1.0; 768], 0, 10).await;
+
+    assert!(
+        duration_ms <= 480,
+        "Duration {}ms violated 400ms hard deadline",
+        duration_ms
+    );
+
+    // All 3 fast peers must be present
+    assert!(
+        results.iter().any(|r| r.chunk.chunk_id == "c_fast_1"),
+        "Missing fast peer 1"
+    );
+    assert!(
+        results.iter().any(|r| r.chunk.chunk_id == "c_fast_3"),
+        "Missing fast peer 3"
+    );
+    assert!(
+        results.iter().any(|r| r.chunk.chunk_id == "c_fast_5"),
+        "Missing fast peer 5"
+    );
+
+    // None of the 3 slow peers must be present
+    assert!(!results.iter().any(|r| r.chunk.chunk_id == "c_slow_0"));
+    assert!(!results.iter().any(|r| r.chunk.chunk_id == "c_slow_2"));
+    assert!(!results.iter().any(|r| r.chunk.chunk_id == "c_slow_4"));
+}
+
