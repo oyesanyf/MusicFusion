@@ -365,20 +365,21 @@ impl AudioBuffer {
         match bit_depth {
             WavBitDepth::Float32 => {
                 for &sample in &self.samples {
-                    bytes.extend_from_slice(&sample.to_le_bytes());
+                    let clean = if sample.is_finite() { sample } else { 0.0 };
+                    bytes.extend_from_slice(&clean.to_le_bytes());
                 }
             }
             WavBitDepth::Pcm16 => {
                 for &sample in &self.samples {
-                    let clamped = sample.clamp(-1.0, 0.999969);
-                    let val = (clamped * 32767.0).round() as i16;
+                    let clean = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
+                    let val = (clean * 32767.0).round() as i16;
                     bytes.extend_from_slice(&val.to_le_bytes());
                 }
             }
             WavBitDepth::Pcm24 => {
                 for &sample in &self.samples {
-                    let clamped = sample.clamp(-1.0, 0.999_999_9);
-                    let val = (clamped * 8_388_607.0).round() as i32;
+                    let clean = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
+                    let val = (clean * 8_388_607.0).round() as i32;
                     let le = val.to_le_bytes();
                     bytes.push(le[0]);
                     bytes.push(le[1]);
@@ -496,6 +497,24 @@ impl AudioBuffer {
         let bytes = self.to_wav_bytes_with_format(bit_depth);
         let mut file = File::create(path)?;
         file.write_all(&bytes)?;
+        Ok(())
+    }
+
+    /// Writes AudioBuffer directly to disk file in 16-bit PCM format via hound.
+    pub fn to_wav_file_hound_pcm16<P: AsRef<Path>>(&self, path: P) -> Result<(), DspError> {
+        let spec = hound::WavSpec {
+            channels: self.channels,
+            sample_rate: self.sample_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(path, spec)?;
+        for &sample in &self.samples {
+            let clean = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
+            let val = (clean * 32767.0).round() as i16;
+            writer.write_sample(val)?;
+        }
+        writer.finalize()?;
         Ok(())
     }
 

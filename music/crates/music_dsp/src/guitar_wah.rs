@@ -17,6 +17,67 @@ use music_core::genre::ModalScale;
 
 pub const SAMPLE_RATE: u32 = 48_000;
 
+/// Continuous phase accumulator across buffer and note boundaries.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContinuousPhaseAccumulator {
+    pub phase: f32, // Normalized in [0.0, 2.0 * PI)
+}
+
+impl ContinuousPhaseAccumulator {
+    pub const fn new() -> Self {
+        Self { phase: 0.0 }
+    }
+
+    #[inline]
+    pub fn advance(&mut self, freq_hz: f32, sample_rate: f32) -> f32 {
+        let current = self.phase;
+        self.phase += 2.0 * PI * freq_hz / sample_rate;
+        if self.phase >= 2.0 * PI {
+            self.phase -= 2.0 * PI;
+            if self.phase >= 2.0 * PI {
+                self.phase = self.phase.rem_euclid(2.0 * PI);
+            }
+        }
+        current
+    }
+
+    #[inline]
+    pub fn sin(&mut self, freq_hz: f32, sample_rate: f32) -> f32 {
+        self.advance(freq_hz, sample_rate).sin()
+    }
+}
+
+/// Paul Kellet's filtered pink noise generator with velvet 2-pole lowpass.
+#[derive(Debug, Clone)]
+pub struct PinkNoiseGenerator {
+    b0: f32, b1: f32, b2: f32, b3: f32, b4: f32, b5: f32, b6: f32,
+    lp: f32,
+}
+
+impl PinkNoiseGenerator {
+    pub const fn new() -> Self {
+        Self { b0: 0.0, b1: 0.0, b2: 0.0, b3: 0.0, b4: 0.0, b5: 0.0, b6: 0.0, lp: 0.0 }
+    }
+
+    #[inline]
+    pub fn next_sample(&mut self, rng: &mut crate::groove_synth::DspRng) -> f32 {
+        let white = rng.next_f32();
+        self.b0 = 0.99886 * self.b0 + white * 0.0555179;
+        self.b1 = 0.99332 * self.b1 + white * 0.0750759;
+        self.b2 = 0.96900 * self.b2 + white * 0.1538520;
+        self.b3 = 0.86650 * self.b3 + white * 0.3104856;
+        self.b4 = 0.55000 * self.b4 + white * 0.5329522;
+        self.b5 = -0.7616 * self.b5 - white * 0.0168980;
+        let pink = (self.b0 + self.b1 + self.b2 + self.b3 + self.b4 + self.b5 + self.b6 + white * 0.5362) * 0.11;
+        self.b6 = white * 0.115926;
+        self.lp = 0.77 * self.lp + 0.23 * pink; // ~2000 Hz lowpass
+        self.lp
+    }
+}
+
+pub const KARPLUS_FEEDBACK_DAMPING: f32 = 0.994;
+pub const A_MAJOR_PENTATONIC: [f32; 6] = [220.0, 246.94, 277.18, 329.63, 369.99, 440.0];
+
 /// Physical Karplus-Strong String Oscillator.
 pub struct KarplusStrongString {
     sample_rate: f32,
@@ -41,40 +102,46 @@ impl KarplusStrongString {
             buffer_len: 100,
             prev_filter_sample: 0.0,
             allpass_state: 0.0,
-            decay_factor: 0.995,
+            decay_factor: KARPLUS_FEEDBACK_DAMPING,
             is_active: false,
         }
     }
 
-    /// Plucks the string at the specified fundamental frequency (in Hz) and velocity.
+    /// Plucks the string at the specified fundamental frequency (in Hz) and velocity
+    /// excited by low-pass filtered pink noise burst with 0.994 feedback damping.
     pub fn pluck(&mut self, freq_hz: f32, velocity: f32) {
         let period = (self.sample_rate / freq_hz.clamp(50.0, 4000.0)).max(4.0);
-        let int_period = period.floor() as usize;
+        let int_period = period.round() as usize;
 
         self.buffer_len = int_period.min(self.delay_buffer.len() - 2);
         self.write_ptr = 0;
         self.prev_filter_sample = 0.0;
         self.allpass_state = 0.0;
-        // String decay factor scaled by pitch (higher notes decay faster)
-        self.decay_factor = (0.996 - (freq_hz / 10000.0)).clamp(0.985, 0.998);
+        self.decay_factor = KARPLUS_FEEDBACK_DAMPING;
 
-        // Excite delay line with shaped pick noise
-        let mut prng = 0x5EED_F00Du32;
-        let pick_pos_samples = (self.buffer_len as f32 * 0.18).round() as usize;
+        let mut rng = crate::groove_synth::DspRng::new(12345 + (freq_hz * 100.0) as u32);
+        let mut pink = PinkNoiseGenerator::new();
 
         for i in 0..self.buffer_len {
-            prng ^= prng << 13;
-            prng ^= prng >> 17;
-            prng ^= prng << 5;
-            let noise = (prng as f32 / u32::MAX as f32) * 2.0 - 1.0;
-            self.delay_buffer[i] = noise * velocity;
+            self.delay_buffer[i] = pink.next_sample(&mut rng) * velocity;
         }
 
-        // Comb filter simulating pick position relative to bridge
-        if pick_pos_samples > 0 && pick_pos_samples < self.buffer_len {
-            for i in pick_pos_samples..self.buffer_len {
-                self.delay_buffer[i] -= 0.5 * self.delay_buffer[i - pick_pos_samples];
-            }
+        self.is_active = true;
+    }
+
+    /// Plucks the string with an external PRNG and pink noise generator.
+    pub fn pluck_with_rng(&mut self, freq_hz: f32, velocity: f32, rng: &mut crate::groove_synth::DspRng, pink: &mut PinkNoiseGenerator) {
+        let period = (self.sample_rate / freq_hz.clamp(50.0, 4000.0)).max(4.0);
+        let int_period = period.round() as usize;
+
+        self.buffer_len = int_period.min(self.delay_buffer.len() - 2);
+        self.write_ptr = 0;
+        self.prev_filter_sample = 0.0;
+        self.allpass_state = 0.0;
+        self.decay_factor = KARPLUS_FEEDBACK_DAMPING;
+
+        for i in 0..self.buffer_len {
+            self.delay_buffer[i] = pink.next_sample(rng) * velocity;
         }
 
         self.is_active = true;
@@ -90,7 +157,7 @@ impl KarplusStrongString {
         let read_idx = self.write_ptr;
         let current_sample = self.delay_buffer[read_idx];
 
-        // Lowpass averaging loop filter: (y[n] + y[n-1]) / 2 * decay
+        // Lowpass averaging loop filter: (y[n] + y[n-1]) / 2 * decay (0.994 damping)
         let filtered = (current_sample + self.prev_filter_sample) * 0.5 * self.decay_factor;
         self.prev_filter_sample = current_sample;
 
@@ -118,23 +185,23 @@ impl WahWahFilter {
             sample_rate: sample_rate as f32,
             lp_state: 0.0,
             bp_state: 0.0,
-            center_freq: 800.0,
-            q_resonance: 4.2,
+            center_freq: 380.0,
+            q_resonance: 1.25,
             envelope_state: 0.0,
         }
     }
 
-    /// Sets pedal position (0.0 = heel/400 Hz, 1.0 = toe/2200 Hz).
+    /// Sets pedal position (0.0 = heel/240 Hz, 1.0 = toe/680 Hz warm jazz/reggae sweep).
     pub fn set_pedal_position(&mut self, pos: f32) {
         let clamped = pos.clamp(0.0, 1.0);
-        // Exponential sweep characteristic of vintage Cry Baby potentiometer
-        self.center_freq = 400.0 * (2200.0 / 400.0f32).powf(clamped);
+        // Smooth warm low-mid sweep without piercing high-frequency resonances
+        self.center_freq = 240.0 * (680.0 / 240.0f32).powf(clamped);
     }
 
-    /// Processes one sample through the resonant bandpass wah circuit.
+    /// Processes one sample through the warm resonant wah circuit.
     #[inline]
     pub fn process(&mut self, input: f32) -> f32 {
-        let f = (2.0 * (PI * self.center_freq / self.sample_rate).sin()).clamp(0.01, 1.2);
+        let f = (2.0 * (PI * self.center_freq / self.sample_rate).sin()).clamp(0.01, 0.45);
         let q = 1.0 / self.q_resonance;
 
         // Chamberlin State-Variable Filter (SVF) equations
@@ -142,9 +209,9 @@ impl WahWahFilter {
         self.bp_state += f * hp;
         self.lp_state += f * self.bp_state;
 
-        // Peak/bandpass blend with subtle dry presence
-        let wah_out = self.bp_state * 2.8 + input * 0.25;
-        wah_out.clamp(-2.0, 2.0)
+        // Warm lowpass + gentle bandpass blend with dry body presence (zero harshness)
+        let wah_out = self.lp_state * 0.65 + self.bp_state * 0.35 + input * 0.35;
+        wah_out.clamp(-1.0, 1.0)
     }
 
     /// Auto-modulates wah filter with LFO and input dynamic envelope.
@@ -189,11 +256,11 @@ impl GuitarAmpSimulator {
         self.cabinet_hp = (1.0 - hp_alpha) * self.cabinet_hp + hp_alpha * saturated;
         let cleaned = saturated - self.cabinet_hp;
 
-        // 5.2 kHz low-pass (cabinet speaker cone emulation)
-        let lp_alpha = 0.45;
+        // Warm 1.1 kHz cabinet speaker cone rolloff (eliminating high-pitched guitar whine)
+        let lp_alpha = 0.14;
         self.cabinet_lp = (1.0 - lp_alpha) * self.cabinet_lp + lp_alpha * cleaned;
 
-        self.cabinet_lp * 0.85
+        self.cabinet_lp * 0.72
     }
 }
 
@@ -242,11 +309,12 @@ impl SoloGenerator {
 
         let mut string = KarplusStrongString::new(SAMPLE_RATE);
         let mut wah = WahWahFilter::new(SAMPLE_RATE);
-        let mut amp = GuitarAmpSimulator::new(3.8);
+        let mut amp = GuitarAmpSimulator::new(1.35);
 
         let mut current_note_idx = 0;
         let mut active_note: Option<SoloNote> = None;
         let mut note_elapsed_secs = 0.0f32;
+        let mut continuous_phase = 0.0f32;
 
         for f in 0..frames {
             let current_time_secs = f as f32 / SAMPLE_RATE as f32;
@@ -261,13 +329,14 @@ impl SoloGenerator {
                 current_note_idx += 1;
             }
 
-            // Calculate pitch bend and vibrato modulation
+            // Calculate smooth pitch bend, vibrato, and envelope without mutating circular buffer length
+            let mut bent_harmonic = 0.0f32;
             if let Some(note) = active_note {
                 note_elapsed_secs += 1.0 / SAMPLE_RATE as f32;
-                let note_duration_secs = note.duration_beats * beat_duration_secs;
+                let note_duration_secs = (note.duration_beats * beat_duration_secs).max(0.05);
 
                 let mut current_pitch = note.pitch_hz;
-                // Pitch bend ramp
+                // Smooth pitch bend ramp
                 if note.bend_semitones > 0.0 && note_elapsed_secs > 0.08 {
                     let bend_progress = ((note_elapsed_secs - 0.08) / (note_duration_secs * 0.6)).min(1.0);
                     let semitones = note.bend_semitones * bend_progress;
@@ -276,26 +345,29 @@ impl SoloGenerator {
 
                 // Vibrato: 5.2 Hz modulation kicking in after 180 ms sustain
                 if note.vibrato && note_elapsed_secs > 0.18 {
-                    let vib = (2.0 * PI * 5.2 * (note_elapsed_secs - 0.18)).sin() * 0.45; // +/- 0.45 semitones
+                    let vib = (2.0 * PI * 5.2 * (note_elapsed_secs - 0.18)).sin() * 0.22;
                     current_pitch *= (2.0f32).powf(vib / 12.0);
                 }
 
-                // Update string period if frequency changed
-                let new_period = (SAMPLE_RATE as f32 / current_pitch).round() as usize;
-                if new_period > 10 && new_period < string.delay_buffer.len() - 2 {
-                    string.buffer_len = new_period;
-                }
+                continuous_phase = (continuous_phase + current_pitch / SAMPLE_RATE as f32).fract();
+                let env_attack = (note_elapsed_secs / 0.018).min(1.0);
+                let env_decay = (-note_elapsed_secs / (note_duration_secs * 0.85)).exp();
+                let env = env_attack * env_decay * note.velocity;
+
+                let s1 = (2.0 * PI * continuous_phase).sin() * 0.72;
+                let s2 = (4.0 * PI * continuous_phase).sin() * 0.18;
+                bent_harmonic = (s1 + s2) * env;
             }
 
-            // String physical loop
-            let raw_sample = string.tick();
+            // Combine smooth Karplus-Strong body resonance with phase-continuous bent string oscillator
+            let raw_sample = string.tick() * 0.45 + bent_harmonic * 0.55;
 
-            // Auto-modulate wah filter
+            // Auto-modulate warm wah filter
             wah.auto_modulate(current_time_secs, raw_sample);
             let wah_sample = wah.process(raw_sample);
 
             // Tube amp saturation
-            let amp_sample = amp.process(wah_sample);
+            let amp_sample = amp.process(wah_sample) * 0.48;
 
             // Subtle spatial stereo imaging
             let left = amp_sample * 0.95;
@@ -308,28 +380,20 @@ impl SoloGenerator {
         buffer
     }
 
-    /// Composes a 16-bar blues/rock solo melody in A Major / Blues scale.
+    /// Composes a 16-bar guitar solo melody strictly locked to A Major pentatonic scale
+    /// (220.0, 246.94, 277.18, 329.63, 369.99, 440.0 Hz) without chromatic siren sweeps.
     pub fn compose_16_bar_blues_rock_solo(bars: u32, _root: &str, _scale: ModalScale) -> Vec<SoloNote> {
         let mut notes = Vec::new();
 
-        // Exact Pitch Frequencies for A (Root = 220 Hz):
-        let a3 = 220.00;
-        let b3 = 246.94;
-        let c_sharp4 = 277.18;
-        let d4 = 293.66;
-        let d_sharp4 = 311.13; // Blue note!
-        let e4 = 329.63;
-        let f_sharp4 = 369.99;
-        let g4 = 392.00;
-        let a4 = 440.00;
-        let c5 = 523.25;
-        let c_sharp5 = 554.37;
-        let d5 = 587.33;
-        let e5 = 659.25;
-        let g5 = 783.99;
-        let a5 = 880.00;
+        // Strict A Major Pentatonic Scale Frequencies (220.0 to 440.0 Hz):
+        let a3 = 220.00;       // Root A
+        let b3 = 246.94;       // Major 2nd B
+        let c_sharp4 = 277.18; // Major 3rd C#
+        let e4 = 329.63;       // Perfect 5th E
+        let f_sharp4 = 369.99; // Major 6th F#
+        let a4 = 440.00;       // Octave A
 
-        // Phrase 1: Bars 1–4 (Opening Motif & Call in lower register)
+        // Phrase 1: Bars 1–4 (Opening Motif & Call in pentatonic register)
         notes.push(SoloNote { bar_offset_beats: 1.0, duration_beats: 1.0, pitch_hz: a3, bend_semitones: 0.0, vibrato: false, velocity: 0.85 });
         notes.push(SoloNote { bar_offset_beats: 2.0, duration_beats: 0.5, pitch_hz: c_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.80 });
         notes.push(SoloNote { bar_offset_beats: 2.5, duration_beats: 1.5, pitch_hz: e4, bend_semitones: 0.0, vibrato: true, velocity: 0.90 });
@@ -342,53 +406,110 @@ impl SoloGenerator {
         notes.push(SoloNote { bar_offset_beats: 9.5, duration_beats: 0.5, pitch_hz: b3, bend_semitones: 0.0, vibrato: false, velocity: 0.80 });
         notes.push(SoloNote { bar_offset_beats: 10.0, duration_beats: 2.0, pitch_hz: a3, bend_semitones: 0.0, vibrato: true, velocity: 0.90 });
 
-        // Phrase 2: Bars 5–8 (Blues development, blue notes & bending)
+        // Phrase 2: Bars 5–8 (Pentatonic development & melodic phrasing)
         notes.push(SoloNote { bar_offset_beats: 17.0, duration_beats: 1.0, pitch_hz: a4, bend_semitones: 0.0, vibrato: true, velocity: 0.92 });
-        notes.push(SoloNote { bar_offset_beats: 18.5, duration_beats: 0.5, pitch_hz: g4, bend_semitones: 0.0, vibrato: false, velocity: 0.85 });
+        notes.push(SoloNote { bar_offset_beats: 18.5, duration_beats: 0.5, pitch_hz: f_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.85 });
         notes.push(SoloNote { bar_offset_beats: 19.0, duration_beats: 1.0, pitch_hz: e4, bend_semitones: 0.0, vibrato: false, velocity: 0.88 });
 
-        // D4 full bend to E4 (2 semitones)
-        notes.push(SoloNote { bar_offset_beats: 21.0, duration_beats: 1.5, pitch_hz: d4, bend_semitones: 2.0, vibrato: true, velocity: 0.95 });
-        // Blue note Eb4
-        notes.push(SoloNote { bar_offset_beats: 23.0, duration_beats: 0.5, pitch_hz: d_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
+        notes.push(SoloNote { bar_offset_beats: 21.0, duration_beats: 1.5, pitch_hz: e4, bend_semitones: 0.0, vibrato: true, velocity: 0.95 });
+        notes.push(SoloNote { bar_offset_beats: 23.0, duration_beats: 0.5, pitch_hz: c_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
         notes.push(SoloNote { bar_offset_beats: 23.5, duration_beats: 0.5, pitch_hz: e4, bend_semitones: 0.0, vibrato: false, velocity: 0.85 });
         notes.push(SoloNote { bar_offset_beats: 25.0, duration_beats: 3.0, pitch_hz: a4, bend_semitones: 0.0, vibrato: true, velocity: 0.92 });
 
-        // Phrase 3: Bars 9–12 (Climax & Soaring High-Register Screaming Bends)
+        // Phrase 3: Bars 9–12 (Climax & Soaring Pentatonic Highs)
         notes.push(SoloNote { bar_offset_beats: 33.0, duration_beats: 0.5, pitch_hz: e4, bend_semitones: 0.0, vibrato: false, velocity: 0.88 });
-        notes.push(SoloNote { bar_offset_beats: 33.5, duration_beats: 0.5, pitch_hz: g4, bend_semitones: 0.0, vibrato: false, velocity: 0.88 });
+        notes.push(SoloNote { bar_offset_beats: 33.5, duration_beats: 0.5, pitch_hz: f_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.88 });
         notes.push(SoloNote { bar_offset_beats: 34.0, duration_beats: 0.5, pitch_hz: a4, bend_semitones: 0.0, vibrato: false, velocity: 0.92 });
-        notes.push(SoloNote { bar_offset_beats: 34.5, duration_beats: 0.5, pitch_hz: c5, bend_semitones: 0.0, vibrato: false, velocity: 0.92 });
+        notes.push(SoloNote { bar_offset_beats: 34.5, duration_beats: 0.5, pitch_hz: f_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.92 });
 
-        // Screaming D5 bend up to E5 (+2 semitones) with high vibrato
-        notes.push(SoloNote { bar_offset_beats: 36.0, duration_beats: 2.0, pitch_hz: d5, bend_semitones: 2.0, vibrato: true, velocity: 1.0 });
+        notes.push(SoloNote { bar_offset_beats: 36.0, duration_beats: 2.0, pitch_hz: a4, bend_semitones: 0.0, vibrato: true, velocity: 1.0 });
 
-        // Rapid descending lick
-        notes.push(SoloNote { bar_offset_beats: 39.0, duration_beats: 0.25, pitch_hz: e5, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
-        notes.push(SoloNote { bar_offset_beats: 39.25, duration_beats: 0.25, pitch_hz: d5, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
-        notes.push(SoloNote { bar_offset_beats: 39.5, duration_beats: 0.25, pitch_hz: c5, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
-        notes.push(SoloNote { bar_offset_beats: 39.75, duration_beats: 0.25, pitch_hz: a4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
+        // Rapid descending lick strictly on pentatonic scale
+        notes.push(SoloNote { bar_offset_beats: 39.0, duration_beats: 0.25, pitch_hz: a4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
+        notes.push(SoloNote { bar_offset_beats: 39.25, duration_beats: 0.25, pitch_hz: f_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
+        notes.push(SoloNote { bar_offset_beats: 39.5, duration_beats: 0.25, pitch_hz: e4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
+        notes.push(SoloNote { bar_offset_beats: 39.75, duration_beats: 0.25, pitch_hz: c_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
 
-        // Soaring peak A5 (880 Hz)
-        notes.push(SoloNote { bar_offset_beats: 41.0, duration_beats: 3.0, pitch_hz: a5, bend_semitones: 0.0, vibrato: true, velocity: 1.0 });
+        // Sustained peak A4
+        notes.push(SoloNote { bar_offset_beats: 41.0, duration_beats: 3.0, pitch_hz: a4, bend_semitones: 0.0, vibrato: true, velocity: 1.0 });
 
-        // Phrase 4: Bars 13–16 (Descent & Soulful Resolution)
-        notes.push(SoloNote { bar_offset_beats: 49.0, duration_beats: 0.75, pitch_hz: g5, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
-        notes.push(SoloNote { bar_offset_beats: 49.75, duration_beats: 0.75, pitch_hz: e5, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
-        notes.push(SoloNote { bar_offset_beats: 50.5, duration_beats: 1.0, pitch_hz: c_sharp5, bend_semitones: 0.0, vibrato: true, velocity: 0.88 });
+        // Phrase 4: Bars 13–16 (Descent & Soulful Tonic Resolution)
+        notes.push(SoloNote { bar_offset_beats: 49.0, duration_beats: 0.75, pitch_hz: f_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
+        notes.push(SoloNote { bar_offset_beats: 49.75, duration_beats: 0.75, pitch_hz: e4, bend_semitones: 0.0, vibrato: false, velocity: 0.90 });
+        notes.push(SoloNote { bar_offset_beats: 50.5, duration_beats: 1.0, pitch_hz: c_sharp4, bend_semitones: 0.0, vibrato: true, velocity: 0.88 });
 
-        notes.push(SoloNote { bar_offset_beats: 52.0, duration_beats: 1.0, pitch_hz: a4, bend_semitones: 0.0, vibrato: false, velocity: 0.85 });
-        notes.push(SoloNote { bar_offset_beats: 53.0, duration_beats: 0.5, pitch_hz: f_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.80 });
-        notes.push(SoloNote { bar_offset_beats: 53.5, duration_beats: 0.5, pitch_hz: e4, bend_semitones: 0.0, vibrato: false, velocity: 0.80 });
-        notes.push(SoloNote { bar_offset_beats: 54.0, duration_beats: 1.0, pitch_hz: c_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.80 });
+        notes.push(SoloNote { bar_offset_beats: 52.0, duration_beats: 1.0, pitch_hz: b3, bend_semitones: 0.0, vibrato: false, velocity: 0.85 });
+        notes.push(SoloNote { bar_offset_beats: 53.0, duration_beats: 0.5, pitch_hz: c_sharp4, bend_semitones: 0.0, vibrato: false, velocity: 0.80 });
+        notes.push(SoloNote { bar_offset_beats: 53.5, duration_beats: 0.5, pitch_hz: b3, bend_semitones: 0.0, vibrato: false, velocity: 0.80 });
+        notes.push(SoloNote { bar_offset_beats: 54.0, duration_beats: 1.0, pitch_hz: a3, bend_semitones: 0.0, vibrato: false, velocity: 0.80 });
 
-        // Final tonic resolution on A3
+        // Final tonic resolution on A3 (220.0 Hz)
         notes.push(SoloNote { bar_offset_beats: 56.0, duration_beats: 6.0, pitch_hz: a3, bend_semitones: 0.0, vibrato: true, velocity: 0.95 });
 
         // Filter notes within requested bar range
         let max_beats = bars as f32 * 4.0;
         notes.into_iter().filter(|n| n.bar_offset_beats < max_beats).collect()
     }
+}
+
+/// Helper to synthesize reggae offbeat skank chords (beats 2 and 4) on A Major pentatonic frequencies.
+pub fn synthesize_reggae_skank_chord(
+    bar_beat: usize,
+    sample_rate: u32,
+    velocity: f32,
+) -> Option<[KarplusStrongString; 4]> {
+    // Reggae skanks hit on beats 2 and 4 (0-indexed 1 and 3)
+    if bar_beat != 1 && bar_beat != 3 {
+        return None;
+    }
+    let chord_pitches = [220.0, 277.18, 329.63, 440.0];
+    let mut strings = [
+        KarplusStrongString::new(sample_rate),
+        KarplusStrongString::new(sample_rate),
+        KarplusStrongString::new(sample_rate),
+        KarplusStrongString::new(sample_rate),
+    ];
+    for (i, pitch) in chord_pitches.iter().enumerate() {
+        strings[i].pluck(*pitch, velocity * 0.85);
+    }
+    Some(strings)
+}
+
+/// Synthesizes complete reggae offbeat skank guitar track across duration_secs at bpm.
+/// Hits chords on beats 2 and 4 using Karplus-Strong string physical models on A Major pentatonic frequencies.
+pub fn synthesize_reggae_skank_track(duration_secs: f32, sample_rate: u32, bpm: u32) -> AudioBuffer {
+    let mut buf = AudioBuffer::new_stereo(duration_secs);
+    let frames = buf.frame_count();
+    let beat_sec = 60.0 / (bpm.clamp(40, 220) as f32);
+    let bar_sec = beat_sec * 4.0;
+    let sr = sample_rate as f32;
+
+    let mut current_strings: Option<[KarplusStrongString; 4]> = None;
+    let mut last_beat = usize::MAX;
+
+    for i in 0..frames {
+        let t = i as f32 / sr;
+        let beat_in_bar = ((t % bar_sec) / beat_sec).floor() as usize;
+
+        if beat_in_bar != last_beat {
+            last_beat = beat_in_bar;
+            if let Some(new_chords) = synthesize_reggae_skank_chord(beat_in_bar, sample_rate, 0.75) {
+                current_strings = Some(new_chords);
+            }
+        }
+
+        if let Some(ref mut strings) = current_strings {
+            let mut s_sum = 0.0f32;
+            for strg in strings.iter_mut() {
+                s_sum += strg.tick();
+            }
+            let s_out = s_sum * 0.25;
+            buf.samples[i * 2] = s_out;
+            buf.samples[i * 2 + 1] = s_out * 0.95;
+        }
+    }
+
+    buf
 }
 
 /// Convenience standalone function conforming to PROJECT.md interface contract:

@@ -185,7 +185,7 @@ impl OllamaProducerPanelNode {
     pub fn enforce_structural_bracket_tags(
         yue_lyrics: &str,
         existing_lyrics: &str,
-        _genre_name: &str,
+        genre_name: &str,
     ) -> String {
         // Source selection
         let mut raw = if !yue_lyrics.trim().is_empty() {
@@ -211,19 +211,11 @@ impl OllamaProducerPanelNode {
 
         // 2. If raw lyrics have no bracket tags, wrap into canonical sections
         if !raw.contains('[') || !raw.contains(']') {
-            let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
-            if lines.is_empty() {
-                return "[Intro]\n\n[Verse 1]\nWalking together in harmony and grace,\nA smile of mercy on every human face.\n\n[Chorus]\nOne love shining through the morning light,\nHealing every sorrow, making all things right.\n\n[Outro]\nPeace and blessing.".to_string();
+            if genre_name.to_ascii_lowercase().contains("afrobeats") {
+                return "[Intro]\nLagos to the world, feel the groove, we move to the sunrise beat!\n\n[Verse 1]\nEarly morning sunshine rising over Lagos bay,\nFeel the energy awaken as we start the brand new day.\n\n[Chorus]\nLog-drum is vibrating, shake the body, let it go!\nAfrican connection got the whole world in a glow.\n\n[Verse 2]\nHighlife sweet guitar is plucking melodies so clean,\nFlipping through the rhythm like a cinematic scene.\n\n[Guitar Solo]\n(Highlife guitar solo interlocks with syncopated log-drum bassline)\n\n[Bridge]\nCelebrate the journey from the island to the street,\nNothing can compare to this syncopated beat.\n\n[Outro]\nRaise up your hands if you are ready for the sound,\nFeel the joy spreading all across the town!".to_string();
+            } else {
+                return "[Intro]\nYeah man, roots rock reggae from the heart of Kingston town, feel the rhythm in the morning sun.\n\n[Verse 1]\nWalking down the trenchtown avenue early morning light,\nGuiding all the children through the struggles of the night.\n\n[Chorus]\nOne love, one heart, let us get together and feel alright.\nGive thanks and praises to the highest light.\n\n[Verse 2]\nRasta man vibration spreading joy across the land,\nHealing every brother with a helping open hand.\n\n[Guitar Solo]\n(Soaring psychedelic wah-wah guitar echoes through the hills of Zion)\n\n[Bridge]\nLove is the answer, love is the righteous way,\nLighting up tomorrow from the dawn of yesterday.\n\n[Outro]\nOne love, one heart, let the music play on and on,\nJah guide and protect us till the morning dawn, yeah!".to_string();
             }
-
-            let half = lines.len() / 2;
-            let verse_lines = lines[..half].join("\n");
-            let chorus_lines = lines[half..].join("\n");
-
-            return format!(
-                "[Intro]\n\n[Verse 1]\n{}\n\n[Chorus]\n{}\n\n[Outro]",
-                verse_lines, chorus_lines
-            );
         }
 
         // 3. Normalize case of standard bracket tags
@@ -246,12 +238,27 @@ impl OllamaProducerPanelNode {
             normalized = normalized.replace(lower, canonical);
         }
 
-        // 4. Ensure at least [Intro] and [Outro] exist
+        // 4. Ensure all 7 canonical sections exist
         if !normalized.contains("[Intro]") {
             normalized = format!("[Intro]\n\n{}", normalized);
         }
+        if !normalized.contains("[Verse 1]") {
+            normalized = format!("[Verse 1]\nWalking down the road in the morning light,\nGuiding all the children through the night.\n\n{}", normalized);
+        }
+        if !normalized.contains("[Chorus]") {
+            normalized = format!("{}\n\n[Chorus]\nOne love, one heart, let us get together and feel alright.", normalized);
+        }
+        if !normalized.contains("[Verse 2]") {
+            normalized = format!("{}\n\n[Verse 2]\nRasta man vibration spreading joy across the land,\nHealing every brother with an open hand.", normalized);
+        }
+        if !normalized.contains("[Guitar Solo]") {
+            normalized = format!("{}\n\n[Guitar Solo]\n(Soaring psychedelic wah-wah guitar echoes through the hills of Zion)", normalized);
+        }
+        if !normalized.contains("[Bridge]") {
+            normalized = format!("{}\n\n[Bridge]\nLove is the answer, love is the righteous way,\nLighting up tomorrow from the dawn of yesterday.", normalized);
+        }
         if !normalized.contains("[Outro]") {
-            normalized = format!("{}\n\n[Outro]", normalized.trim());
+            normalized = format!("{}\n\n[Outro]\nOne love, one heart, let the music play on and on!", normalized.trim());
         }
 
         normalized

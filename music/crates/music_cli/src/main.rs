@@ -25,6 +25,23 @@ async fn main() -> anyhow::Result<()> {
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    // 1b. Hugging Face Music Model Auto-Discovery & Upgrade CLI command
+    if args.update_models {
+        println!("🔄 Auto-Discovering & Upgrading Hugging Face Music & Vocal Models...");
+        let mem = music_fusion::memory::SystemMemory::detect_live();
+        mem.print_telemetry();
+        let engine = music_fusion::hf_model_discovery::HfModelDiscoveryEngine::new(
+            args.storage_dir.join("hf_music_models_registry.json"),
+        );
+        let registry = engine.evaluate_and_upgrade(&mem).await?;
+        println!("✨ Discovered & Evaluated {} models across pipeline stages:", registry.discovered_count);
+        for (stage, model_id) in &registry.active_models {
+            println!("   • {:<22} => {}", stage, model_id);
+        }
+        println!("💾 Active registry saved to {}", args.storage_dir.join("hf_music_models_registry.json").display());
+        return Ok(());
+    }
+
     // 2. Flagship Roots Reggae Anthem CLI command
     if args.create_reggae_anthem {
         println!("🇯🇲 Generating 1977 Roots Reggae 'One Love' Anthem...");
@@ -133,11 +150,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 8. Default mode or --serve: Launch Tokio HTTP REST Server + ChatGPT-like Web Studio UI
-    // Dynamic port selection: scans from args.port..=(args.port + 100) and falls back to OS-assigned port if busy
-    let end_port = args.port.saturating_add(100);
-    let bound_port = rest_server::start_rest_server(
+    // Dynamic port selection: scans 5050..=5070 (or args.port..=(args.port + 20)) and falls back to OS-assigned port if busy
+    let end_port = args.port.saturating_add(20);
+    let bound_port = rest_server::start_rest_server_with_host(
         runner,
         args.storage_dir.clone(),
+        &args.host,
         args.port,
         end_port,
         args.ollama_host.clone(),

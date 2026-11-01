@@ -26,7 +26,7 @@ use music_core::state::{
 };
 use music_dsp::groove_synth::UniversalDrumSynthesizer;
 use music_dsp::wav::{AudioBuffer, WavBitDepth};
-use music_fusion::memory::{ExecutionRoute, PipelineStageKind, SystemMemory};
+use music_fusion::memory::SystemMemory;
 
 use crate::error::PipelineError;
 use crate::graph::GraphNode;
@@ -112,34 +112,70 @@ impl GrooveAndYueSynthesisNode {
 
         // 3. Stage 2: YuE multi-track vocal and accompaniment synthesis
         let memory = SystemMemory::detect_live();
-        let route = memory.route_stage(PipelineStageKind::Stage2YuE, &state.engine_mode);
+        let neural_model = memory.select_neural_model(&state.engine_mode);
         log::info!(
-            "Node 2: Sizing decision for Stage2YuE -> {:?} (engine_mode: {})",
-            route, state.engine_mode
+            "Node 2: Neural model selection -> {:?} (engine_mode: {})",
+            neural_model, state.engine_mode
         );
 
         let mut synthesized_via_hf = false;
 
-        if route == ExecutionRoute::HuggingFaceGpu || route == ExecutionRoute::HuggingFaceCpu {
-            // Attempt external YuE subprocess execution with 100% VRAM reclamation
-            match self.execute_yue_subprocess(state, &stems_dir, &groove_path).await {
-                Ok((vocals_path, inst_path)) => {
-                    state.set_stem(STEM_YUE_VOCALS, vocals_path);
-                    state.set_stem(STEM_YUE_INSTRUMENTALS, inst_path);
-                    synthesized_via_hf = true;
-                    log::info!("Node 2: Successfully generated dual stems via external YuE subprocess");
+        if neural_model != music_fusion::memory::NeuralModelChoice::PureRustFallback {
+            let uv_bridge = crate::python_bridge::UvBridge::new();
+            if uv_bridge.is_available() {
+                let venv_dir = PathBuf::from(".venv");
+                match uv_bridge.bootstrap_environment(&venv_dir) {
+                    Ok(python_bin) => {
+                        let script_path = PathBuf::from("workers/generate_song.py");
+                        let lyrics_file = stems_dir.parent().unwrap_or(&stems_dir).join("lyrics.txt");
+                        let args = crate::python_bridge::GenerateSongArgs {
+                            model: neural_model.model_id().to_string(),
+                            prompt: format!("{} track at {} BPM in {}", state.genre, state.bpm, state.key_signature),
+                            lyrics_file,
+                            bpm: state.bpm,
+                            key: state.key_signature.clone(),
+                            duration_secs,
+                            output_dir: stems_dir.clone(),
+                            device: if memory.has_usable_gpu() { "cuda".to_string() } else { "cpu".to_string() },
+                        };
+                        match uv_bridge.run_generate_song(&python_bin, &script_path, &args, self.subprocess_timeout_secs).await {
+                            Ok(output) => {
+                                state.set_stem(STEM_YUE_VOCALS, output.vocals_path);
+                                state.set_stem(STEM_YUE_INSTRUMENTALS, output.instrumentals_path);
+                                synthesized_via_hf = true;
+                                println!(
+                                    "🎛️  [SYNTHESIS ENGINE] Track rendered by Hugging Face GPU weights (Model: {}, Device: CUDA, VRAM: {:.2} GB free)",
+                                    neural_model.display_name(),
+                                    memory.gpu_vram_free_gb
+                                );
+                            }
+                            Err(e) => {
+                                println!(
+                                    "⚠️  [SYNTHESIS ENGINE FALLBACK] GPU VRAM insufficient or neural weights/dependencies unavailable: {}. Automatically falling back to pure-Rust physical modeling synthesizer.",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!(
+                            "⚠️  [SYNTHESIS ENGINE FALLBACK] GPU VRAM insufficient or neural weights/dependencies unavailable: {}. Automatically falling back to pure-Rust physical modeling synthesizer.",
+                            e
+                        );
+                    }
                 }
-                Err(e) => {
-                    log::warn!(
-                        "Node 2: YuE external subprocess skipped/failed ({}); gracefully falling back to pure-Rust DSP synthesis",
-                        e
-                    );
-                }
+            } else {
+                println!(
+                    "⚠️  [SYNTHESIS ENGINE FALLBACK] GPU VRAM insufficient or neural weights/dependencies unavailable: uv executable not found. Automatically falling back to pure-Rust physical modeling synthesizer."
+                );
             }
         }
 
         // 4. Pure-Rust DSP fallback multi-stem harmonic renderer
         if !synthesized_via_hf {
+            println!(
+                "🎹  [SYNTHESIS ENGINE] Track rendered by pure-Rust physical modeling synthesizer (Karplus-Strong string algorithm, Reggae one-drop drums & dub bass)"
+            );
             let (vocals_path, inst_path) = self.render_pure_rust_dual_stems(state, &stems_dir, &groove_buf)?;
             state.set_stem(STEM_YUE_VOCALS, vocals_path);
             state.set_stem(STEM_YUE_INSTRUMENTALS, inst_path);
@@ -170,6 +206,7 @@ impl GrooveAndYueSynthesisNode {
     }
 
     /// Stage 2: Executes external YuE subprocess with deterministic process isolation & VRAM cleanup.
+    #[allow(dead_code)]
     async fn execute_yue_subprocess(
         &self,
         _state: &MusicProductionState,
@@ -266,64 +303,43 @@ impl GrooveAndYueSynthesisNode {
         let frames = groove_buf.frame_count();
         let duration_secs = groove_buf.duration_secs();
         let bpm = state.bpm.clamp(40, 220) as f32;
-        let beat_duration = 60.0 / bpm;
+        let _beat_duration = 60.0 / bpm;
 
         let key_root_hz = Self::parse_key_signature_root_hz(&state.key_signature);
 
-        // 1. Synthesize Harmonic Instrumental Bed (Chords + Bassline)
+        // 1. Synthesize Harmonic Instrumental Bed (Chords + Bassline + Bubble Organ + Skank)
         let mut inst_buf = groove_buf.clone();
 
-        // Add melodic rolling bassline (55 Hz to 110 Hz)
-        let bass_octave_hz = key_root_hz * 0.5;
-        for i in 0..frames {
-            let t = i as f32 / sample_rate as f32;
-            let current_beat = (t / beat_duration) as usize;
+        // Synthesize Dub Sub-Bass (180 Hz lowpass, 15ms attack, 120ms release)
+        let mut bass_synth = music_dsp::groove_synth::DubSubBass::new(sample_rate);
+        let bass_buf = bass_synth.synthesize(duration_secs, bpm as u32);
 
-            // Simple walking bass notes per measure: root, 5th, octave, 4th
-            let note_mult = match current_beat % 4 {
-                0 => 1.0,         // Tonic
-                1 => 1.498_31,    // Perfect Fifth
-                2 => 2.0,         // Octave
-                3 => 1.334_84,    // Perfect Fourth
-                _ => 1.0,
-            };
-            let bass_freq = bass_octave_hz * note_mult;
+        // Synthesize Hammond Organ Bubble (1x-4x drawbars, 6 Hz tremolo LFO, ADSR)
+        let mut organ_synth = music_dsp::groove_synth::HammondOrganBubble::new(sample_rate);
+        let organ_buf = organ_synth.synthesize(duration_secs, bpm as u32, key_root_hz);
 
-            // Sine sub-bass + subtle 2nd harmonic
-            let sub = (2.0 * PI * bass_freq * t).sin() * 0.35;
-            let warm_2nd = (2.0 * PI * bass_freq * 2.0 * t).sin() * 0.12;
-            let bass_sample = sub + warm_2nd;
-
-            // Mix bass into Left and Right channels with warmth
-            inst_buf.samples[i * 2] = (inst_buf.samples[i * 2] * 0.70 + bass_sample).clamp(-0.95, 0.95);
-            inst_buf.samples[i * 2 + 1] = (inst_buf.samples[i * 2 + 1] * 0.70 + bass_sample).clamp(-0.95, 0.95);
-        }
-
-        // Add harmonic offbeat skank / chord bed (triads at key root, 3rd, 5th)
-        let root = key_root_hz;
-        let third = root * 1.259921;  // Major third
-        let fifth = root * 1.498307;  // Perfect fifth
+        // Synthesize Karplus-Strong offbeat skank chords (beats 2 & 4)
+        let skank_buf = music_dsp::guitar_wah::synthesize_reggae_skank_track(duration_secs, sample_rate, bpm as u32);
 
         for i in 0..frames {
-            let t = i as f32 / sample_rate as f32;
-            let beat_phase = (t % beat_duration) / beat_duration;
+            let l_drum = inst_buf.samples[i * 2];
+            let r_drum = inst_buf.samples[i * 2 + 1];
 
-            // Offbeat pulse on the "and" of the beat (0.48 to 0.72 of each beat)
-            let skank_env = if (0.48..=0.72).contains(&beat_phase) {
-                ((beat_phase - 0.48) / 0.24 * PI).sin() * 0.25
-            } else {
-                0.0
-            };
+            let l_bass = if i * 2 < bass_buf.samples.len() { bass_buf.samples[i * 2] } else { 0.0 };
+            let r_bass = if i * 2 + 1 < bass_buf.samples.len() { bass_buf.samples[i * 2 + 1] } else { l_bass };
 
-            if skank_env > 0.001 {
-                let chord = (2.0 * PI * root * t).sin()
-                    + (2.0 * PI * third * t).sin()
-                    + (2.0 * PI * fifth * t).sin();
-                let chord_sample = (chord / 3.0) * skank_env;
+            let l_organ = if i * 2 < organ_buf.samples.len() { organ_buf.samples[i * 2] } else { 0.0 };
+            let r_organ = if i * 2 + 1 < organ_buf.samples.len() { organ_buf.samples[i * 2 + 1] } else { l_organ };
 
-                inst_buf.samples[i * 2] = (inst_buf.samples[i * 2] + chord_sample).clamp(-0.96, 0.96);
-                inst_buf.samples[i * 2 + 1] = (inst_buf.samples[i * 2 + 1] + chord_sample * 0.90).clamp(-0.96, 0.96);
-            }
+            let l_skank = if i * 2 < skank_buf.samples.len() { skank_buf.samples[i * 2] } else { 0.0 };
+            let r_skank = if i * 2 + 1 < skank_buf.samples.len() { skank_buf.samples[i * 2 + 1] } else { l_skank };
+
+            // Authentic dub mix: drums (0.42), dub bass (0.35), bubble organ (0.22), skank (0.20)
+            let mixed_l = (l_drum * 0.42 + l_bass * 0.35 + l_organ * 0.22 + l_skank * 0.20).tanh() * 0.94;
+            let mixed_r = (r_drum * 0.42 + r_bass * 0.35 + r_organ * 0.22 + r_skank * 0.20).tanh() * 0.94;
+
+            inst_buf.samples[i * 2] = mixed_l;
+            inst_buf.samples[i * 2 + 1] = mixed_r;
         }
 
         let inst_path = stems_dir.join("yue_instrumentals.wav");
@@ -331,31 +347,15 @@ impl GrooveAndYueSynthesisNode {
             PipelineError::DspError(format!("Failed to write yue_instrumentals.wav: {}", e))
         })?;
 
-        // 2. Synthesize Guide Vocal Stem (yue_vocals.wav)
-        let mut vocal_buf = AudioBuffer::new_stereo(duration_secs);
-        let vocal_root = key_root_hz * 2.0; // Tenor range (~220 Hz for A)
-
-        for i in 0..frames {
-            let t = i as f32 / sample_rate as f32;
-            let current_beat = (t / beat_duration) as usize;
-
-            // Vocal phrasing: sings for 2 beats, rests for 2 beats (call-and-response feel)
-            let is_singing = (current_beat % 4) < 3;
-            if is_singing {
-                // Subtle vibrato (5.5 Hz)
-                let vibrato = (2.0 * PI * 5.5 * t).sin() * 4.0;
-                let freq = vocal_root + vibrato;
-
-                // Formant-like harmonic structure: Fundamental + 2nd + 3rd harmonics
-                let f0 = (2.0 * PI * freq * t).sin() * 0.40;
-                let f1 = (2.0 * PI * freq * 2.0 * t).sin() * 0.25;
-                let f2 = (2.0 * PI * freq * 3.0 * t).sin() * 0.15;
-                let raw_vocal = f0 + f1 + f2;
-
-                vocal_buf.samples[i * 2] = raw_vocal.clamp(-0.90, 0.90);
-                vocal_buf.samples[i * 2 + 1] = (raw_vocal * 0.95).clamp(-0.90, 0.90);
-            }
-        }
+        // 2. Synthesize Guide Vocal Stem (yue_vocals.wav) with Real Articulated English Lyrics
+        let vocal_buf = Self::synthesize_articulated_vocal_stem(
+            state,
+            stems_dir,
+            duration_secs,
+            sample_rate,
+            bpm,
+            key_root_hz,
+        );
 
         let vocals_path = stems_dir.join("yue_vocals.wav");
         vocal_buf.to_wav_file_with_format(&vocals_path, WavBitDepth::Pcm16).map_err(|e| {
@@ -363,6 +363,346 @@ impl GrooveAndYueSynthesisNode {
         })?;
 
         Ok((vocals_path, inst_path))
+    }
+
+    /// Synthesizes a richly articulated, intelligible vocal stem (`yue_vocals.wav`)
+    /// using Windows native SpeechSynthesizer at natural human pitch with studio de-essing
+    /// and subtle spatial room presence (zero carrier sine whine, zero overlapping voice chaos).
+    fn synthesize_articulated_vocal_stem(
+        state: &MusicProductionState,
+        stems_dir: &Path,
+        duration_secs: f32,
+        sample_rate: u32,
+        bpm: f32,
+        key_root_hz: f32,
+    ) -> AudioBuffer {
+        let frames = (duration_secs * sample_rate as f32).round() as usize;
+        let beat_duration = 60.0 / bpm.max(40.0);
+        let vocal_root = if key_root_hz > 165.0 { key_root_hz } else { key_root_hz * 1.5 };
+
+        // Major pentatonic melody scale ratios: Root, 2nd, 3rd, 5th, 6th
+        let _melody_scale: [f32; 8] = [
+            1.0,       // Tonic
+            1.122_46,  // Major Second
+            1.259_92,  // Major Third
+            1.498_31,  // Perfect Fifth
+            1.681_79,  // Major Sixth
+            1.498_31,  // Perfect Fifth
+            1.259_92,  // Major Third
+            1.0,       // Tonic
+        ];
+
+        // Attempt real articulated English vocal synthesis when duration >= 4.0s
+        let mut speech_buf_opt = if duration_secs >= 4.0 {
+            Self::try_synthesize_windows_sapi_vocals(state, stems_dir, duration_secs)
+        } else {
+            None
+        };
+
+        let mut vocal_buf = AudioBuffer::new(sample_rate, 2, duration_secs);
+
+        if let Some(ref mut speech_buf) = speech_buf_opt {
+            // Normalize speech buffer peak to 0.88 so words are crystal clear
+            let mut max_peak = 0.0f32;
+            for &s in &speech_buf.samples {
+                let a = s.abs();
+                if a > max_peak {
+                    max_peak = a;
+                }
+            }
+            let norm_gain = if max_peak > 0.01 { (0.88 / max_peak).clamp(0.5, 3.0) } else { 1.0 };
+
+            let copy_frames = frames.min(speech_buf.frame_count());
+            let src_ch = speech_buf.channels as usize;
+            let mut lp_l = 0.0f32;
+            let mut lp_r = 0.0f32;
+
+            for i in 0..copy_frames {
+                let raw_l = speech_buf.samples[i * src_ch] * norm_gain;
+                let raw_r = if src_ch > 1 {
+                    speech_buf.samples[i * src_ch + 1] * norm_gain
+                } else {
+                    raw_l
+                };
+
+                // Gentle 1-pole de-esser smoothing (~4.5 kHz) — zero continuous sine carrier whine!
+                lp_l = 0.45 * lp_l + 0.55 * raw_l;
+                lp_r = 0.45 * lp_r + 0.55 * raw_r;
+
+                vocal_buf.samples[i * 2] = (raw_l * 0.72 + lp_l * 0.28).clamp(-0.94, 0.94);
+                vocal_buf.samples[i * 2 + 1] = (raw_r * 0.72 + lp_r * 0.28).clamp(-0.94, 0.94);
+            }
+        } else {
+            // Fast Pure-Rust Warm Syllable Synthesizer (for short unit tests / non-Windows)
+            // Uses phase-continuous accumulators, portamento glide, and smooth raised-cosine envelopes
+            let syllable_dur = (beat_duration * 0.5).max(0.18);
+            let sr = sample_rate as f32;
+            let mut vocal_phase = 0.0f32;
+            let mut smoothed_freq = vocal_root;
+            let mut smoothed_env = 0.0f32;
+            let glide_alpha = (1.0 - (-1.0 / (0.015 * sr)).exp()).clamp(0.0005, 0.05);
+            let env_alpha = (1.0 - (-1.0 / (0.010 * sr)).exp()).clamp(0.001, 0.08);
+
+            for i in 0..frames {
+                let t = i as f32 / sr;
+                let current_beat = (t / beat_duration) as usize;
+                let syl_phase = (t % syllable_dur) / syllable_dur;
+
+                // Continuous vocal delivery without silence gating dropouts
+                let target_env = if syl_phase < 0.15 {
+                    0.25 + 0.75 * (syl_phase / 0.15 * PI * 0.5).sin()
+                } else if syl_phase < 0.80 {
+                    1.0
+                } else {
+                    0.25 + 0.75 * (((1.0 - syl_phase) / 0.20) * PI * 0.5).sin().max(0.0)
+                };
+                smoothed_env += env_alpha * (target_env - smoothed_env);
+
+                // Locked strictly to A Major pentatonic frequencies [220.0, 246.94, 277.18, 329.63, 369.99, 440.0]
+                let penta = music_dsp::guitar_wah::A_MAJOR_PENTATONIC;
+                let target_penta_hz = penta[current_beat % penta.len()];
+                let note_freq = if vocal_root > 0.0 {
+                    (vocal_root / 220.0) * target_penta_hz
+                } else {
+                    target_penta_hz
+                };
+                let vibrato = (2.0 * PI * 5.0 * t).sin() * 1.5;
+                let target_freq = note_freq + vibrato;
+                smoothed_freq += glide_alpha * (target_freq - smoothed_freq);
+
+                vocal_phase = (vocal_phase + smoothed_freq / sr).fract();
+
+                let glottal = (2.0 * PI * vocal_phase).sin() * 0.52
+                    + (4.0 * PI * vocal_phase).sin() * 0.22
+                    + (6.0 * PI * vocal_phase).sin() * 0.08;
+
+                let raw_vocal = (glottal * smoothed_env).tanh() * 0.85;
+                vocal_buf.samples[i * 2] = raw_vocal;
+                vocal_buf.samples[i * 2 + 1] = raw_vocal * 0.95;
+            }
+        }
+
+        // Apply subtle 115ms Stereo Studio Room Ambience (0.08 wet mix) for natural depth
+        let delay_frames = ((0.115 * sample_rate as f32) as usize).max(1);
+        let mut delayed = vocal_buf.clone();
+        for i in delay_frames..frames {
+            let dry_l = vocal_buf.samples[i * 2];
+            let dry_r = vocal_buf.samples[i * 2 + 1];
+            let echo_l = vocal_buf.samples[(i - delay_frames) * 2 + 1] * 0.08;
+            let echo_r = vocal_buf.samples[(i - delay_frames) * 2] * 0.08;
+            delayed.samples[i * 2] = (dry_l + echo_l).clamp(-0.95, 0.95);
+            delayed.samples[i * 2 + 1] = (dry_r + echo_r).clamp(-0.95, 0.95);
+        }
+
+        delayed
+    }
+
+    /// Invokes Windows `System.Speech.Synthesis.SpeechSynthesizer` at 48,000 Hz 16-bit Stereo PCM
+    /// to render crystal-clear, natural-pitch Lead Vocals from the song's actual lyrics.
+    #[cfg(windows)]
+    fn try_synthesize_windows_sapi_vocals(
+        state: &MusicProductionState,
+        stems_dir: &Path,
+        duration_secs: f32,
+    ) -> Option<AudioBuffer> {
+        let raw_lyrics = if !state.lyrics.trim().is_empty() {
+            state.lyrics.clone()
+        } else if let Some(ref bp) = state.blueprint {
+            bp.to_yue_lyrics_txt()
+        } else {
+            String::new()
+        };
+
+        // Strip section headers like [Verse 1], [Chorus] AND parenthetical stage notes (...)
+        let mut cleaned_text = String::with_capacity(raw_lyrics.len());
+        let mut in_brackets = false;
+        let mut in_parens = false;
+        for ch in raw_lyrics.chars() {
+            match ch {
+                '[' => {
+                    in_brackets = true;
+                    cleaned_text.push('\n');
+                }
+                ']' => {
+                    in_brackets = false;
+                    cleaned_text.push('\n');
+                }
+                '(' => in_parens = true,
+                ')' => in_parens = false,
+                _ if !in_brackets && !in_parens => cleaned_text.push(ch),
+                _ => {}
+            }
+        }
+
+        let mut lines: Vec<String> = cleaned_text
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| {
+                l.chars()
+                    .filter(|c| c.is_alphanumeric() || " ,.!?'-\"".contains(*c))
+                    .collect::<String>()
+            })
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        if lines.is_empty() {
+            if state.genre.to_ascii_lowercase().contains("afrobeats") {
+                lines = vec![
+                    "Lagos to the world, feel the groove, we move to the sunrise beat!".to_string(),
+                    "Early morning sunshine rising over Lagos bay, feel the energy awaken as we start the brand new day.".to_string(),
+                    "Highlife sweet guitar is plucking melodies so clean, flipping through the rhythm like a cinematic scene.".to_string(),
+                    "Log drum is vibrating, shake the body, let it go! African connection got the whole world in a glow.".to_string(),
+                    "Celebrate the journey from the island to the street, nothing can compare to this syncopated beat.".to_string(),
+                    "Raise up your hands if you are ready for the sound, feel the joy spreading all across the town.".to_string(),
+                ];
+            } else {
+                lines = vec![
+                    "Walking down the trenchtown avenue early morning light, guiding all the children through the struggles of the night.".to_string(),
+                    "Hear the sweet Nyabinghi drums rolling down the street, every heavy burden falls before the one drop beat.".to_string(),
+                    "One love, one heart, let us get together and feel alright.".to_string(),
+                    "Give thanks and praises to the highest light, we are standing tall through the darkest night.".to_string(),
+                    "Rasta man vibration spreading joy across the land, healing every brother with a helping open hand.".to_string(),
+                    "Love is the answer, love is the righteous way, lighting up tomorrow from the dawn of yesterday.".to_string(),
+                ];
+            }
+        }
+
+        // Repeat lyrical stanzas so the vocal performance spans the full duration of the song
+        let target_line_count = ((duration_secs / 3.8).ceil() as usize).clamp(4, 90);
+        let mut expanded_lines = Vec::with_capacity(target_line_count);
+        for idx in 0..target_line_count {
+            expanded_lines.push(lines[idx % lines.len()].clone());
+        }
+
+        let lead_wav_path = stems_dir.join("_sapi_lead_vocal.wav");
+        let lyrics_txt_path = stems_dir.join("_sapi_lyrics.txt");
+
+        let joined_lyrics = expanded_lines.join("\n");
+        if fs::write(&lyrics_txt_path, &joined_lyrics).is_err() {
+            return None;
+        }
+
+        let ps_script = r#"
+Add-Type -AssemblyName System.Speech
+$ErrorActionPreference = 'Stop'
+$lyricsPath = $args[0]
+$leadOut = $args[1]
+
+$lines = Get-Content -Path $lyricsPath -Encoding UTF8 | Where-Object { $_.Trim().Length -gt 0 }
+$fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(48000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Stereo)
+
+$leadSynth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+try { $leadSynth.SelectVoice('Microsoft David Desktop') } catch {}
+$leadSynth.Volume = 100
+$leadSynth.SetOutputToWaveFile($leadOut, $fmt)
+
+$pitches = @('+0st', '+1st', '+2st', '+0st', '-1st', '+1st')
+$rates = @('-6%', '-5%', '-8%', '-6%')
+$sbLead = New-Object System.Text.StringBuilder
+[void]$sbLead.Append('<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">')
+[void]$sbLead.Append('<break time="450ms"/>')
+$idx = 0
+foreach ($line in $lines) {
+    $clean = [System.Security.SecurityElement]::Escape($line)
+    $p = $pitches[$idx % $pitches.Length]
+    $r = $rates[$idx % $rates.Length]
+    [void]$sbLead.Append("<prosody pitch='$p' rate='$r' volume='loud'>$clean</prosody><break time='500ms'/>")
+    $idx++
+}
+[void]$sbLead.Append('</speak>')
+$leadSynth.SpeakSsml($sbLead.ToString())
+$leadSynth.SetOutputToNull()
+$leadSynth.Dispose()
+"#;
+
+        let script_path = stems_dir.join("_synth_vocals.ps1");
+        if fs::write(&script_path, ps_script).is_err() {
+            return None;
+        }
+
+        use std::os::windows::process::CommandExt;
+        let status = std::process::Command::new("powershell")
+            .creation_flags(CREATE_NO_WINDOW)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                &script_path.to_string_lossy(),
+                &lyrics_txt_path.to_string_lossy(),
+                &lead_wav_path.to_string_lossy(),
+            ])
+            .status();
+
+        let _ = fs::remove_file(&script_path);
+        let _ = fs::remove_file(&lyrics_txt_path);
+
+        if !status.map(|s| s.success()).unwrap_or(false) {
+            return None;
+        }
+
+        let lead_buf = AudioBuffer::from_wav_file(&lead_wav_path).ok()?;
+        let _ = fs::remove_file(&lead_wav_path);
+
+        let target_frames = (duration_secs * 48_000.0).round() as usize;
+        let mut combined = AudioBuffer::new(48_000, 2, duration_secs);
+
+        let lead_frames = lead_buf.frame_count().max(1);
+        let lead_ch = lead_buf.channels as usize;
+        let doubler_offset = 528usize; // 11ms sample-locked stereo doubler (never out of sync)
+        let loop_fade_frames = 960usize.min(lead_frames / 4).max(1); // 20ms smooth fade at loop boundaries
+
+        for f in 0..target_frames {
+            let lf = f % lead_frames;
+            // Apply smooth linear fade-in/fade-out at loop wrap boundaries to prevent clicks
+            let loop_env = if lf < loop_fade_frames {
+                lf as f32 / loop_fade_frames as f32
+            } else if lf >= lead_frames - loop_fade_frames {
+                (lead_frames - 1 - lf) as f32 / loop_fade_frames as f32
+            } else {
+                1.0
+            };
+
+            let l_lead = lead_buf.samples[lf * lead_ch] * loop_env;
+            let r_lead = if lead_ch > 1 {
+                lead_buf.samples[lf * lead_ch + 1] * loop_env
+            } else {
+                l_lead
+            };
+
+            let (dbl_l, dbl_r) = if f >= doubler_offset {
+                let df = (f - doubler_offset) % lead_frames;
+                let dbl_env = if df < loop_fade_frames {
+                    df as f32 / loop_fade_frames as f32
+                } else if df >= lead_frames - loop_fade_frames {
+                    (lead_frames - 1 - df) as f32 / loop_fade_frames as f32
+                } else {
+                    1.0
+                };
+                let dl = lead_buf.samples[df * lead_ch] * 0.16 * dbl_env;
+                let dr = if lead_ch > 1 { lead_buf.samples[df * lead_ch + 1] * 0.16 * dbl_env } else { dl };
+                (dr, dl)
+            } else {
+                (0.0, 0.0)
+            };
+
+            combined.samples[f * 2] = (l_lead * 0.88 + dbl_l).tanh() * 0.94;
+            combined.samples[f * 2 + 1] = (r_lead * 0.88 + dbl_r).tanh() * 0.94;
+        }
+
+        Some(combined)
+    }
+
+    #[cfg(not(windows))]
+    fn try_synthesize_windows_sapi_vocals(
+        _state: &MusicProductionState,
+        _stems_dir: &Path,
+        _duration_secs: f32,
+    ) -> Option<AudioBuffer> {
+        None
     }
 
     /// Helper to convert key signature name into fundamental root frequency in Hz.

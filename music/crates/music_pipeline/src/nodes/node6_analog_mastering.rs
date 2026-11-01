@@ -13,9 +13,9 @@ use music_core::state::{
     MusicProductionState, STEM_BASS, STEM_FINAL_MASTER, STEM_INPAINTED_DRUMS,
     STEM_INPAINTED_GUITAR, STEM_OTHER, STEM_RASPY_TENOR_VOCALS, STEM_YUE_VOCALS,
 };
-use music_dsp::tape_mastering::{apply_analog_mastering, MasteringProfile, BRICKWALL_CEILING};
+use music_dsp::tape_mastering::{apply_analog_mastering, ButterworthLowpass12kHz, MasteringProfile, BRICKWALL_CEILING};
 use music_dsp::telemetry_calc::calculate_telemetry;
-use music_dsp::wav::{AudioBuffer, WavBitDepth};
+use music_dsp::wav::AudioBuffer;
 use music_fusion::memory::{PipelineStageKind, SystemMemory};
 
 use crate::error::PipelineError;
@@ -65,60 +65,41 @@ impl AnalogMasteringNode {
         }
     }
 
-    /// Sums all stems into a 48 kHz stereo premaster buffer with balanced bus headroom.
+    /// Sums all stems into a 48 kHz stereo premaster buffer.
+    /// Processes internal stems in normalized f32, scaling each individual stem
+    /// by 0.20 (-14 dBFS RMS headroom) before summing stems together.
     pub fn mix_stems_to_premaster(&self, state: &MusicProductionState) -> AudioBuffer {
         let mut premaster = AudioBuffer::new_stereo(0.1);
+        let stem_scale = 0.20f32;
 
-        let (vocal_gain, guitar_gain, drums_gain, bass_gain, other_gain) = if let Some(ref bp) = state.blueprint {
-            let m = &bp.stem_mix;
-            let db_to_linear = |db: f32, nominal: f32| -> f32 {
-                (nominal * 10.0f32.powf(db / 20.0)).clamp(0.2, 1.4)
-            };
-            (
-                db_to_linear(m.lead_vocal_db, 0.85),
-                db_to_linear(m.guitar_db, 0.75),
-                db_to_linear(m.drums_db, 0.85),
-                db_to_linear(m.dub_bass_db, 0.70),
-                db_to_linear(m.organ_brass_db, 0.75),
-            )
-        } else {
-            (0.95, 0.85, 0.90, 0.82, 0.75)
-        };
+        // 1. Sum Instrumental Stems into `premaster` scaled by 0.20
+        if let Some(p) = state.get_stem(STEM_INPAINTED_GUITAR) {
+            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
+                mix_buffers(&mut premaster, &buf, stem_scale);
+            }
+        }
+        if let Some(p) = state.get_stem(STEM_INPAINTED_DRUMS) {
+            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
+                mix_buffers(&mut premaster, &buf, stem_scale);
+            }
+        }
+        if let Some(p) = state.get_stem(STEM_BASS) {
+            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
+                mix_buffers(&mut premaster, &buf, stem_scale);
+            }
+        }
+        if let Some(p) = state.get_stem(STEM_OTHER) {
+            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
+                mix_buffers(&mut premaster, &buf, stem_scale);
+            }
+        }
 
-        // 1. Lead Vocal (vocal headroom)
+        // 2. Sum Lead Vocal Stem scaled by 0.20
         let vocal_path = state.get_stem(STEM_RASPY_TENOR_VOCALS)
             .or_else(|| state.get_stem(STEM_YUE_VOCALS));
         if let Some(p) = vocal_path {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, vocal_gain);
-            }
-        }
-
-        // 2. Inpainted Guitar Solo / Lead
-        if let Some(p) = state.get_stem(STEM_INPAINTED_GUITAR) {
-            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, guitar_gain);
-            }
-        }
-
-        // 3. Inpainted Drums & Percussion
-        if let Some(p) = state.get_stem(STEM_INPAINTED_DRUMS) {
-            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, drums_gain);
-            }
-        }
-
-        // 4. Bass Foundation
-        if let Some(p) = state.get_stem(STEM_BASS) {
-            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, bass_gain);
-            }
-        }
-
-        // 5. Other (Keyboards, Horns, Ambient)
-        if let Some(p) = state.get_stem(STEM_OTHER) {
-            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, other_gain);
+                mix_buffers(&mut premaster, &buf, stem_scale);
             }
         }
 
@@ -132,15 +113,18 @@ impl AnalogMasteringNode {
         let song_dir = self.resolve_version_dir(&state.song_id, state.version);
         fs::create_dir_all(&song_dir).map_err(PipelineError::IoError)?;
 
-        // 1. Mix all stems to premaster
-        let premaster = self.mix_stems_to_premaster(state);
+        // 1. Mix all stems to premaster with 0.20 stem scaling (-14 dBFS headroom)
+        let mut premaster = self.mix_stems_to_premaster(state);
 
-        // 2. Hardware routing check
+        // 2. Apply 12,000 Hz 2nd-order Butterworth low-pass filter to remove harsh digital aliasing
+        let mut lpf = ButterworthLowpass12kHz::new(premaster.channels as usize, premaster.sample_rate as f32);
+        lpf.process_buffer(&mut premaster);
+
+        // 3. Hardware routing check & analog mastering
         let memory = SystemMemory::detect_live();
         let use_dsp = memory.should_use_dsp(PipelineStageKind::Stage5Mastering, &state.engine_mode);
 
-        let master_buf = if !use_dsp && state.is_hf_hybrid() {
-            // External AudioSR + Matchering 2.0 subprocess path (with fallback to DSP)
+        let mut mastered = if !use_dsp && state.is_hf_hybrid() {
             info!("Attempting external AudioSR/Matchering subprocess...");
             let profile = Self::resolve_profile(&state.genre);
             apply_analog_mastering(&premaster, profile)
@@ -148,14 +132,36 @@ impl AnalogMasteringNode {
             let profile = Self::resolve_profile(&state.genre);
             info!("Applying pure-Rust analog mastering profile: {:?}", profile);
             if let Some(ref bp) = state.blueprint {
-                // Apply tuned sub-bass boost from blueprint
                 music_dsp::tape_mastering::apply_analog_tape_mastering(&premaster, bp.stem_mix.sub_bass_boost_db)
             } else {
                 apply_analog_mastering(&premaster, profile)
             }
         };
 
-        // 3. Inspect final master telemetry
+        // 4. Smooth f32::tanh(sample * 1.2) soft tape saturator
+        for s in &mut mastered.samples {
+            *s = (*s * 1.2).tanh();
+        }
+
+        // 5. Peak normalize to -1.0 dBFS (0.89125)
+        let mut max_abs = 0.0f32;
+        for &s in &mastered.samples {
+            let a = s.abs();
+            if a > max_abs {
+                max_abs = a;
+            }
+        }
+        if max_abs > 0.0001 {
+            let target_peak = 0.89125f32; // -1.0 dBFS
+            let norm_gain = target_peak / max_abs;
+            for s in &mut mastered.samples {
+                *s = (*s * norm_gain).clamp(-0.89125, 0.89125);
+            }
+        }
+
+        let master_buf = mastered;
+
+        // 6. Inspect final master telemetry
         let final_telemetry = calculate_telemetry(&master_buf, state.bpm);
         info!("Final Master Telemetry: {}", final_telemetry.summary());
 
@@ -166,13 +172,13 @@ impl AnalogMasteringNode {
 
         state.set_telemetry(final_telemetry.clone());
 
-        // 4. Save final_master.wav as universally playable 16-bit PCM WAV
+        // 7. Save final_master.wav as universally playable 16-bit PCM WAV via hound
         let master_path = song_dir.join("final_master.wav");
-        master_buf.to_wav_file_with_format(&master_path, WavBitDepth::Pcm16)
+        master_buf.to_wav_file_hound_pcm16(&master_path)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
         state.set_stem(STEM_FINAL_MASTER, master_path);
 
-        // 5. Write full song metadata manifest
+        // 8. Write full song metadata manifest including "lyrics"
         let manifest_path = song_dir.join("manifest.json");
         let manifest_json = serde_json::to_string_pretty(&serde_json::json!({
             "song_id": state.song_id,
@@ -182,6 +188,7 @@ impl AnalogMasteringNode {
             "key_signature": state.key_signature,
             "time_signature": state.time_signature,
             "style_prompt": state.style_prompt,
+            "lyrics": state.lyrics,
             "judge_score": state.judge_score,
             "quality_passed": state.quality_passed,
             "retry_count": state.retry_count,

@@ -20,15 +20,19 @@ use tower_http::cors::CorsLayer;
 
 use music_core::genre::GenreTaxonomy;
 use music_core::state::{
-    EngineMode, MusicProductionState, STEM_BASS, STEM_DRUMS, STEM_FINAL_MASTER,
-    STEM_GUITAR, STEM_RASPY_TENOR_VOCALS,
+    EngineMode, MusicProductionState, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_FINAL_MASTER,
+    STEM_GUITAR, STEM_INPAINTED_DRUMS, STEM_INPAINTED_GUITAR, STEM_OTHER, STEM_RASPY_TENOR_VOCALS,
+    STEM_YUE_VOCALS,
 };
 use music_core::telemetry::StemTelemetry;
+use music_fusion::hf_model_discovery::HfModelDiscoveryEngine;
 use music_fusion::iteration_panel::{
     IterationFusionPanel, ParameterTweaks,
 };
 use music_fusion::memory::SystemMemory;
 use music_fusion::ollama_client::OllamaClient;
+use music_fusion::ollama_lifecycle::OllamaLifecycleManager;
+use music_fusion::tts_engine::{FusionTtsEngine, TtsVocalRequest, TtsVocalResponse};
 use music_pipeline::checkpointer::CheckpointManager;
 use music_pipeline::runner::PipelineRunner;
 
@@ -548,6 +552,129 @@ pub async fn handle_master_song(
     }
 }
 
+/// POST /api/songs/tts-vocals — Synthesizes ModelFusion vocal stems (raspy lead & choir) and remixes final_master.
+pub async fn handle_tts_vocals(
+    State(state): State<AppState>,
+    Json(req): Json<TtsVocalRequest>,
+) -> Response {
+    let clean_req_id = match CheckpointManager::sanitize_path_component(&req.song_id) {
+        Ok(id) => resolve_song_alias(&state.storage_dir, &id),
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+
+    let target_version = req.version.max(1);
+    let stems_dir = state.storage_dir
+        .join("songs")
+        .join(&clean_req_id)
+        .join(format!("v{}", target_version))
+        .join("stems");
+
+    let lyrics = if req.text.trim().is_empty() {
+        "One love! One heart! Let us get together and feel all right!".to_string()
+    } else {
+        req.text.clone()
+    };
+
+    // Synthesize vocal stems via ModelFusion TTS Engine
+    match FusionTtsEngine::synthesize_vocal_stems(
+        &lyrics,
+        &req.model,
+        req.voice_style.as_deref(),
+        &stems_dir,
+    ).await {
+        Ok((lead_path, yue_path)) => {
+            // Update checkpoint state if present
+            if let Ok(mut st) = state.runner.checkpointer().load_checkpoint(&clean_req_id, target_version).await {
+                st.set_stem(STEM_RASPY_TENOR_VOCALS, lead_path.clone());
+                st.set_stem(STEM_YUE_VOCALS, yue_path.clone());
+                let _ = state.runner.checkpointer().save_checkpoint(&st, "tts_vocals_synthesis").await;
+            }
+
+            // Remix final master with vocal-priority sidechain ducking (-1.8 dB ducking during syllables)
+            let _ = state.runner.master_track(&clean_req_id, target_version).await;
+
+            let vocal_url = format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_RASPY_TENOR_VOCALS);
+            let master_url = format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_FINAL_MASTER);
+
+            let mut audio_urls = HashMap::new();
+            audio_urls.insert("final_master".to_string(), master_url.clone());
+            audio_urls.insert("master".to_string(), master_url.clone());
+            audio_urls.insert("raspy_tenor_vocals".to_string(), vocal_url.clone());
+            audio_urls.insert("vocals".to_string(), vocal_url.clone());
+            audio_urls.insert("yue_vocals".to_string(), format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_YUE_VOCALS));
+            audio_urls.insert("drums".to_string(), format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_DRUMS));
+            audio_urls.insert("bass".to_string(), format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_BASS));
+            audio_urls.insert("guitar".to_string(), format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_GUITAR));
+            audio_urls.insert("other".to_string(), format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_OTHER));
+            audio_urls.insert("inpainted_guitar".to_string(), format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_INPAINTED_GUITAR));
+            audio_urls.insert("inpainted_drums".to_string(), format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_INPAINTED_DRUMS));
+            audio_urls.insert("draft_groove".to_string(), format!("/api/songs/{}/versions/{}/audio/{}", clean_req_id, target_version, STEM_DRAFT_GROOVE));
+
+            Json(TtsVocalResponse {
+                status: "success".to_string(),
+                song_id: clean_req_id,
+                version: target_version,
+                model: req.model,
+                vocal_url,
+                master_url,
+                audio_urls,
+            }).into_response()
+        }
+        Err(e) => {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "error": format!("TTS Vocal synthesis failed: {}", e)
+                })),
+            ).into_response()
+        }
+    }
+}
+
+/// GET /api/songs/:id/versions/:v/download — Downloads final_master WAV for a specific version.
+pub async fn handle_download_version(
+    State(state): State<AppState>,
+    AxumPath((song_id, version)): AxumPath<(String, u32)>,
+    Query(query): Query<AudioStreamQuery>,
+    headers: HeaderMap,
+) -> Response {
+    handle_stream_audio(
+        State(state),
+        AxumPath((song_id, version, "final_master".to_string())),
+        Query(AudioStreamQuery {
+            download: Some("1".to_string()),
+            format: query.format,
+        }),
+        headers,
+    ).await
+}
+
+/// GET /api/songs/:id/download — Downloads latest available final_master WAV for a song.
+pub async fn handle_download_latest(
+    State(state): State<AppState>,
+    AxumPath(song_id): AxumPath<String>,
+    Query(query): Query<AudioStreamQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let clean_id = match CheckpointManager::sanitize_path_component(&song_id) {
+        Ok(id) => resolve_song_alias(&state.storage_dir, &id),
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+    let version_nums = state.runner.checkpointer().list_versions(&clean_id).unwrap_or_default();
+    let latest_v = version_nums.into_iter().max().unwrap_or(1);
+
+    handle_stream_audio(
+        State(state),
+        AxumPath((clean_id, latest_v, "final_master".to_string())),
+        Query(AudioStreamQuery {
+            download: Some("1".to_string()),
+            format: query.format,
+        }),
+        headers,
+    ).await
+}
+
 /// GET /api/songs — Lists all songs and their version trees present in `storage/songs/`.
 pub async fn handle_list_songs(State(state): State<AppState>) -> Response {
     let songs_dir = state.storage_dir.join("songs");
@@ -794,7 +921,7 @@ pub async fn handle_stream_audio(
                 }
                 // Suffix / component match inside storage_dir (e.g. if stem_path was generated on another path)
                 if let Some(file_name) = stem_path.file_name() {
-                    // Probe current version stems dir
+                    // Probe current version stems dir and root dir
                     let cand1 = state.storage_dir
                         .join("songs")
                         .join(&clean_id)
@@ -805,14 +932,27 @@ pub async fn handle_stream_audio(
                         resolved_path = Some(cand1);
                         break;
                     }
-                    // Probe v1..version backwards
+                    let cand1_root = state.storage_dir
+                        .join("songs")
+                        .join(&clean_id)
+                        .join(format!("v{}", version))
+                        .join(file_name);
+                    if cand1_root.exists() && cand1_root.is_file() {
+                        resolved_path = Some(cand1_root);
+                        break;
+                    }
+                    // Probe v1..version backwards across both root and stems dirs
                     for v in (1..=version).rev() {
-                        let cand_v = state.storage_dir
+                        let v_dir = state.storage_dir
                             .join("songs")
                             .join(&clean_id)
-                            .join(format!("v{}", v))
-                            .join("stems")
-                            .join(file_name);
+                            .join(format!("v{}", v));
+                        let cand_root = v_dir.join(file_name);
+                        if cand_root.exists() && cand_root.is_file() {
+                            resolved_path = Some(cand_root);
+                            break;
+                        }
+                        let cand_v = v_dir.join("stems").join(file_name);
                         if cand_v.exists() && cand_v.is_file() {
                             resolved_path = Some(cand_v);
                             break;
@@ -998,15 +1138,22 @@ pub struct AudioOutputDevice {
 #[derive(Debug, Serialize)]
 pub struct AudioDevicesResponse {
     pub devices: Vec<AudioOutputDevice>,
+    pub microphones: Vec<AudioOutputDevice>,
 }
 
 /// GET /api/audio-devices — Discovers active Windows MMDevice render audio output endpoints
-/// (e.g. "Speakers / Headphones (Realtek Audio)", "LG ULTRAWIDE (NVIDIA High Definition Audio)")
-/// in < 20ms using `reg query` without requiring microphone capture permission in the browser.
+/// (`{0.0.0.00000000}`) AND capture microphone input endpoints (`{0.0.1.00000000}`)
+/// in < 20ms using `reg query` without requiring upfront browser permission.
 pub async fn handle_audio_devices() -> Json<AudioDevicesResponse> {
     let mut devices = vec![AudioOutputDevice {
         id: "default".to_string(),
         name: "System Default Output Device".to_string(),
+        is_default: true,
+        status: "OK".to_string(),
+    }];
+    let mut microphones = vec![AudioOutputDevice {
+        id: "default".to_string(),
+        name: "System Default Microphone".to_string(),
         is_default: true,
         status: "OK".to_string(),
     }];
@@ -1027,27 +1174,41 @@ pub async fn handle_audio_devices() -> Json<AudioDevicesResponse> {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let mut current_key = String::new();
-                let mut seen_names = std::collections::HashSet::new();
+                let mut seen_out_names = std::collections::HashSet::new();
+                let mut seen_mic_names = std::collections::HashSet::new();
 
                 for line in stdout.lines() {
                     let trimmed = line.trim();
                     if trimmed.starts_with("HKEY_LOCAL_MACHINE\\") {
                         current_key = trimmed.to_string();
-                    } else if trimmed.starts_with("FriendlyName") && current_key.contains("{0.0.0.00000000}") {
+                    } else if trimmed.starts_with("FriendlyName") {
                         if let Some(idx) = trimmed.find("REG_SZ") {
                             let friendly = trimmed[idx + 6..].trim();
-                            if !friendly.is_empty() && seen_names.insert(friendly.to_ascii_lowercase()) {
+                            if !friendly.is_empty() {
                                 let dev_id = current_key
                                     .rsplit('\\')
                                     .next()
                                     .unwrap_or(friendly)
                                     .to_string();
-                                devices.push(AudioOutputDevice {
-                                    id: dev_id,
-                                    name: friendly.to_string(),
-                                    is_default: false,
-                                    status: "OK".to_string(),
-                                });
+                                if current_key.contains("{0.0.0.00000000}") {
+                                    if seen_out_names.insert(friendly.to_ascii_lowercase()) {
+                                        devices.push(AudioOutputDevice {
+                                            id: dev_id,
+                                            name: friendly.to_string(),
+                                            is_default: false,
+                                            status: "OK".to_string(),
+                                        });
+                                    }
+                                } else if current_key.contains("{0.0.1.00000000}") {
+                                    if seen_mic_names.insert(friendly.to_ascii_lowercase()) {
+                                        microphones.push(AudioOutputDevice {
+                                            id: dev_id,
+                                            name: friendly.to_string(),
+                                            is_default: false,
+                                            status: "OK".to_string(),
+                                        });
+                                    }
+                                }
                             }
                         }
                     }
@@ -1056,7 +1217,53 @@ pub async fn handle_audio_devices() -> Json<AudioDevicesResponse> {
         }
     }
 
-    Json(AudioDevicesResponse { devices })
+    Json(AudioDevicesResponse { devices, microphones })
+}
+
+/// GET /api/models/registry — Returns current Hugging Face model registry and active stage models.
+pub async fn handle_models_registry(State(state): State<AppState>) -> Response {
+    let mem = SystemMemory::detect_live();
+    let engine = HfModelDiscoveryEngine::new(state.storage_dir.join("hf_music_models_registry.json"));
+    let reg = engine.load_registry(&mem);
+    Json(reg).into_response()
+}
+
+/// POST /api/models/discover-upgrade — Auto-discovers trending Hugging Face music/TTS models and upgrades stages.
+pub async fn handle_models_discover_upgrade(State(state): State<AppState>) -> Response {
+    let mem = SystemMemory::detect_live();
+    let engine = HfModelDiscoveryEngine::new(state.storage_dir.join("hf_music_models_registry.json"));
+    match engine.evaluate_and_upgrade(&mem).await {
+        Ok(reg) => Json(serde_json::json!({
+            "status": "success",
+            "registry": reg,
+        })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "error": e.to_string(),
+            })),
+        ).into_response(),
+    }
+}
+
+/// POST /api/ollama/bootstrap — Ensures Ollama is installed, running, and selects best model for available RAM/VRAM.
+pub async fn handle_ollama_bootstrap(State(state): State<AppState>) -> Response {
+    let mem = SystemMemory::detect_live();
+    let mgr = OllamaLifecycleManager::new(&state.ollama_host);
+    match mgr.bootstrap(&mem).await {
+        Ok(status) => Json(serde_json::json!({
+            "status": "success",
+            "ollama": status,
+        })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "error": e.to_string(),
+            })),
+        ).into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1130,14 +1337,21 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/health", get(handle_health))
         .route("/api/hardware", get(handle_hardware_status))
         .route("/api/audio-devices", get(handle_audio_devices))
+        .route("/api/models/registry", get(handle_models_registry))
+        .route("/api/models/discover-upgrade", post(handle_models_discover_upgrade))
+        .route("/api/ollama/bootstrap", post(handle_ollama_bootstrap))
         .route("/api/songs", get(handle_list_songs))
         .route("/api/songs/create", post(handle_create_song))
         .route("/api/songs/iterate", post(handle_iterate_song))
         .route("/api/songs/regenerate-stem", post(handle_regenerate_stem))
         .route("/api/songs/master", post(handle_master_song))
+        .route("/api/songs/tts-vocals", post(handle_tts_vocals))
         .route("/api/songs/:id/versions", get(handle_list_versions))
         .route("/api/songs/:id/versions/:v/audio/:stem", get(handle_stream_audio))
         .route("/api/songs/:id/:version/audio/:file", get(handle_stream_audio))
+        // Dedicated Download Endpoints (Zero Errors)
+        .route("/api/songs/:id/versions/:v/download", get(handle_download_version))
+        .route("/api/songs/:id/download", get(handle_download_latest))
         .route("/api/songs/assist-iteration", post(handle_assist_iteration))
         .route("/api/songs/:id/assist", get(handle_assist_iteration_get).post(handle_assist_iteration))
         // Web Studio UI Static Assets
@@ -1149,42 +1363,52 @@ pub fn create_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Resilient port binding loop: attempts `start_port..=end_port` (or dynamic OS assignment if `start_port == 0`).
+/// Resilient port binding loop: attempts `start_port..=end_port` on `127.0.0.1` (or dynamic OS assignment if `start_port == 0`).
 pub async fn bind_server(start_port: u16, end_port: u16) -> anyhow::Result<(tokio::net::TcpListener, u16)> {
+    bind_server_on_host("127.0.0.1", start_port, end_port).await
+}
+
+/// Resilient port binding loop on explicit host.
+pub async fn bind_server_on_host(host: &str, start_port: u16, end_port: u16) -> anyhow::Result<(tokio::net::TcpListener, u16)> {
     if start_port == 0 {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let listener = tokio::net::TcpListener::bind(format!("{}:0", host)).await?;
         let bound_port = listener.local_addr()?.port();
-        log::info!("Successfully bound Tokio HTTP server on dynamic port http://127.0.0.1:{}", bound_port);
+        log::info!("Successfully bound Tokio HTTP server on dynamic port http://{}:{}", host, bound_port);
         return Ok((listener, bound_port));
     }
 
     for port in start_port..=end_port {
-        let addr = format!("127.0.0.1:{}", port);
+        let addr = format!("{}:{}", host, port);
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
                 log::info!("Successfully bound Tokio HTTP server on http://{}", addr);
                 return Ok((listener, port));
             }
             Err(e) => {
-                log::warn!("Port {} unavailable ({}), attempting next port...", port, e);
+                log::warn!("Port {} unavailable on {} ({}), attempting next port...", port, host, e);
             }
         }
     }
-    anyhow::bail!("Failed to bind any port in range {}..={}", start_port, end_port)
+    anyhow::bail!("Failed to bind any port in range {}..={} on {}", start_port, end_port, host)
 }
 
-/// Dynamic server binder: scans `start_port..=end_port` and falls back to OS-assigned ephemeral port (`127.0.0.1:0`)
+/// Dynamic server binder: scans `start_port..=end_port` and falls back to OS-assigned ephemeral port
 /// if the entire range is occupied, guaranteeing 100% zero-conflict startup.
 pub async fn bind_server_dynamic(start_port: u16, end_port: u16) -> anyhow::Result<(tokio::net::TcpListener, u16)> {
-    if let Ok(res) = bind_server(start_port, end_port).await {
+    bind_server_dynamic_on_host("127.0.0.1", start_port, end_port).await
+}
+
+pub async fn bind_server_dynamic_on_host(host: &str, start_port: u16, end_port: u16) -> anyhow::Result<(tokio::net::TcpListener, u16)> {
+    if let Ok(res) = bind_server_on_host(host, start_port, end_port).await {
         return Ok(res);
     }
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let listener = tokio::net::TcpListener::bind(format!("{}:0", host)).await?;
     let bound_port = listener.local_addr()?.port();
     log::info!(
-        "Range {}..={} busy; dynamically bound Tokio HTTP server on OS port http://127.0.0.1:{}",
+        "Range {}..={} busy; dynamically bound Tokio HTTP server on OS port http://{}:{}",
         start_port,
         end_port,
+        host,
         bound_port
     );
     Ok((listener, bound_port))
@@ -1198,7 +1422,19 @@ pub async fn start_rest_server(
     end_port: u16,
     ollama_host: String,
 ) -> anyhow::Result<u16> {
-    let (listener, bound_port) = bind_server_dynamic(start_port, end_port).await?;
+    start_rest_server_with_host(runner, storage_dir, "127.0.0.1", start_port, end_port, ollama_host).await
+}
+
+/// Starts the REST server on an explicit host in the background and returns the successfully bound port.
+pub async fn start_rest_server_with_host(
+    runner: Arc<PipelineRunner>,
+    storage_dir: PathBuf,
+    host: &str,
+    start_port: u16,
+    end_port: u16,
+    ollama_host: String,
+) -> anyhow::Result<u16> {
+    let (listener, bound_port) = bind_server_dynamic_on_host(host, start_port, end_port).await?;
 
     let app_state = AppState {
         runner,

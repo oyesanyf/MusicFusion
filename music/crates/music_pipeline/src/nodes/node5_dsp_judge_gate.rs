@@ -79,40 +79,40 @@ impl DspAndJudgeGateNode {
     pub fn assemble_composite_mix(&self, state: &MusicProductionState) -> AudioBuffer {
         let mut mix = AudioBuffer::new_stereo(0.1);
 
-        // Vocal stem
+        // Vocal stem scaled by 0.20 (-14 dBFS headroom)
         let vocal_path = state.get_stem(STEM_RASPY_TENOR_VOCALS)
             .or_else(|| state.get_stem(STEM_YUE_VOCALS));
         if let Some(p) = vocal_path {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut mix, &buf, 1.0); // 0 dB baseline
+                mix_buffers(&mut mix, &buf, 0.20);
             }
         }
 
-        // Inpainted guitar
+        // Inpainted guitar scaled by 0.20
         if let Some(p) = state.get_stem(STEM_INPAINTED_GUITAR) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut mix, &buf, 0.85); // -1.5 dB
+                mix_buffers(&mut mix, &buf, 0.20);
             }
         }
 
-        // Inpainted drums
+        // Inpainted drums scaled by 0.20
         if let Some(p) = state.get_stem(STEM_INPAINTED_DRUMS) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut mix, &buf, 0.90); // -1.0 dB
+                mix_buffers(&mut mix, &buf, 0.20);
             }
         }
 
-        // Bass
+        // Bass scaled by 0.20
         if let Some(p) = state.get_stem(STEM_BASS) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut mix, &buf, 0.80); // -2.0 dB
+                mix_buffers(&mut mix, &buf, 0.20);
             }
         }
 
-        // Other
+        // Other scaled by 0.20
         if let Some(p) = state.get_stem(STEM_OTHER) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut mix, &buf, 0.70); // -3.0 dB
+                mix_buffers(&mut mix, &buf, 0.20);
             }
         }
 

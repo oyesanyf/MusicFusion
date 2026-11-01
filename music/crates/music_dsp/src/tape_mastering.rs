@@ -125,7 +125,7 @@ pub struct BrickwallLimiter {
 
 impl BrickwallLimiter {
     pub fn new(lookahead_samples: usize, ceiling: f32) -> Self {
-        let release_time_secs = 0.050; // 50 ms release
+        let release_time_secs = 0.080; // 80 ms smooth release
         let release_coeff = (-1.0 / (release_time_secs * SAMPLE_RATE as f32)).exp();
         Self {
             lookahead_buffer: vec![[0.0, 0.0]; lookahead_samples.max(1)],
@@ -136,27 +136,93 @@ impl BrickwallLimiter {
         }
     }
 
+    /// Smooth cubic/tanh soft-knee saturator that gently rounds peaks approaching the ceiling
+    /// instead of flattening them into harsh square waves.
+    #[inline]
+    pub fn soft_clip_to_ceiling(sample: f32, ceiling: f32) -> f32 {
+        let c = ceiling.max(0.1);
+        let knee = c * 0.82;
+        let abs_x = sample.abs();
+        if abs_x <= knee {
+            sample
+        } else {
+            let headroom = (c - knee).max(1e-5);
+            let excess = (abs_x - knee) / headroom;
+            let compressed = knee + headroom * excess.tanh();
+            compressed.copysign(sample).clamp(-c, c)
+        }
+    }
+
     pub fn process_frame(&mut self, left: f32, right: f32) -> (f32, f32) {
         let delayed = self.lookahead_buffer[self.lookahead_idx];
         self.lookahead_buffer[self.lookahead_idx] = [left, right];
         self.lookahead_idx = (self.lookahead_idx + 1) % self.lookahead_buffer.len();
 
-        let peak = left.abs().max(right.abs());
-        let target_gain = if peak > self.ceiling {
-            self.ceiling / peak
+        // Compute true peak across the entire lookahead window + delayed sample
+        let mut window_peak = delayed[0].abs().max(delayed[1].abs());
+        for frame in &self.lookahead_buffer {
+            let p = frame[0].abs().max(frame[1].abs());
+            if p > window_peak {
+                window_peak = p;
+            }
+        }
+
+        let target_gain = if window_peak > self.ceiling {
+            (self.ceiling * 0.98) / window_peak
         } else {
             1.0
         };
 
         if target_gain < self.gain {
-            self.gain = target_gain; // Instant attack
+            // Smooth 1.5 ms attack toward target gain (prevents step-function click modulation)
+            self.gain = 0.85 * self.gain + 0.15 * target_gain;
+            if delayed[0].abs() * self.gain > self.ceiling || delayed[1].abs() * self.gain > self.ceiling {
+                self.gain = target_gain;
+            }
         } else {
             self.gain = self.gain * self.release_coeff + 1.0 * (1.0 - self.release_coeff);
         }
 
-        let out_left = (delayed[0] * self.gain).clamp(-self.ceiling, self.ceiling);
-        let out_right = (delayed[1] * self.gain).clamp(-self.ceiling, self.ceiling);
+        let out_left = Self::soft_clip_to_ceiling(delayed[0] * self.gain, self.ceiling);
+        let out_right = Self::soft_clip_to_ceiling(delayed[1] * self.gain, self.ceiling);
         (out_left, out_right)
+    }
+}
+
+/// Normalizes a stereo/mono buffer into the optimal analog tape sweet spot (0.72 peak)
+/// and applies a 10 ms linear fade-in/fade-out at buffer boundaries before mastering.
+fn pre_normalize_and_fade_master_input(buffer: &mut AudioBuffer) {
+    let channels = buffer.channels.max(1) as usize;
+    let frames = buffer.frame_count();
+    if frames == 0 {
+        return;
+    }
+
+    let mut max_peak = 0.0f32;
+    for &s in &buffer.samples {
+        let a = s.abs();
+        if a > max_peak {
+            max_peak = a;
+        }
+    }
+
+    // If signal exceeds 0.78 peak, scale linearly into the 0.72 analog sweet spot before EQ/Tape
+    if max_peak > 0.78 {
+        let scale = 0.72 / max_peak;
+        for s in &mut buffer.samples {
+            *s *= scale;
+        }
+    }
+
+    // Apply 10 ms smooth boundary fade-in and fade-out to eliminate edge clicks
+    let fade_frames = ((0.010 * buffer.sample_rate as f32) as usize).min(frames / 4);
+    for f in 0..fade_frames {
+        let gain = f as f32 / fade_frames.max(1) as f32;
+        for c in 0..channels {
+            buffer.samples[f * channels + c] *= gain;
+            let end_f = frames - 1 - f;
+            buffer.samples[end_f * channels + c] *= gain;
+        }
     }
 }
 
@@ -191,6 +257,63 @@ impl SubBassWarmthFilter {
     }
 }
 
+/// 2nd-order Butterworth Low-Pass Filter at 12,000 Hz (Q = 1 / sqrt(2) ≈ 0.7071)
+/// to eliminate harsh digital aliasing harmonics on synthetic instruments.
+#[derive(Debug, Clone)]
+pub struct ButterworthLowpass12kHz {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    states: Vec<[f32; 2]>,
+}
+
+impl ButterworthLowpass12kHz {
+    pub fn new(channels: usize, sample_rate: f32) -> Self {
+        let w0 = 2.0 * std::f32::consts::PI * 12000.0 / sample_rate;
+        let alpha = w0.sin() / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
+        let cos_w = w0.cos();
+        let b0 = (1.0 - cos_w) / 2.0;
+        let b1 = 1.0 - cos_w;
+        let b2 = (1.0 - cos_w) / 2.0;
+        let a0 = 1.0 + alpha;
+        let a1 = -2.0 * cos_w;
+        let a2 = 1.0 - alpha;
+        Self {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: a1 / a0,
+            a2: a2 / a0,
+            states: vec![[0.0, 0.0]; channels],
+        }
+    }
+
+    #[inline]
+    pub fn process_sample(&mut self, ch: usize, x: f32) -> f32 {
+        if ch >= self.states.len() {
+            return x;
+        }
+        let s = &mut self.states[ch];
+        let y = self.b0 * x + s[0];
+        s[0] = self.b1 * x - self.a1 * y + s[1];
+        s[1] = self.b2 * x - self.a2 * y;
+        y
+    }
+
+    pub fn process_buffer(&mut self, buffer: &mut AudioBuffer) {
+        let ch = buffer.channels as usize;
+        let frames = buffer.frame_count();
+        for f in 0..frames {
+            for c in 0..ch {
+                let sample = buffer.samples[f * ch + c];
+                buffer.samples[f * ch + c] = self.process_sample(c, sample);
+            }
+        }
+    }
+}
+
 /// Primary public contract function satisfying PROJECT.md §Interface Contracts line 69.
 pub fn apply_analog_mastering(
     buffer: &AudioBuffer,
@@ -200,28 +323,29 @@ pub fn apply_analog_mastering(
     let channels = buffer.channels as usize;
     let frames = buffer.frame_count();
     let mut out = buffer.clone();
+    pre_normalize_and_fade_master_input(&mut out);
 
     let mut warmth_eq = BiquadFilter::peaking_eq(cfg.sub_bass_freq, 1.8, cfg.sub_bass_boost_db, channels);
     let mut presence_eq = BiquadFilter::peaking_eq(3500.0, 2.0, cfg.presence_boost_db, channels);
-    let mut limiter = BrickwallLimiter::new(24, BRICKWALL_CEILING);
+    let mut limiter = BrickwallLimiter::new(64, BRICKWALL_CEILING);
 
     for i in 0..frames {
         let raw_l = out.samples[i * channels];
         let raw_r = if channels > 1 { out.samples[i * channels + 1] } else { raw_l };
 
-        // 1. Analog tape saturation (Studer A800)
-        let sat_l = AnalogTapeSaturator::process_sample(raw_l, cfg.tape_drive, cfg.tape_bias);
-        let sat_r = AnalogTapeSaturator::process_sample(raw_r, cfg.tape_drive, cfg.tape_bias);
+        // 1. Sub-bass warmth & spectral EQ before tape saturation
+        let eq_l = presence_eq.process_sample(0, warmth_eq.process_sample(0, raw_l));
+        let eq_r = presence_eq.process_sample(1, warmth_eq.process_sample(1, raw_r));
 
-        // 2. Sub-bass warmth & spectral EQ
-        let eq_l = presence_eq.process_sample(0, warmth_eq.process_sample(0, sat_l));
-        let eq_r = presence_eq.process_sample(1, warmth_eq.process_sample(1, sat_r));
+        // 2. Stereo Mid-Side Spatial Expansion (scaled by 0.88 for headroom)
+        let (wide_l, wide_r) = StereoSpatialProcessor::process_frame(eq_l * 0.88, eq_r * 0.88, cfg.stereo_width);
 
-        // 3. Stereo Mid-Side Spatial Expansion
-        let (wide_l, wide_r) = StereoSpatialProcessor::process_frame(eq_l, eq_r, cfg.stereo_width);
+        // 3. Analog tape saturation (Studer A800 smooth tanh soft-clipper)
+        let sat_l = AnalogTapeSaturator::process_sample(wide_l, cfg.tape_drive, cfg.tape_bias);
+        let sat_r = AnalogTapeSaturator::process_sample(wide_r, cfg.tape_drive, cfg.tape_bias);
 
-        // 4. Lookahead Brickwall Limiter (-0.3 dBFS ceiling)
-        let (lim_l, lim_r) = limiter.process_frame(wide_l, wide_r);
+        // 4. Lookahead Brickwall Soft-Knee Limiter (-0.3 dBFS ceiling)
+        let (lim_l, lim_r) = limiter.process_frame(sat_l, sat_r);
 
         out.samples[i * channels] = lim_l;
         if channels > 1 {
@@ -241,32 +365,33 @@ pub fn apply_analog_tape_mastering(input: &AudioBuffer, sub_bass_boost: f32) -> 
     let channels = input.channels as usize;
     let frames = input.frame_count();
     let mut out = input.clone();
+    pre_normalize_and_fade_master_input(&mut out);
 
     let mut warmth_eq = BiquadFilter::peaking_eq(cfg.sub_bass_freq, 1.8, cfg.sub_bass_boost_db, channels);
     let mut presence_eq = BiquadFilter::peaking_eq(3500.0, 2.0, cfg.presence_boost_db, channels);
-    let mut limiter = BrickwallLimiter::new(24, BRICKWALL_CEILING);
+    let mut limiter = BrickwallLimiter::new(64, BRICKWALL_CEILING);
 
     for i in 0..frames {
         let raw_l = out.samples[i * channels];
         let raw_r = if channels > 1 { out.samples[i * channels + 1] } else { raw_l };
 
-        // 1. Analog tape saturation (Studer A800)
-        let sat_l = AnalogTapeSaturator::process_sample(raw_l, cfg.tape_drive, cfg.tape_bias);
-        let sat_r = AnalogTapeSaturator::process_sample(raw_r, cfg.tape_drive, cfg.tape_bias);
+        // 1. Sub-bass warmth & spectral EQ before tape saturation
+        let eq_l = presence_eq.process_sample(0, warmth_eq.process_sample(0, raw_l));
+        let eq_r = presence_eq.process_sample(1, warmth_eq.process_sample(1, raw_r));
 
-        // 2. Sub-bass warmth & spectral EQ
-        let eq_l = presence_eq.process_sample(0, warmth_eq.process_sample(0, sat_l));
-        let eq_r = presence_eq.process_sample(1, warmth_eq.process_sample(1, sat_r));
+        // 2. Stereo Mid-Side Spatial Expansion (scaled by 0.88 for headroom)
+        let (wide_l, wide_r) = StereoSpatialProcessor::process_frame(eq_l * 0.88, eq_r * 0.88, cfg.stereo_width);
 
-        // 3. Stereo Mid-Side Spatial Expansion
-        let (wide_l, wide_r) = StereoSpatialProcessor::process_frame(eq_l, eq_r, cfg.stereo_width);
+        // 3. Analog tape saturation (Studer A800 smooth tanh soft-clipper)
+        let sat_l = AnalogTapeSaturator::process_sample(wide_l, cfg.tape_drive, cfg.tape_bias);
+        let sat_r = AnalogTapeSaturator::process_sample(wide_r, cfg.tape_drive, cfg.tape_bias);
 
-        // 4. Lookahead Brickwall Limiter (-0.3 dBFS ceiling)
-        let (lim_l, lim_r) = limiter.process_frame(wide_l, wide_r);
+        // 4. Lookahead Brickwall Soft-Knee Limiter (-0.3 dBFS ceiling)
+        let (lim_l, lim_r) = limiter.process_frame(sat_l, sat_r);
 
-        out.samples[i * channels] = lim_l.clamp(-BRICKWALL_CEILING, BRICKWALL_CEILING);
+        out.samples[i * channels] = lim_l;
         if channels > 1 {
-            out.samples[i * channels + 1] = lim_r.clamp(-BRICKWALL_CEILING, BRICKWALL_CEILING);
+            out.samples[i * channels + 1] = lim_r;
         }
     }
 

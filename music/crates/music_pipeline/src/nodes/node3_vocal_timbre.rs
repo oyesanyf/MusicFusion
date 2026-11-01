@@ -240,8 +240,9 @@ impl VocalTimbreFusionNode {
             params.default_rasp
         };
 
-        // 4. Apply resonant formant filter bank and non-linear rasp distortion
-        let formant_and_rasp_buf = apply_vocal_timbre(&input_buf, rasp, 0.0);
+        // 4. Apply gentle studio vocal warmth and subtle rasp (max 0.12) so articulated English words stay 100% natural
+        let effective_rasp = (rasp * 0.15).clamp(0.02, 0.12);
+        let formant_and_rasp_buf = apply_vocal_timbre(&input_buf, effective_rasp, 0.0);
 
         // 5. Apply Pitch-Lock Vocoder & transient phase alignment (<= 5 ms alignment error)
         let key_root_hz = crate::nodes::node2_groove_yue::GrooveAndYueSynthesisNode::parse_key_signature_root_hz(
@@ -249,8 +250,36 @@ impl VocalTimbreFusionNode {
         ) * 2.0; // Tenor octave
         let pitch_locked = PitchLockVocoder::align_and_pitch_lock(&formant_and_rasp_buf, state.bpm, key_root_hz);
 
+        // 5b. Blend 90% pure dry articulated vocal + 10% warm studio tube character (zero comb-filter Haas ringing)
+        let mut final_buf = input_buf.clone();
+        let total_frames = final_buf.frame_count().min(pitch_locked.frame_count());
+        let ch = final_buf.channels as usize;
+
+        for f in 0..total_frames {
+            for c in 0..ch {
+                let idx = f * ch + c;
+                let dry = input_buf.samples[idx];
+                let wet = pitch_locked.samples[idx];
+                final_buf.samples[idx] = (dry * 0.90 + wet * 0.10).clamp(-0.96, 0.96);
+            }
+        }
+
+        // Normalize vocal stem to 0.90 peak so vocals are always loud, upfront, and unmistakable
+        let mut max_vocal_peak = 0.0f32;
+        for &s in &final_buf.samples {
+            let a = s.abs();
+            if a > max_vocal_peak {
+                max_vocal_peak = a;
+            }
+        }
+        if max_vocal_peak > 0.01 {
+            let norm_scale = (0.90 / max_vocal_peak).clamp(0.5, 4.0);
+            for s in &mut final_buf.samples {
+                *s = (*s * norm_scale).clamp(-0.96, 0.96);
+            }
+        }
+
         // 6. Optional vocal_ref_wav audio conditioning
-        let mut final_buf = pitch_locked;
         if let Some(ref ref_path) = state.vocal_ref_wav {
             if ref_path.exists() {
                 if let Ok(ref_buf) = AudioBuffer::from_wav_file(ref_path) {

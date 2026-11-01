@@ -5,6 +5,7 @@ pub mod error;
 pub mod graph;
 pub mod node;
 pub mod nodes;
+pub mod python_bridge;
 pub mod runner;
 
 // Public re-exports
@@ -13,6 +14,7 @@ pub use error::{PipelineError, Result};
 pub use graph::{CompiledGraph, Edge, StateGraph, ConditionFn, END, START};
 pub use node::{FnNode, GraphNode, GraphObserver};
 pub use nodes::*;
+pub use python_bridge::{GenerateSongArgs, GenerateSongOutput, UvBridge};
 pub use runner::{build_production_pipeline, PipelineConfig, PipelineRunner};
 
 /// Returns the current music_pipeline crate release version.

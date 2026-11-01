@@ -23,13 +23,16 @@ pub use telemetry_calc::{
 };
 
 pub use groove_synth::{
-    generate_groove, synthesize_groove, DspRng, DrumHit, DrumVoice,
+    generate_groove, synthesize_groove, synthesize_reggae_one_drop_drums_and_dub_bass,
+    DrumHit, DrumVoice, DspRng, DubSubBass, HammondOrganBubble,
     UniversalDrumSynth, UniversalDrumSynthesizer,
 };
 
 pub use guitar_wah::{
-    synthesize_guitar_solo, synthesize_lead_solo, GuitarAmpSimulator,
-    KarplusStrongGuitar, KarplusStrongString, SoloGenerator, SoloNote, WahWahFilter,
+    synthesize_guitar_solo, synthesize_lead_solo, synthesize_reggae_skank_chord,
+    synthesize_reggae_skank_track, A_MAJOR_PENTATONIC, ContinuousPhaseAccumulator, GuitarAmpSimulator,
+    KARPLUS_FEEDBACK_DAMPING, KarplusStrongGuitar, KarplusStrongString, PinkNoiseGenerator,
+    SoloGenerator, SoloNote, WahWahFilter,
 };
 
 pub use vocal_formant::{
@@ -43,8 +46,8 @@ pub use crossfader::{
 
 pub use tape_mastering::{
     apply_analog_mastering, apply_analog_tape_mastering, AnalogTapeSaturator,
-    BrickwallLimiter, MasteringConfig, MasteringProfile, StereoSpatialProcessor,
-    SubBassWarmthFilter, BRICKWALL_CEILING,
+    BrickwallLimiter, ButterworthLowpass12kHz, MasteringConfig, MasteringProfile,
+    StereoSpatialProcessor, SubBassWarmthFilter, BRICKWALL_CEILING,
 };
 
 pub const SAMPLE_RATE: u32 = 48_000;

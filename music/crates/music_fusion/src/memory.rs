@@ -277,6 +277,24 @@ impl SystemMemory {
         self.should_use_dsp(stage, "auto")
     }
 
+    /// Selects the optimal Hugging Face neural model or pure-Rust fallback based on live GPU VRAM.
+    pub fn select_neural_model(&self, engine_mode: &str) -> NeuralModelChoice {
+        if engine_mode == "pure_rust" || self.force_dsp || !self.has_usable_gpu() {
+            return NeuralModelChoice::PureRustFallback;
+        }
+
+        let budget_vram = self.gpu_budget_gb();
+        if budget_vram >= 10.0 || self.gpu_vram_free_gb >= 12.0 {
+            NeuralModelChoice::YueS1_7B
+        } else if budget_vram >= 5.0 || self.gpu_vram_free_gb >= 6.0 {
+            NeuralModelChoice::AceStepV1_5
+        } else if budget_vram >= 3.0 || self.gpu_vram_free_gb >= 3.5 {
+            NeuralModelChoice::MusicGenMedium
+        } else {
+            NeuralModelChoice::PureRustFallback
+        }
+    }
+
     /// Print hardware telemetry to stderr.
     pub fn print_telemetry(&self) {
         eprintln!(
@@ -288,6 +306,39 @@ impl SystemMemory {
             self.gpu_vram_free_gb,
             self.gpu_vram_total_gb
         );
+    }
+}
+
+/// Hugging Face neural song/vocal generation model choice based on live GPU VRAM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NeuralModelChoice {
+    /// Full-song dual-track vocal & accompaniment transformer (~12+ GB VRAM)
+    YueS1_7B,
+    /// Acoustic drum kit & rhythm foundation diffusion model (~6-8 GB VRAM)
+    AceStepV1_5,
+    /// Conditional multi-instrument music generator (~3.5-6 GB VRAM)
+    MusicGenMedium,
+    /// Standalone pure-Rust 48 kHz physical modeling synthesizer (0 GB VRAM)
+    PureRustFallback,
+}
+
+impl NeuralModelChoice {
+    pub fn model_id(&self) -> &'static str {
+        match self {
+            Self::YueS1_7B => "m-a-p/YuE-s1-7B-anneal-en-cot",
+            Self::AceStepV1_5 => "ACE-Studio/ACE-Step-v1.5",
+            Self::MusicGenMedium => "facebook/musicgen-medium",
+            Self::PureRustFallback => "InternalPureRust/PhysicalModeler",
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::YueS1_7B => "YuE-s1-7B",
+            Self::AceStepV1_5 => "ACE-Step-v1.5",
+            Self::MusicGenMedium => "musicgen-medium",
+            Self::PureRustFallback => "Pure-Rust Physical Modeler",
+        }
     }
 }
 

@@ -31,3 +31,4 @@ async-trait   = "0.1"
 futures       = "0.3"
 sysinfo       = "0.30"
 uuid          = { version = "1.10", features = ["v4", "serde"] }
+hound         = "3.5"

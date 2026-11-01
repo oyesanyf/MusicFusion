@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="chatgpt-theme" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +8,7 @@
   <title>MusicFusion AI Studio | Universal AI Music Producer</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body class="theme-dark">
+<body class="theme-chatgpt-light" data-theme="light">
   <div class="chatgpt-app" id="chatgpt-app">
 
     <!-- ============================================================ -->
@@ -166,33 +166,76 @@
         </div>
       </nav>
 
-      <!-- Sidebar Footer: Live Hardware & Ollama Status -->
-      <div class="sidebar-footer">
-        <div class="hw-status-card">
-          <div class="hw-card-header">
-            <span class="hw-title">LIVE HARDWARE (M1)</span>
-            <span class="status-indicator-pill online">
-              <span class="pulse-dot"></span> Online
+      <!-- Sidebar Footer: ChatGPT Bottom-Left User Profile & Popover Menu -->
+      <div class="sidebar-footer" id="sidebar-user-footer">
+        <!-- Floating ChatGPT User Account Popover Menu (Matches chatgpt.com) -->
+        <div class="chatgpt-user-popover hidden" id="chatgpt-user-popover" role="menu" aria-label="Account and Settings Menu">
+          <button type="button" class="popover-profile-header" data-settings-tab="profile">
+            <span class="user-avatar-circle">OY</span>
+            <span class="user-profile-text">
+              <span class="user-profile-name">oyesanyf</span>
+              <span class="user-profile-sub">Personal account</span>
             </span>
-          </div>
-          <div class="hw-metrics-row">
-            <div class="hw-metric">
-              <span class="metric-label">GPU VRAM</span>
-              <span class="metric-val" id="hw-vram-text">21.2 / 24 GB</span>
-            </div>
-            <div class="hw-metric">
-              <span class="metric-label">SYS RAM</span>
-              <span class="metric-val" id="hw-ram-text">18.5 / 32 GB</span>
-            </div>
-          </div>
-          <div class="hw-gpu-name" id="hw-gpu-text">NVIDIA RTX 4090 (24GB)</div>
-          <div class="hw-ollama-tags" id="hw-ollama-models" title="Active ModelFusion Panel Models">
-            <span class="ollama-tag">qwen2.5:32b</span>
-            <span class="ollama-tag">deepseek-r1</span>
-            <span class="ollama-tag">glm4</span>
-            <span class="ollama-tag">flint</span>
-          </div>
+            <span class="popover-chevron">›</span>
+          </button>
+
+          <div class="popover-divider"></div>
+
+          <button type="button" class="popover-menu-item" data-settings-tab="models" role="menuitem">
+            <span class="popover-item-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L14.8 8.5L22 9.3L16.5 14L18.2 21L12 17.3L5.8 21L7.5 14L2 9.3L9.2 8.5L12 2Z"/></svg>
+            </span>
+            <span class="popover-item-label">Upgrade plan</span>
+          </button>
+
+          <button type="button" class="popover-menu-item" data-settings-tab="personalization" role="menuitem">
+            <span class="popover-item-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9.5 15a3.5 3.5 0 0 0 5 0"/></svg>
+            </span>
+            <span class="popover-item-label">Personalization</span>
+          </button>
+
+          <button type="button" class="popover-menu-item" data-settings-tab="profile" role="menuitem">
+            <span class="popover-item-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20v-1a6 6 0 0 1 12 0v1"/></svg>
+            </span>
+            <span class="popover-item-label">Profile</span>
+          </button>
+
+          <button type="button" class="popover-menu-item" id="btn-popover-open-settings" data-settings-tab="audio" role="menuitem">
+            <span class="popover-item-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </span>
+            <span class="popover-item-label">Settings</span>
+          </button>
+
+          <div class="popover-divider"></div>
+
+          <button type="button" class="popover-menu-item" data-settings-tab="help" role="menuitem">
+            <span class="popover-item-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/></svg>
+            </span>
+            <span class="popover-item-label">Help</span>
+            <span class="popover-chevron">›</span>
+          </button>
+
+          <button type="button" class="popover-menu-item" id="btn-popover-logout" role="menuitem">
+            <span class="popover-item-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </span>
+            <span class="popover-item-label">Log out</span>
+          </button>
         </div>
+
+        <!-- Bottom-Left User Profile Trigger Button (Matches chatgpt.com) -->
+        <button type="button" class="chatgpt-user-trigger" id="btn-user-profile-trigger" aria-expanded="false" title="Open Account &amp; Settings Menu (Audio Output, Microphone, Live Hardware)">
+          <span class="user-avatar-circle">OY</span>
+          <span class="user-profile-text">
+            <span class="user-profile-name">oyesanyf</span>
+            <span class="user-profile-sub">Personal account</span>
+          </span>
+          <span class="popover-chevron">›</span>
+        </button>
       </div>
     </aside>
 
@@ -219,19 +262,15 @@
               <option value="2">Version 2 (80 BPM Wah Lead &amp; Sub-Bass Boost)</option>
             </select>
           </div>
+
+          <!-- ChatGPT Centered Segmented Pill (Chat / New Song vs Work / Studio) -->
+          <div class="chatgpt-segmented-switch" title="Switch between New Song Chat Composer and Studio Player">
+            <button type="button" class="chatgpt-seg-btn" id="seg-btn-chat">Chat</button>
+            <button type="button" class="chatgpt-seg-btn active" id="seg-btn-studio">Work</button>
+          </div>
         </div>
 
         <div class="top-nav-right">
-          <!-- Audio Output Device Selector (Header Quick Picker) -->
-          <div class="output-device-header-wrap" title="Choose Sound Output Device (Speakers / Headphones / Monitor)">
-            <label for="header-audio-output-select" class="output-device-label">🔊 Output:</label>
-            <select id="header-audio-output-select" class="version-select output-device-select" title="Choose Sound Output Device">
-              <option value="default" selected>Speakers / Headphones (Realtek Audio)</option>
-              <option value="lg_ultrawide">LG ULTRAWIDE (NVIDIA High Definition Audio)</option>
-            </select>
-            <button type="button" class="rate-btn" id="btn-refresh-audio-devices" title="Scan &amp; Select Browser/OS Audio Output Devices">🔄 Scan</button>
-          </div>
-
           <!-- Multi-LLM Deliberation Panel Badge -->
           <div class="panel-models-badge" title="Active Multi-LLM Iteration Specialist Panel">
             <span class="panel-icon">✨</span>
@@ -243,14 +282,138 @@
             <span class="panel-chip judge" title="Judge Gate">Judge: qwen2.5</span>
           </div>
 
+          <!-- Quick Mic Test & Settings Trigger Buttons -->
+          <button type="button" class="header-action-btn" id="btn-header-mic-test" title="Test Microphone &amp; Voice Input">
+            🎙️ Mic
+          </button>
+          <button type="button" class="header-action-btn" id="btn-header-open-settings" title="Open Settings (Audio Output, Microphone Choice, Live Hardware &amp; Models)">
+            ⚙️ Settings
+          </button>
+
           <!-- Theme Toggle -->
-          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle Theme (Dark / Obsidian / Slate)">🌙</button>
+          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle Theme (ChatGPT Light / ChatGPT Dark)">☀️</button>
         </div>
       </header>
 
       <!-- Viewport / Conversation Stream -->
       <div class="chatgpt-viewport" id="chatgpt-viewport">
         <div class="chat-messages" id="chat-messages">
+
+          <!-- ============================================================ -->
+          <!-- CHATGPT NEW SONG NATURAL LANGUAGE CHAT COMPOSER (PRE-FILLED) -->
+          <!-- ============================================================ -->
+          <section class="chatgpt-new-song-hero hidden" id="new-song-chat-hero" aria-label="New Song Natural Language Chat Composer">
+            <h2 class="chatgpt-hero-heading">Hey, producer. Ready to dive in?</h2>
+            <p class="chatgpt-hero-sub">Describe your new song in natural language below. Pre-filled with a complete example showing how to control <strong>Lead &amp; Choir Vocals</strong> + <strong>All Instruments</strong> (Drums, Sub-Bass, Guitar Solo, Organ &amp; Brass).</p>
+
+            <!-- Main ChatGPT Pill Composer Box -->
+            <div class="chatgpt-pill-composer-box">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <label for="new-song-nl-prompt" style="font-size:12px; font-weight:600; color:var(--text-secondary);">💬 NATURAL LANGUAGE SONG PROMPT (VOCALS + ALL INSTRUMENTS + PRODUCTION):</label>
+                <span style="font-size:11.5px; color:var(--text-muted);">Editable • Synced with Chat Bar</span>
+              </div>
+              <textarea id="new-song-nl-prompt" class="chatgpt-nl-textarea" rows="7" spellcheck="false">Create a 1977 Roots Reggae &amp; Soul Fusion Anthem ("One Love Shining") at 76 BPM in A Major:
+• LEAD &amp; BACKING VOCALS: Soulful raspy Jamaican male tenor lead vocal singing clear articulated English lyrics right from the start, supported by a 3-part female gospel backing choir in call-and-response harmony on every Chorus and Outro.
+• DRUMS &amp; PERCUSSION: Hypnotic 1977 one-drop drum groove dropping on beat 3, crisp cross-stick rimshot, syncopated Nyabinghi burru hand-drum rolls in Verse 2, and shimmering hi-hat triplets.
+• BASS FOUNDATION: Deep analog Fender Precision sub-bass walking line (55–90 Hz) with +3.0 dB warm Studer tape saturation.
+• GUITARS (RHYTHM &amp; LEAD SOLO): Crisp offbeat rhythm guitar skank on the "and" of each beat, plus a 16-bar soaring psychedelic blues-rock wah-wah electric guitar solo.
+• KEYBOARDS, ORGAN &amp; BRASS: Warm Hammond B3 rotary organ bubble, Clavinet stabs, and uplifting tenor saxophone &amp; trombone horn swells.
+• MASTERING: 1977 Kingston Studer A800 48 kHz 16-bit PCM Stereo analog tape master with vocal-priority ducking so vocals shine clearly on top.</textarea>
+
+              <!-- Sung Lyrics Box (Directly drives Lead & Choir Vocal Synthesis) -->
+              <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-subtle);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <label for="new-song-lyrics-input" style="font-size:12px; font-weight:600; color:var(--text-secondary);">🎤 SUNG ENGLISH LYRICS (LEAD TENOR + GOSPEL BACKING CHOIR):</label>
+                  <span style="font-size:11.5px; color:var(--text-muted);">Synthesized into yue_vocals.wav &amp; raspy_tenor_vocals.wav</span>
+                </div>
+                <textarea id="new-song-lyrics-input" class="chatgpt-nl-textarea" rows="5" style="min-height:105px; font-size:13px;" spellcheck="false">[Verse 1]
+One love! One heart! Let us get together and feel all right!
+Hear the children crying, give thanks and praise to the Most High!
+Walking through the valley with a burning light, standing up for what is right!
+
+[Chorus]
+One love shining, rising in the morning sun!
+Unity and brotherhood for everyone!
+Let compassion shine upon every soul tonight!
+
+[Outro]
+One love, one heart, shining forever in harmony!</textarea>
+              </div>
+
+              <!-- Dedicated ModelFusion Text-to-Voice (TTS) Section -->
+              <div class="chatgpt-tts-control-box" style="margin-top:14px; padding:14px 16px; background:var(--bg-card-subtle); border:1px solid var(--border-color); border-radius:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                  <span style="font-size:12.5px; font-weight:700; color:var(--text-primary);">🎤 MODELFUSION TEXT-TO-VOICE (TTS) VOCAL ENGINE:</span>
+                  <span style="font-size:11px; color:#10a37f; font-weight:600;">✨ Studio AI Vocalists</span>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:4px;">
+                  <div>
+                    <label for="hero-tts-model-select" style="font-size:11px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">TTS Synthesis Model:</label>
+                    <select id="hero-tts-model-select" class="version-select" style="width:100%; font-size:12px;">
+                      <option value="f5-tts" selected>F5-TTS / Kokoro-82M (Ultra-Clear Studio Lead Vocal)</option>
+                      <option value="suno-bark">Suno Bark (Expressive Singing &amp; Melodic Phrasing)</option>
+                      <option value="coqui-xtts">Coqui XTTS-v2 (Zero-Shot Timbre &amp; Cloning)</option>
+                      <option value="fish-speech">Fish-Speech-1.5 (Natural Emotional Cadence)</option>
+                      <option value="parler-tts">Parler-TTS Large (Style-Prompted Gospel Choir)</option>
+                      <option value="seed-vc">Plachtaa Seed-VC (Pitch-Locked Timbre Fusion)</option>
+                      <option value="david_lead_zira_choir">Microsoft David (Lead) + Zira (Choir Duet 48kHz)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="hero-tts-style-select" style="font-size:11px; font-weight:600; color:var(--text-muted); display:block; margin-bottom:4px;">Vocal Delivery Style:</label>
+                    <select id="hero-tts-style-select" class="version-select" style="width:100%; font-size:12px;">
+                      <option value="lead_tenor" selected>Soulful Raspy Male Tenor (Lead)</option>
+                      <option value="gospel_choir">Lead Tenor + 3-Part Gospel Backing Choir</option>
+                      <option value="female_soprano">Soulful Female Soprano Lead</option>
+                      <option value="rock_baritone">Gritty Rock Baritone</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Composer Toolbar (Genre, BPM, Key, Generate Button) -->
+              <div class="chatgpt-composer-toolbar">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <select id="hero-genre-select" class="version-select" title="Select Genre">
+                    <option value="Roots Reggae" selected>🇯🇲 Roots Reggae (76 BPM)</option>
+                    <option value="Afrobeats">🌍 Afrobeats (104 BPM)</option>
+                    <option value="Amapiano">🎹 Amapiano (113 BPM)</option>
+                    <option value="Soul / Gospel">🎤 Soul &amp; Gospel (72 BPM)</option>
+                    <option value="Blues Rock">🎸 Blues Rock (120 BPM)</option>
+                    <option value="Hip-Hop / Trap">🥁 Hip-Hop / Trap (140 BPM)</option>
+                    <option value="Jazz Fusion">🎷 Jazz Fusion (128 BPM)</option>
+                    <option value="EDM / House">⚡ EDM / House (126 BPM)</option>
+                  </select>
+                  <button type="button" class="rate-btn" id="btn-hero-back-studio" title="Return to Active Song Player">🎧 Back to Active Song</button>
+                </div>
+
+                <button type="button" class="chatgpt-blue-send-btn" id="btn-generate-new-song-main" title="Generate Full Song with Vocals &amp; All Instruments">
+                  <span>🚀 Generate Song (Vocals + All Instruments)</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- ChatGPT Quick Example Starters (1-Click Prefill for Different Genres) -->
+            <div class="chatgpt-quick-actions" aria-label="Example Prompt Templates">
+              <div style="font-size:11.5px; font-weight:600; color:var(--text-muted); padding:0 14px 4px;">CLICK ANY FULL-BAND + VOCAL EXAMPLE BELOW TO PREFILL:</div>
+              <button type="button" class="chatgpt-quick-action-row" data-template="reggae">
+                <span>🇯🇲</span>
+                <span><strong>1977 Roots Reggae Anthem</strong> — Raspy Jamaican Tenor Lead + Gospel Choir + One-Drop Drums + Sub-Bass + 16-Bar Wah Guitar Solo</span>
+              </button>
+              <button type="button" class="chatgpt-quick-action-row" data-template="afrobeats">
+                <span>🌍</span>
+                <span><strong>Lagos Sunrise Afrobeats Hit</strong> — Melodic Lead &amp; Choir Vocals + Syncopated Tresillo Log-Drum + Highlife Guitar + Saxophone Brass</span>
+              </button>
+              <button type="button" class="chatgpt-quick-action-row" data-template="bluesrock">
+                <span>🎸</span>
+                <span><strong>Stadium Blues-Rock Odyssey</strong> — Gritty Rock Baritone Vocal + Soaring Overdriven Wah Guitar Solo + Punchy Live Drums + Hammond B3</span>
+              </button>
+              <button type="button" class="chatgpt-quick-action-row" data-template="gospel">
+                <span>🎤</span>
+                <span><strong>Soul &amp; Gospel Choir Ballad</strong> — Soulful Lead Vocal + 4-Part Gospel Harmony Choir + Warm Rhodes Piano + Upright Bass + Horns</span>
+              </button>
+            </div>
+          </section>
 
           <!-- User Message Bubble -->
           <div class="message-bubble user-bubble">
@@ -283,7 +446,7 @@
                 </div>
                 <div class="song-card-actions" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                   <span class="version-tag" id="card-version-tag">v1 Master</span>
-                  <button type="button" class="card-download-btn" id="btn-card-load-local" title="Load and play a local .WAV or audio file from your computer" style="cursor:pointer; background:rgba(16,163,127,0.18); border:1px solid #10a37f; color:#e4e4e7;">
+                  <button type="button" class="card-download-btn" id="btn-card-load-local" title="Load and play a local .WAV or audio file from your computer">
                     📂 Load Local WAV
                   </button>
                   <a href="/api/songs/roots_reggae_anthem/versions/1/audio/final_master?download=1" download="One_Love_Anthem_v1_Master.wav" class="card-download-btn" id="card-download-btn" title="Download Master 48 kHz WAV">
@@ -318,15 +481,11 @@
                     <span class="volume-icon">🔊</span>
                     <input type="range" id="master-volume-slider" min="0" max="1" step="0.01" value="0.95" title="Master Volume" class="volume-slider">
                   </div>
-                  <div class="deck-output-device-wrap" style="display:inline-flex; align-items:center; gap:6px;">
-                    <label for="deck-audio-output-select" style="font-size:12px; color:#a1a1aa; white-space:nowrap;">🎧 Device:</label>
-                    <select id="deck-audio-output-select" class="version-select" title="Select Sound Output Device (Speakers / Headphones / Monitor)" style="max-width:240px; font-size:12px; padding:4px 8px;">
-                      <option value="default" selected>Speakers / Headphones (Realtek Audio)</option>
-                      <option value="lg_ultrawide">LG ULTRAWIDE (NVIDIA High Definition Audio)</option>
-                    </select>
-                  </div>
                   <div class="deck-rate-wrap">
+                    <button type="button" class="rate-btn" id="btn-deck-solo-vocals" title="Solo vocals stem directly">🎤 Solo Vocals</button>
+                    <button type="button" class="rate-btn" id="btn-deck-revert" title="Revert to prior version">⏪ Revert</button>
                     <button type="button" class="rate-btn" id="btn-toggle-loop" title="Toggle Loop Mode">🔁 Loop</button>
+                    <button type="button" class="rate-btn" id="btn-deck-open-audio-settings" title="Open Audio Output &amp; Microphone Settings">⚙️ Audio &amp; Mic</button>
                   </div>
                   <div class="deck-status-msg" id="deck-status-msg">Ready for 48 kHz playback</div>
                 </div>
@@ -398,6 +557,38 @@
                     ⚡ Speed up tempo from 76 to 80 BPM
                   </button>
                 </div>
+              </div>
+
+              <!-- Dedicated ModelFusion Text-to-Voice (TTS) Section in Active Card -->
+              <div class="card-collapsible-section" style="border-top:1px solid var(--border-subtle); padding:12px 14px; margin-top:8px; background:var(--bg-card-subtle); border-radius:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:14px;">🎤</span>
+                    <span style="font-size:13px; font-weight:700; color:var(--text-primary);">Synthesize &amp; Inject Text-to-Voice (TTS) Vocals</span>
+                    <span style="font-size:11px; color:#10a37f; font-weight:600;">✨ ModelFusion</span>
+                  </div>
+                  <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                    <select id="card-tts-model-select" class="version-select" style="font-size:11.5px; padding:4px 8px;">
+                      <option value="f5-tts" selected>F5-TTS / Kokoro-82M</option>
+                      <option value="suno-bark">Suno Bark (Singing)</option>
+                      <option value="coqui-xtts">Coqui XTTS-v2</option>
+                      <option value="fish-speech">Fish-Speech-1.5</option>
+                      <option value="parler-tts">Parler-TTS Choir</option>
+                      <option value="seed-vc">Seed-VC Tenor</option>
+                      <option value="david_lead_zira_choir">David &amp; Zira Choir</option>
+                    </select>
+                    <select id="card-tts-style-select" class="version-select" style="font-size:11.5px; padding:4px 8px;">
+                      <option value="Lead Male Tenor" selected>Lead Male Tenor</option>
+                      <option value="Soulful Female Soprano">Soulful Female Soprano</option>
+                      <option value="Lead + Gospel Choir Duet">Lead + Gospel Choir Duet</option>
+                      <option value="Gritty Rock Baritone">Gritty Rock Baritone</option>
+                    </select>
+                    <button type="button" class="stem-remaster-btn" id="btn-card-synthesize-tts" style="background:#10a37f; color:#fff; font-weight:600; padding:5px 12px; font-size:12px; border-radius:6px; cursor:pointer;">
+                      🎤 Synthesize &amp; Add to Song
+                    </button>
+                  </div>
+                </div>
+                <textarea id="card-tts-text-input" class="chatgpt-nl-textarea" rows="2" style="min-height:55px; font-size:12.5px; padding:8px 10px; border-radius:8px; background:var(--bg-canvas); border:1px solid var(--border-color);" placeholder="Enter lyrics or spoken hook to synthesize directly into this song version..."></textarea>
               </div>
 
               <!-- Collapsible Drawer 1: Stems & Multi-Track Studio -->
@@ -573,15 +764,15 @@
                 </div>
               </div>
 
-              <!-- Collapsible Drawer 2: Lyrics & Arrangement Sections -->
+              <!-- Collapsible Drawer 2: Lyrics & Arrangement Sections (Expanded by Default) -->
               <div class="card-collapsible-section">
-                <button type="button" class="section-toggle-btn" id="toggle-lyrics-btn" aria-expanded="false">
-                  <span class="toggle-icon">▸</span>
+                <button type="button" class="section-toggle-btn" id="toggle-lyrics-btn" aria-expanded="true">
+                  <span class="toggle-icon">▾</span>
                   <span class="toggle-title">📜 Lyrics &amp; Structural Arrangement Sections</span>
                   <span class="toggle-badge">8 Bracketed Tags Verified</span>
                 </button>
 
-                <div class="section-collapsible-body collapsed" id="lyrics-drawer-body">
+                <div class="section-collapsible-body" id="lyrics-drawer-body">
                   <div class="lyrics-tabs-bar">
                     <button type="button" class="tab-btn active" data-tab="lyrics-formatted">Formatted Lyrics</button>
                     <button type="button" class="tab-btn" data-tab="lyrics-yue">YuE genre.txt &amp; lyrics.txt</button>
@@ -786,13 +977,18 @@ One love... One heart... Forever.</pre>
             <option value="Hip-Hop / Trap">Hip-Hop / Trap</option>
             <option value="Blues Rock">Blues Rock</option>
             <option value="Jazz Fusion">Jazz Fusion</option>
-            <option value="Cinematic Orchestral">Cinematic</option>
+            <option value="Cinematic Orchestral">Cinematic Orchestral</option>
             <option value="EDM / House">EDM / House</option>
-            <option value="Latin Bossa">Latin Bossa</option>
+            <option value="Latin / Bossa">Latin / Bossa</option>
           </select>
 
           <!-- Multi-Line Expandable Textarea -->
           <textarea id="chat-input-textarea" rows="1" placeholder="Describe a new song, or tell me how to iterate/adjust the current song (e.g. 'boost guitar wah, add nyabinghi rolls, change chorus')..." spellcheck="false"></textarea>
+
+          <!-- Live Microphone Voice Input Button -->
+          <button type="button" class="capsule-btn params-btn" id="btn-capsule-mic" title="Speak into Microphone (Voice Input / Test Mic)">
+            🎙️
+          </button>
 
           <!-- Parameters Drawer Toggle Button -->
           <button type="button" class="capsule-btn params-btn" id="btn-toggle-sliders" title="Toggle manual parameter sliders (BPM, Rasp, Wah, Sub-Bass)">
@@ -837,11 +1033,14 @@ One love... One heart... Forever.</pre>
                 <option value="D Major">D Major</option>
                 <option value="G Major">G Major</option>
                 <option value="E Major">E Major</option>
+                <option value="F Minor">F Minor</option>
+                <option value="C# Minor">C# Minor</option>
                 <option value="A Minor">A Minor</option>
                 <option value="C Minor">C Minor</option>
                 <option value="D Minor">D Minor</option>
                 <option value="G Minor">G Minor</option>
                 <option value="E Minor">E Minor</option>
+                <option value="D Dorian">D Dorian</option>
               </select>
             </div>
 
@@ -915,6 +1114,237 @@ One love... One heart... Forever.</pre>
     </main> <!-- /chatgpt-main-content -->
 
   </div> <!-- /chatgpt-app -->
+
+  <!-- ============================================================ -->
+  <!-- CHATGPT SETTINGS MODAL (Audio Output, Microphone, Hardware)  -->
+  <!-- ============================================================ -->
+  <div class="chatgpt-modal-backdrop hidden" id="chatgpt-settings-modal" role="dialog" aria-modal="true" aria-labelledby="chatgpt-settings-title">
+    <div class="chatgpt-settings-dialog">
+      <!-- Dialog Top Bar -->
+      <div class="settings-dialog-header">
+        <h2 class="settings-dialog-title" id="chatgpt-settings-title">Settings</h2>
+        <button type="button" class="settings-close-btn" id="btn-close-settings-modal" title="Close Settings (Esc)">✕</button>
+      </div>
+
+      <!-- Dialog 2-Column Body -->
+      <div class="settings-dialog-body">
+        <!-- Left Navigation Rail -->
+        <nav class="settings-nav-rail" aria-label="Settings Categories">
+          <button type="button" class="settings-nav-btn active" data-tab-target="audio">
+            <span>🔊</span>
+            <span>Audio &amp; Microphone</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab-target="hardware">
+            <span>🖥️</span>
+            <span>Live Hardware (M1)</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab-target="models">
+            <span>✨</span>
+            <span>AI Models &amp; Upgrade</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab-target="personalization">
+            <span>🎨</span>
+            <span>Personalization</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab-target="profile">
+            <span>👤</span>
+            <span>Profile</span>
+          </button>
+          <button type="button" class="settings-nav-btn" data-tab-target="help">
+            <span>🛟</span>
+            <span>Help &amp; Shortcuts</span>
+          </button>
+        </nav>
+
+        <!-- Right Settings Content Panes -->
+        <div class="settings-content-area">
+
+          <!-- PANE 1: AUDIO OUTPUT & MICROPHONE CHOICE -->
+          <div class="settings-tab-pane active" id="settings-pane-audio">
+            <h3 class="settings-pane-heading">Audio Output &amp; Microphone Settings</h3>
+            <p class="settings-pane-desc">Select your active sound output speaker/headphone device and microphone input for voice commands and vocal testing.</p>
+
+            <!-- Sound Output Selection -->
+            <div class="settings-group-card">
+              <div class="settings-row-top">
+                <div>
+                  <div class="settings-label">🔊 Sound Output Device (Speakers / Headphones / Monitor)</div>
+                  <div class="settings-sublabel">Routes 48 kHz stereo master and 8 isolated stems to the chosen audio endpoint.</div>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <button type="button" class="settings-action-btn" id="btn-refresh-audio-devices" title="Scan Browser &amp; Windows OS Audio Devices">🔄 Scan Devices</button>
+                  <button type="button" class="settings-action-btn primary" id="btn-test-speaker-tone" title="Play a warm musical chord to verify speaker output">🔊 Test Speaker</button>
+                </div>
+              </div>
+              <div style="margin-top:10px;">
+                <select id="header-audio-output-select" class="settings-select" title="Choose Sound Output Device">
+                  <option value="default" selected>Speakers / Headphones (Realtek Audio)</option>
+                  <option value="lg_ultrawide">LG ULTRAWIDE (NVIDIA High Definition Audio)</option>
+                </select>
+                <!-- Hidden mirror select for backwards-compatible deck sync -->
+                <select id="deck-audio-output-select" class="hidden" aria-hidden="true">
+                  <option value="default" selected>Speakers / Headphones (Realtek Audio)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Microphone Input Selection & Live Voice Test -->
+            <div class="settings-group-card">
+              <div class="settings-row-top">
+                <div>
+                  <div class="settings-label">🎙️ Microphone Input Choice</div>
+                  <div class="settings-sublabel">Choose which microphone to use when speaking to the producer or recording voice input.</div>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <button type="button" class="settings-action-btn" id="btn-refresh-mic-devices" title="Scan Microphone Input Devices">🔄 Scan Mics</button>
+                  <button type="button" class="settings-action-btn primary" id="btn-test-microphone" title="Start listening to your microphone and test voice input">🎙️ Test Microphone / Listen</button>
+                </div>
+              </div>
+              <div style="margin-top:10px;">
+                <select id="settings-mic-select" class="settings-select" title="Choose Microphone Input Device">
+                  <option value="default" selected>Default System Microphone (Realtek Audio)</option>
+                </select>
+              </div>
+
+              <!-- Live Microphone Meter & Voice Recognition Feedback -->
+              <div class="mic-meter-box" style="margin-top:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <span style="font-size:12px; font-weight:700; color:var(--text-primary);">Input Level Meter:</span>
+                  <span id="mic-level-text" style="font-size:12px; font-weight:700; font-family:var(--mono-font); color:var(--text-primary);">Idle (Click "Test Microphone / Listen" &amp; say "Hello, hello")</span>
+                </div>
+                <div class="mic-meter-track">
+                  <div class="mic-meter-fill" id="mic-level-bar-fill" style="width:0%;"></div>
+                </div>
+                <div id="mic-live-status" class="mic-live-transcript">
+                  🎙️ Ready — Click <strong>"Test Microphone / Listen"</strong> above or the <strong>🎙️</strong> button in the chat bar and speak ("Can you hear me? Hello, hello").
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANE 2: LIVE HARDWARE (M1) -->
+          <div class="settings-tab-pane hidden" id="settings-pane-hardware">
+            <h3 class="settings-pane-heading">Live Hardware Telemetry (M1)</h3>
+            <p class="settings-pane-desc">Real-time GPU VRAM, System RAM, and active local ModelFusion / Ollama model allocation.</p>
+
+            <div class="settings-group-card">
+              <div class="hw-status-card" style="border:none; box-shadow:none; padding:0;">
+                <div class="hw-card-header" style="margin-bottom:10px;">
+                  <span class="hw-title" style="font-size:13px; color:var(--text-primary);">LIVE HARDWARE (M1)</span>
+                  <span class="status-indicator-pill online" style="font-size:12px;">
+                    <span class="pulse-dot"></span> Online &amp; Active
+                  </span>
+                </div>
+                <div class="hw-metrics-row" style="gap:24px; margin-bottom:12px;">
+                  <div class="hw-metric">
+                    <span class="metric-label" style="font-size:11px;">GPU VRAM (FREE / TOTAL)</span>
+                    <span class="metric-val" id="hw-vram-text" style="font-size:16px;">21.2 / 24 GB</span>
+                  </div>
+                  <div class="hw-metric">
+                    <span class="metric-label" style="font-size:11px;">SYSTEM RAM (FREE / TOTAL)</span>
+                    <span class="metric-val" id="hw-ram-text" style="font-size:16px;">18.5 / 32 GB</span>
+                  </div>
+                </div>
+                <div class="hw-gpu-name" id="hw-gpu-text" style="font-size:13.5px; font-weight:700; color:var(--text-primary); margin-bottom:10px;">
+                  NVIDIA GeForce RTX 4090 (24 GB VRAM)
+                </div>
+                <div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:6px;">Active Multi-LLM Producer Panel Models:</div>
+                <div class="hw-ollama-tags" id="hw-ollama-models" title="Active ModelFusion Panel Models">
+                  <span class="ollama-tag">qwen2.5:32b</span>
+                  <span class="ollama-tag">deepseek-r1</span>
+                  <span class="ollama-tag">glm4</span>
+                  <span class="ollama-tag">flint</span>
+                </div>
+              </div>
+              <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color); display:flex; justify-content:flex-end;">
+                <button type="button" class="settings-action-btn primary" id="btn-refresh-hardware">🔄 Refresh Hardware Telemetry</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANE 3: AI MODELS & UPGRADE PLAN -->
+          <div class="settings-tab-pane hidden" id="settings-pane-models">
+            <h3 class="settings-pane-heading">AI Models, Hugging Face Auto-Upgrade &amp; Ollama Lifecycle</h3>
+            <p class="settings-pane-desc">Automatically discover and upgrade to the best Hugging Face music &amp; vocal synthesis models, or bootstrap local Ollama models dynamically sized to your free RAM/VRAM.</p>
+
+            <div class="settings-group-card">
+              <div class="settings-row-top">
+                <div>
+                  <div class="settings-label">🤗 Hugging Face Music &amp; Vocal Model Auto-Discovery</div>
+                  <div class="settings-sublabel">Scans Hugging Face Hub for higher-performing Audio-Text-to-Audio, Singing Synthesis, and TTS models (ACE-Step, YuE, F5-TTS, Kokoro-82M) and upgrades automatically.</div>
+                </div>
+                <button type="button" class="settings-action-btn primary" id="btn-discover-hf-models">🤗 Discover &amp; Upgrade Models</button>
+              </div>
+            </div>
+
+            <div class="settings-group-card">
+              <div class="settings-row-top">
+                <div>
+                  <div class="settings-label">⚡ Ollama Automatic Installer &amp; Memory-Law Bootstrapper</div>
+                  <div class="settings-sublabel">Detects, installs, or starts the local Ollama daemon and pulls the optimal Qwen2.5 model tier based strictly on runtime free RAM/VRAM.</div>
+                </div>
+                <button type="button" class="settings-action-btn primary" id="btn-bootstrap-ollama">⚡ Bootstrap Ollama Now</button>
+              </div>
+            </div>
+
+            <div id="settings-models-status" class="mic-live-transcript" style="margin-top:8px;">
+              ✅ Model Registry Ready — Click either button above to run live Hugging Face model discovery or Ollama lifecycle verification.
+            </div>
+          </div>
+
+          <!-- PANE 4: PERSONALIZATION & THEME -->
+          <div class="settings-tab-pane hidden" id="settings-pane-personalization">
+            <h3 class="settings-pane-heading">Personalization &amp; Theme</h3>
+            <p class="settings-pane-desc">Customize your studio appearance. ChatGPT Light uses pure white surfaces and bold black typography so every text element is crystal clear.</p>
+
+            <div class="settings-group-card">
+              <div class="settings-row-top">
+                <div>
+                  <div class="settings-label">🎨 Color Theme</div>
+                  <div class="settings-sublabel">Matches https://chatgpt.com/ design tokens (`data-theme="light"` / `data-theme="dark"`).</div>
+                </div>
+                <select id="settings-theme-select" class="settings-select" style="max-width:280px;">
+                  <option value="theme-chatgpt-light" selected>☀️ ChatGPT Light (White &amp; Bold Black)</option>
+                  <option value="theme-dark">🌙 ChatGPT Dark (#1b1b1b / #000000)</option>
+                  <option value="theme-obsidian">🌑 Obsidian Pitch Black</option>
+                  <option value="theme-slate">🌌 Slate Studio Navy</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANE 5: PROFILE -->
+          <div class="settings-tab-pane hidden" id="settings-pane-profile">
+            <h3 class="settings-pane-heading">Profile</h3>
+            <div class="settings-group-card">
+              <div style="display:flex; align-items:center; gap:14px;">
+                <span class="user-avatar-circle" style="width:48px; height:48px; font-size:18px;">OY</span>
+                <div>
+                  <div class="settings-label" style="font-size:16px;">oyesanyf</div>
+                  <div class="settings-sublabel">Personal account • Universal AI Music Producer Studio</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANE 6: HELP & SHORTCUTS -->
+          <div class="settings-tab-pane hidden" id="settings-pane-help">
+            <h3 class="settings-pane-heading">Help &amp; Keyboard Shortcuts</h3>
+            <div class="settings-group-card">
+              <div class="settings-label" style="margin-bottom:8px;">Studio Shortcuts &amp; Voice Controls</div>
+              <ul style="padding-left:18px; line-height:1.8; color:var(--text-primary); font-weight:500;">
+                <li><strong>Spacebar</strong>: Play / Pause active 48 kHz master track</li>
+                <li><strong>Ctrl + N</strong>: Open New Song Natural Language Composer</li>
+                <li><strong>Ctrl + [</strong>: Collapse / Expand Left Sidebar</li>
+                <li><strong>🎙️ Mic Button</strong>: Speak directly into your selected microphone ("Hello, hello", or dictate song adjustments)</li>
+              </ul>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Application Script -->
   <script src="app.js"></script>

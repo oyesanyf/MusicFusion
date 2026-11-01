@@ -112,4 +112,8 @@ pub struct CliArgs {
     /// Ollama endpoint host URL
     #[arg(long, default_value = "http://127.0.0.1:11434")]
     pub ollama_host: String,
+
+    /// Discover and dynamically upgrade Hugging Face music and vocal models
+    #[arg(long, alias = "discover-models")]
+    pub update_models: bool,
 }

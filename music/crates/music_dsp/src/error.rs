@@ -7,6 +7,9 @@ pub enum DspError {
     #[error("I/O error during audio processing: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Hound WAV error: {0}")]
+    HoundError(#[from] hound::Error),
+
     #[error("Invalid WAV file header: {0}")]
     InvalidWavHeader(String),
 

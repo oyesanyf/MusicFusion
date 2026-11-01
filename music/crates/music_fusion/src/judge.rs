@@ -50,7 +50,15 @@ impl EvaluatedSongBlueprint {
         if trimmed.is_empty() {
             String::new()
         } else {
-            format!("{}\n", trimmed)
+            let mut out = trimmed.to_string();
+            out = out.replace("[Intro]", "[intro]");
+            out = out.replace("[Verse 1]", "[verse 1]");
+            out = out.replace("[Verse 2]", "[verse 2]");
+            out = out.replace("[Chorus]", "[chorus]");
+            out = out.replace("[Guitar Solo]", "[guitar solo]");
+            out = out.replace("[Bridge]", "[bridge]");
+            out = out.replace("[Outro]", "[outro]");
+            format!("{}\n", out)
         }
     }
 }
@@ -151,7 +159,7 @@ impl JudgeEvaluator {
 
 /// Robust JSON extractor: cleans `<think>` blocks, markdown code blocks, extracts `{ ... }`,
 /// and provides a zero-crash fail-safe fallback blueprint on parse failure.
-pub fn parse_judge_json(raw: &str, genre: &GenrePreset, prompt: &str) -> EvaluatedSongBlueprint {
+pub fn parse_judge_json(raw: &str, genre: &GenrePreset, _prompt: &str) -> EvaluatedSongBlueprint {
     // 1. Strip reasoning traces: <think>...</think>
     let mut clean = if let Some(idx) = raw.find("</think>") {
         raw[idx + 8..].to_string()
@@ -198,17 +206,18 @@ pub fn parse_judge_json(raw: &str, genre: &GenrePreset, prompt: &str) -> Evaluat
         bpm: genre.default_bpm as f64,
         key_signature: genre.default_key.clone(),
         time_signature: genre.default_time_signature.clone(),
-        lyrics_text: format!(
-            "[intro]\n\n[verse 1]\n{}\n\n[chorus]\nOne love, one heart, let's get together and feel alright.\n\n[outro]",
-            prompt
-        ),
+        lyrics_text: if genre.name.to_ascii_lowercase().contains("afrobeats") {
+            "[intro]\nLagos to the world, feel the groove, we move to the sunrise beat!\n\n[Verse 1]\nEarly morning sunshine rising over Lagos bay,\nFeel the energy awaken as we start the brand new day.\n\n[Chorus]\nLog-drum is vibrating, shake the body, let it go!\nAfrican connection got the whole world in a glow.\n\n[Verse 2]\nHighlife sweet guitar is plucking melodies so clean,\nFlipping through the rhythm like a cinematic scene.\n\n[Guitar Solo]\n(Highlife guitar solo interlocks with syncopated log-drum bassline)\n\n[Bridge]\nCelebrate the journey from the island to the street,\nNothing can compare to this syncopated beat.\n\n[outro]\nRaise up your hands if you are ready for the sound,\nFeel the joy spreading all across the town!".to_string()
+        } else {
+            "[intro]\nYeah man, roots rock reggae from the heart of Kingston town, feel the rhythm in the morning sun.\n\n[Verse 1]\nWalking down the trenchtown avenue early morning light,\nGuiding all the children through the struggles of the night.\n\n[Chorus]\nOne love, one heart, let us get together and feel alright.\nGive thanks and praises to the highest light.\n\n[Verse 2]\nRasta man vibration spreading joy across the land,\nHealing every brother with a helping open hand.\n\n[Guitar Solo]\n(Soaring psychedelic wah-wah guitar echoes through the hills of Zion)\n\n[Bridge]\nLove is the answer, love is the righteous way,\nLighting up tomorrow from the dawn of yesterday.\n\n[outro]\nOne love, one heart, let the music play on and on,\nJah guide and protect us till the morning dawn, yeah!".to_string()
+        },
         arrangement_map: vec![
             SectionArrangement {
                 section_id: "intro".to_string(),
                 display_label: "Intro".to_string(),
                 yue_clean_tag: "[intro]".to_string(),
-                bars: 4,
-                chords: vec!["A".to_string(), "E".to_string(), "F#m".to_string(), "D".to_string()],
+                bars: 2,
+                chords: vec!["A".to_string(), "E".to_string()],
                 production_cue: format!("{:?}", genre.rhythm_groove),
                 lyrics: vec![],
                 lead_instrument_intensity: 0.6,
@@ -219,10 +228,10 @@ pub fn parse_judge_json(raw: &str, genre: &GenrePreset, prompt: &str) -> Evaluat
                 section_id: "verse_1".to_string(),
                 display_label: "Verse 1".to_string(),
                 yue_clean_tag: "[verse]".to_string(),
-                bars: 8,
+                bars: 4,
                 chords: vec!["A".to_string(), "D".to_string(), "E".to_string(), "A".to_string()],
                 production_cue: genre.vocal_archetype.clone(),
-                lyrics: vec![prompt.to_string()],
+                lyrics: vec!["Walking down the trenchtown avenue early morning light,".to_string(), "Guiding all the children through the struggles of the night.".to_string()],
                 lead_instrument_intensity: 0.3,
                 drum_fill_complexity: 0.4,
                 bass_weight: 0.85,
@@ -231,19 +240,55 @@ pub fn parse_judge_json(raw: &str, genre: &GenrePreset, prompt: &str) -> Evaluat
                 section_id: "chorus_1".to_string(),
                 display_label: "Chorus".to_string(),
                 yue_clean_tag: "[chorus]".to_string(),
-                bars: 8,
+                bars: 4,
                 chords: vec!["A".to_string(), "D".to_string(), "A".to_string(), "E".to_string()],
                 production_cue: "Anthemic hook crescendo".to_string(),
-                lyrics: vec!["One love, one heart, let's get together and feel alright.".to_string()],
+                lyrics: vec!["One love, one heart, let us get together and feel alright.".to_string()],
                 lead_instrument_intensity: 0.7,
                 drum_fill_complexity: 0.7,
                 bass_weight: 0.95,
             },
             SectionArrangement {
+                section_id: "verse_2".to_string(),
+                display_label: "Verse 2".to_string(),
+                yue_clean_tag: "[verse]".to_string(),
+                bars: 4,
+                chords: vec!["A".to_string(), "D".to_string(), "E".to_string(), "A".to_string()],
+                production_cue: genre.vocal_archetype.clone(),
+                lyrics: vec!["Rasta man vibration spreading joy across the land,".to_string(), "Healing every brother with a helping open hand.".to_string()],
+                lead_instrument_intensity: 0.4,
+                drum_fill_complexity: 0.5,
+                bass_weight: 0.85,
+            },
+            SectionArrangement {
+                section_id: "guitar_solo".to_string(),
+                display_label: "Guitar Solo".to_string(),
+                yue_clean_tag: "[guitar solo]".to_string(),
+                bars: 4,
+                chords: vec!["A".to_string(), "D".to_string(), "E".to_string(), "A".to_string()],
+                production_cue: "Virtuoso psychedelic wah-wah solo".to_string(),
+                lyrics: vec![],
+                lead_instrument_intensity: 0.9,
+                drum_fill_complexity: 0.75,
+                bass_weight: 0.85,
+            },
+            SectionArrangement {
+                section_id: "bridge".to_string(),
+                display_label: "Bridge".to_string(),
+                yue_clean_tag: "[bridge]".to_string(),
+                bars: 4,
+                chords: vec!["F#m".to_string(), "D".to_string(), "E".to_string(), "A".to_string()],
+                production_cue: "Spiritual harmonic lift".to_string(),
+                lyrics: vec!["Love is the answer, love is the righteous way,".to_string(), "Lighting up tomorrow from the dawn of yesterday.".to_string()],
+                lead_instrument_intensity: 0.5,
+                drum_fill_complexity: 0.6,
+                bass_weight: 0.9,
+            },
+            SectionArrangement {
                 section_id: "outro".to_string(),
                 display_label: "Outro".to_string(),
                 yue_clean_tag: "[outro]".to_string(),
-                bars: 4,
+                bars: 2,
                 chords: vec!["D".to_string(), "A".to_string()],
                 production_cue: genre.mastering_profile.clone(),
                 lyrics: vec![],
