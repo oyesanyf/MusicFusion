@@ -1,4 +1,6 @@
 /target
 *.pdb
 data/
+.quorumrag-live-data/
+
 
