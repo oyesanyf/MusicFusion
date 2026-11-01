@@ -71,13 +71,29 @@ fn test_stage_routing_gpu_vs_dsp() {
 
 #[test]
 fn test_stage_routing_force_dsp_override() {
-    std::env::set_var("MUSIC_FORCE_DSP", "1");
     let mem = SystemMemory::simulated(64.0, 48.0, 16, Some("RTX 4090".into()), 24.0, 20.0);
+
+    // 1. Engine mode "pure_rust" forces PureRustDsp even with 24 GB high-end GPU
     assert_eq!(
-        mem.route_stage(PipelineStageKind::Stage1Groove, "auto"),
+        mem.route_stage(PipelineStageKind::Stage1Groove, "pure_rust"),
         ExecutionRoute::PureRustDsp
     );
-    std::env::remove_var("MUSIC_FORCE_DSP");
+    assert!(mem.should_use_dsp(PipelineStageKind::Stage1Groove, "pure_rust"));
+
+    // 2. with_force_dsp(true) flag override forces PureRustDsp under "auto" mode without mutating global process env
+    let mem_forced = mem.with_force_dsp(true);
+    assert_eq!(
+        mem_forced.route_stage(PipelineStageKind::Stage1Groove, "auto"),
+        ExecutionRoute::PureRustDsp
+    );
+    assert!(mem_forced.should_use_dsp(PipelineStageKind::Stage1Groove, "auto"));
+
+    // 3. with_force_hf(true) forces HuggingFaceCpu when GPU is absent and RAM budget is sufficient
+    let mem_no_gpu = SystemMemory::simulated(64.0, 48.0, 16, None, 0.0, 0.0).with_force_hf(true);
+    assert_eq!(
+        mem_no_gpu.route_stage(PipelineStageKind::Stage1Groove, "auto"),
+        ExecutionRoute::HuggingFaceCpu
+    );
 }
 
 #[test]

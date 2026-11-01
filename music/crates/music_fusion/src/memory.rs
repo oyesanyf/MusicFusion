@@ -25,6 +25,10 @@ pub struct SystemMemory {
     pub gpu_name: Option<String>,
     pub gpu_vram_total_gb: f64,
     pub gpu_vram_free_gb: f64,
+    #[serde(default)]
+    pub force_dsp: bool,
+    #[serde(default)]
+    pub force_hf: bool,
 }
 
 /// Execution route for a music production pipeline stage.
@@ -101,6 +105,8 @@ impl SystemMemory {
         let cpu_cores = sys.physical_core_count().unwrap_or_else(|| sys.cpus().len()).max(1);
 
         let (gpu_name, gpu_vram_total_gb, gpu_vram_free_gb) = detect_gpu();
+        let force_dsp = std::env::var("MUSIC_FORCE_DSP").is_ok();
+        let force_hf = std::env::var("MUSIC_FORCE_HF").is_ok();
         SystemMemory {
             total_ram_gb,
             free_ram_gb,
@@ -108,6 +114,8 @@ impl SystemMemory {
             gpu_name,
             gpu_vram_total_gb,
             gpu_vram_free_gb,
+            force_dsp,
+            force_hf,
         }
     }
 
@@ -127,7 +135,21 @@ impl SystemMemory {
             gpu_name,
             gpu_vram_total_gb,
             gpu_vram_free_gb,
+            force_dsp: false,
+            force_hf: false,
         }
+    }
+
+    /// Builder helper to simulate DSP override without modifying global process environment.
+    pub fn with_force_dsp(mut self, force: bool) -> Self {
+        self.force_dsp = force;
+        self
+    }
+
+    /// Builder helper to simulate HF override without modifying global process environment.
+    pub fn with_force_hf(mut self, force: bool) -> Self {
+        self.force_hf = force;
+        self
     }
 
     /// Whether a usable discrete GPU with free VRAM is present.
@@ -219,9 +241,9 @@ impl SystemMemory {
     }
 
     /// Decide execution routing for a music pipeline stage based on live hardware resources.
-    /// Supports manual override via `MUSIC_FORCE_DSP=1` or `MUSIC_FORCE_HF=1`.
+    /// Supports manual override via `MUSIC_FORCE_DSP=1` or `MUSIC_FORCE_HF=1` (read during `detect_live()` or via builder).
     pub fn route_stage(&self, stage: PipelineStageKind, engine_mode: &str) -> ExecutionRoute {
-        if engine_mode == "pure_rust" || std::env::var("MUSIC_FORCE_DSP").is_ok() {
+        if engine_mode == "pure_rust" || self.force_dsp {
             return ExecutionRoute::PureRustDsp;
         }
 
@@ -234,7 +256,7 @@ impl SystemMemory {
         }
 
         // 2. Forced HF or hybrid engine with sufficient RAM budget
-        if (engine_mode == "hf_hybrid" || std::env::var("MUSIC_FORCE_HF").is_ok())
+        if (engine_mode == "hf_hybrid" || self.force_hf)
             && self.ram_budget_gb() >= required_ram
         {
             return ExecutionRoute::HuggingFaceCpu;
