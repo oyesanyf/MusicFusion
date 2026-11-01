@@ -1106,6 +1106,23 @@ One love... One heart... Forever.</pre>
                 <option value="hf_hybrid">HuggingFace Hybrid (GPU VRAM)</option>
               </select>
             </div>
+
+            <!-- Selector 9: Hugging Face Model -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Hugging Face Open Model</span>
+                <span class="slider-value" id="val-hf-model">ACE-Step / DiffRhythm</span>
+              </div>
+              <select id="select-hf-model" class="param-select">
+                <option value="ASLP-lab/DiffRhythm">ASLP-lab/DiffRhythm (Apache 2.0, 44.1kHz Full-Song)</option>
+                <option value="ACE-Step/ACE-Step-v1-3.5B" selected>ACE-Step/ACE-Step-v1-3.5B (Apache 2.0 Rhythm &amp; Groove)</option>
+                <option value="m-a-p/YuE-s1-7B-anneal-en-cot">m-a-p/YuE-s1-7B-anneal-en-cot (Apache 2.0 Vocal Transformer)</option>
+                <option value="suno/bark">suno/bark (MIT Melodic Singing &amp; Choir)</option>
+                <option value="fishaudio/fish-speech-1.5">fishaudio/fish-speech-1.5 (Apache 2.0 SOTA Singing)</option>
+                <option value="Plachtaa/Seed-VC">Plachtaa/Seed-VC (MIT Singing Voice Conversion)</option>
+                <option value="facebook/musicgen-medium">facebook/musicgen-medium (Meta/Apache 2.0)</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -1274,6 +1291,26 @@ One love... One heart... Forever.</pre>
                   <div class="settings-sublabel">Scans Hugging Face Hub for higher-performing Audio-Text-to-Audio, Singing Synthesis, and TTS models (ACE-Step, YuE, F5-TTS, Kokoro-82M) and upgrades automatically.</div>
                 </div>
                 <button type="button" class="settings-action-btn primary" id="btn-discover-hf-models">🤗 Discover &amp; Upgrade Models</button>
+              </div>
+            </div>
+
+            <div class="settings-group-card">
+              <div class="settings-row-top">
+                <div>
+                  <div class="settings-label">🎵 Active Hugging Face Production Model</div>
+                  <div class="settings-sublabel">Select the active open-source model used for full-song generation, rhythm foundation, and melodic singing synthesis.</div>
+                </div>
+              </div>
+              <div style="margin-top: 10px;">
+                <select id="select-hf-model-settings" class="param-select" style="width: 100%;">
+                  <option value="ASLP-lab/DiffRhythm">ASLP-lab/DiffRhythm (Apache 2.0, 44.1kHz Full-Song Diffusion)</option>
+                  <option value="ACE-Step/ACE-Step-v1-3.5B" selected>ACE-Step/ACE-Step-v1-3.5B (Apache 2.0 Rhythm &amp; Groove)</option>
+                  <option value="m-a-p/YuE-s1-7B-anneal-en-cot">m-a-p/YuE-s1-7B-anneal-en-cot (Apache 2.0 Full-Song Transformer)</option>
+                  <option value="suno/bark">suno/bark (MIT Melodic Singing &amp; Choir)</option>
+                  <option value="fishaudio/fish-speech-1.5">fishaudio/fish-speech-1.5 (Apache 2.0 SOTA Vocal Synthesis)</option>
+                  <option value="Plachtaa/Seed-VC">Plachtaa/Seed-VC (MIT Zero-Shot Singing Voice Conversion)</option>
+                  <option value="facebook/musicgen-medium">facebook/musicgen-medium (Meta/Apache 2.0)</option>
+                </select>
               </div>
             </div>
 

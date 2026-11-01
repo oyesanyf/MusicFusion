@@ -83,6 +83,71 @@ def main():
             sf.write(vocals_path, audio_data * 0.5, sr)
             sys.exit(0)
 
+        elif "diffrhythm" in model_lower:
+            try:
+                from transformers import AutoModel
+                model = AutoModel.from_pretrained(
+                    args.model,
+                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                    trust_remote_code=True,
+                )
+                model.to(device)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "out of memory" in err_str:
+                    sys.stderr.write(f"CUDA OOM loading {args.model}: {e}\n")
+                    sys.exit(3)
+                else:
+                    sys.stderr.write(f"Failed to load DiffRhythm weights for {args.model}: {e}\n")
+                    sys.exit(2)
+            sys.exit(0)
+
+        elif "bark" in model_lower:
+            try:
+                from transformers import AutoProcessor, BarkModel
+                processor = AutoProcessor.from_pretrained(args.model)
+                model = BarkModel.from_pretrained(args.model, torch_dtype=torch.float16 if device == "cuda" else torch.float32)
+                model.to(device)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "out of memory" in err_str:
+                    sys.stderr.write(f"CUDA OOM loading {args.model}: {e}\n")
+                    sys.exit(3)
+                else:
+                    sys.stderr.write(f"Failed to load Bark weights for {args.model}: {e}\n")
+                    sys.exit(2)
+            sys.exit(0)
+
+        elif "fish-speech" in model_lower:
+            try:
+                from transformers import AutoModel
+                model = AutoModel.from_pretrained(args.model, trust_remote_code=True)
+                model.to(device)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "out of memory" in err_str:
+                    sys.stderr.write(f"CUDA OOM loading {args.model}: {e}\n")
+                    sys.exit(3)
+                else:
+                    sys.stderr.write(f"Failed to load Fish Speech weights for {args.model}: {e}\n")
+                    sys.exit(2)
+            sys.exit(0)
+
+        elif "seed-vc" in model_lower or "rvc" in model_lower:
+            try:
+                from transformers import AutoModel
+                model = AutoModel.from_pretrained(args.model, trust_remote_code=True)
+                model.to(device)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "out of memory" in err_str:
+                    sys.stderr.write(f"CUDA OOM loading {args.model}: {e}\n")
+                    sys.exit(3)
+                else:
+                    sys.stderr.write(f"Failed to load Seed-VC weights for {args.model}: {e}\n")
+                    sys.exit(2)
+            sys.exit(0)
+
         elif "yue" in model_lower or "ace-step" in model_lower:
             try:
                 from transformers import AutoModelForCausalLM

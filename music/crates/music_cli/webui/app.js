@@ -445,6 +445,9 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.selectTapeProfile = document.getElementById('select-tape-profile');
     DOM.selectEngineMode = document.getElementById('select-engine-mode');
     DOM.valEngine = document.getElementById('val-engine');
+    DOM.selectHfModel = document.getElementById('select-hf-model');
+    DOM.selectHfModelSettings = document.getElementById('select-hf-model-settings');
+    DOM.valHfModel = document.getElementById('val-hf-model');
 
     DOM.newSongChatHero = document.getElementById('new-song-chat-hero');
     DOM.newSongNlPrompt = document.getElementById('new-song-nl-prompt');
@@ -1927,9 +1930,25 @@ Grace and love shining forevermore!`
     DOM.sliderBass.addEventListener('input', function () {
       DOM.valBass.textContent = `+${parseFloat(this.value).toFixed(1)} dB`;
     });
-    DOM.selectEngineMode.addEventListener('change', function () {
-      DOM.valEngine.textContent = this.options[this.selectedIndex].text;
-    });
+    if (DOM.selectEngineMode) {
+      DOM.selectEngineMode.addEventListener('change', function () {
+        DOM.valEngine.textContent = this.options[this.selectedIndex].text;
+      });
+    }
+    if (DOM.selectHfModel) {
+      DOM.selectHfModel.addEventListener('change', function () {
+        if (DOM.valHfModel) DOM.valHfModel.textContent = this.options[this.selectedIndex].text.split(' ')[0];
+        if (DOM.selectHfModelSettings) DOM.selectHfModelSettings.value = this.value;
+      });
+    }
+    if (DOM.selectHfModelSettings) {
+      DOM.selectHfModelSettings.addEventListener('change', function () {
+        if (DOM.selectHfModel) {
+          DOM.selectHfModel.value = this.value;
+          if (DOM.valHfModel) DOM.valHfModel.textContent = this.options[this.selectedIndex].text.split(' ')[0];
+        }
+      });
+    }
   }
 
   // ==========================================================================
@@ -2229,7 +2248,8 @@ Grace and love shining forevermore!`
         lyrics: lyrics,
         bpm: bpm,
         key_signature: key,
-        engine_mode: DOM.selectEngineMode.value
+        engine_mode: DOM.selectEngineMode ? DOM.selectEngineMode.value : 'auto',
+        hf_model: DOM.selectHfModel ? DOM.selectHfModel.value : 'ACE-Step/ACE-Step-v1-3.5B'
       })
     })
     .then(r => r.json())

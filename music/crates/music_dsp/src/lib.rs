@@ -8,6 +8,7 @@ pub mod crossfader;
 pub mod error;
 pub mod groove_synth;
 pub mod guitar_wah;
+pub mod melodic_singing;
 pub mod tape_mastering;
 pub mod telemetry_calc;
 pub mod vocal_formant;
@@ -15,6 +16,9 @@ pub mod wav;
 
 // Re-exports
 pub use error::DspError;
+pub use melodic_singing::{
+    MelodicSingingSynthesizer, StudioVocalReverb, MAJOR_PENTATONIC_RATIOS,
+};
 pub use wav::{AudioBuffer, WavBitDepth, WavFormat, WavSpec, DEFAULT_SAMPLE_RATE};
 
 pub use telemetry_calc::{

@@ -106,235 +106,15 @@ impl FusionTtsEngine {
         let lead_path = stems_dir.join("raspy_tenor_vocals.wav");
         let yue_path = stems_dir.join("yue_vocals.wav");
 
-        // Try Windows SAPI synthesis first on Windows platforms
-        #[cfg(windows)]
-        {
-            if let Ok(()) = Self::try_windows_sapi_synthesis(text, &model, style, stems_dir, &lead_path, &yue_path).await {
-                if lead_path.exists() && yue_path.exists() {
-                    log::info!("Successfully synthesized vocals via Windows SAPI ({})", model.display_name());
-                    return Ok((lead_path, yue_path));
-                }
-            }
-        }
-
-        // Guaranteed fallback: Pure-Rust Formant Singing Synthesizer (48 kHz stereo 16-bit PCM)
-        log::info!("Synthesizing vocals via Pure-Rust Formant Singing Engine ({}, style: {})", model.display_name(), style);
+        // Synthesize via Pure-Rust Melodic Singing Synthesizer (48 kHz stereo 16-bit PCM)
+        log::info!("Synthesizing vocals via Melodic Singing Engine ({}, style: {})", model.display_name(), style);
         Self::synthesize_pure_rust_formants(text, &model, style, &lead_path, &yue_path)?;
 
         Ok((lead_path, yue_path))
     }
 
-    #[cfg(windows)]
-    async fn try_windows_sapi_synthesis(
-        text: &str,
-        model: &FusionTtsModel,
-        voice_style: &str,
-        stems_dir: &Path,
-        out_lead: &Path,
-        out_yue: &Path,
-    ) -> Result<()> {
-        struct TempFileGuard(Vec<PathBuf>);
-        impl Drop for TempFileGuard {
-            fn drop(&mut self) {
-                for path in &self.0 {
-                    let _ = fs::remove_file(path);
-                }
-            }
-        }
-
-        let temp_lead = stems_dir.join("_sapi_lead.wav");
-        let lyrics_txt = stems_dir.join("_sapi_lyrics.txt");
-        let script_file = stems_dir.join("_sapi_script.ps1");
-
-        let _guard = TempFileGuard(vec![
-            script_file.clone(),
-            lyrics_txt.clone(),
-            temp_lead.clone(),
-        ]);
-
-        // Strip section tags like [Intro], [Verse 1], [Chorus], [Guitar Solo] and parenthetical stage notes (...)
-        let mut clean_lines: Vec<String> = Vec::new();
-        let mut cleaned_input = String::with_capacity(text.len());
-        let mut in_brackets = false;
-        let mut in_parens = false;
-        for ch in text.chars() {
-            match ch {
-                '[' => {
-                    in_brackets = true;
-                    cleaned_input.push('\n');
-                }
-                ']' => {
-                    in_brackets = false;
-                    cleaned_input.push('\n');
-                }
-                '(' => in_parens = true,
-                ')' => in_parens = false,
-                _ if !in_brackets && !in_parens => cleaned_input.push(ch),
-                _ => {}
-            }
-        }
-        for raw_line in cleaned_input.lines() {
-            let trimmed: String = raw_line
-                .trim()
-                .chars()
-                .filter(|c| c.is_alphanumeric() || " ,.!?'-\"".contains(*c))
-                .collect();
-            let trimmed = trimmed.trim().to_string();
-            if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                clean_lines.push(trimmed);
-            }
-        }
-        if clean_lines.is_empty() {
-            clean_lines.push("One love, one heart, let us get together and feel alright.".to_string());
-            clean_lines.push("Give thanks and praises to the highest light, standing tall through the night.".to_string());
-        }
-
-        // Expand stanzas so the vocal arrangement spans a full song (~60 seconds)
-        let target_lines = 16usize.max(clean_lines.len());
-        let mut full_song_lines = Vec::with_capacity(target_lines);
-        for idx in 0..target_lines {
-            full_song_lines.push(clean_lines[idx % clean_lines.len()].clone());
-        }
-
-        fs::write(&lyrics_txt, full_song_lines.join("\n"))?;
-
-        let (pitch_mod, rate_mod) = match model {
-            FusionTtsModel::SunoBark => ("+1st", "-8%"),
-            FusionTtsModel::F5Tts | FusionTtsModel::Kokoro82m => ("+0st", "-6%"),
-            FusionTtsModel::ParlerTtsLarge => ("+1st", "-8%"),
-            FusionTtsModel::SeedVc => ("+0st", "-6%"),
-            FusionTtsModel::CoquiXttsV2 | FusionTtsModel::FishSpeech15 => ("+0st", "-6%"),
-            FusionTtsModel::WindowsSapi => ("+0st", "-6%"),
-        };
-
-        let style_lower = voice_style.to_ascii_lowercase();
-        let lead_voice = if style_lower.contains("female")
-            || style_lower.contains("soprano")
-            || matches!(model, FusionTtsModel::F5Tts | FusionTtsModel::Kokoro82m) && !style_lower.contains("male") && !style_lower.contains("tenor") && !style_lower.contains("baritone")
-        {
-            "Microsoft Zira Desktop"
-        } else {
-            "Microsoft David Desktop"
-        };
-
-        let ps_script = format!(
-            r#"
-Add-Type -AssemblyName System.Speech
-$ErrorActionPreference = 'Stop'
-$lyricsPath = $args[0]
-$leadOut = $args[1]
-
-$lines = Get-Content -Path $lyricsPath -Encoding UTF8 | Where-Object {{ $_.Trim().Length -gt 0 }}
-if ($lines.Count -eq 0) {{ $lines = @('One love, one heart, let us get together and feel alright.') }}
-
-$fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(48000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Stereo)
-
-$leadSynth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-try {{ $leadSynth.SelectVoice('{lead_voice}') }} catch {{}}
-$leadSynth.Volume = 100
-$leadSynth.SetOutputToWaveFile($leadOut, $fmt)
-
-$pitches = @('{pitch_mod}', '+1st', '+2st', '+0st', '-1st', '+1st')
-$sbLead = New-Object System.Text.StringBuilder
-[void]$sbLead.Append('<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">')
-[void]$sbLead.Append('<break time="450ms"/>')
-$idx = 0
-foreach ($line in $lines) {{
-    $clean = [System.Security.SecurityElement]::Escape($line)
-    $p = $pitches[$idx % $pitches.Length]
-    [void]$sbLead.Append("<prosody pitch='$p' rate='{rate_mod}' volume='loud'>$clean</prosody><break time='550ms'/>")
-    $idx++
-}}
-[void]$sbLead.Append('</speak>')
-$leadSynth.SpeakSsml($sbLead.ToString())
-$leadSynth.SetOutputToNull()
-$leadSynth.Dispose()
-"#,
-            lead_voice = lead_voice,
-            pitch_mod = pitch_mod,
-            rate_mod = rate_mod
-        );
-
-        fs::write(&script_file, ps_script)?;
-
-        let mut cmd = std::process::Command::new("powershell");
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
-        cmd.args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            script_file.to_str().unwrap(),
-            lyrics_txt.to_str().unwrap(),
-            temp_lead.to_str().unwrap(),
-        ]);
-
-        let status = cmd.status()?;
-        if !status.success() || !temp_lead.exists() {
-            anyhow::bail!("PowerShell SAPI invocation returned non-zero status");
-        }
-
-        // Read SAPI output WAV and apply clean studio normalization & sample-locked stereo warmth (zero sine carrier whine, zero out-of-sync overlapping voices)
-        let (lead_l, lead_r, sr) = Self::read_wav_pcm16_stereo(&temp_lead)?;
-        let count = lead_l.len().min(lead_r.len());
-        if count == 0 {
-            anyhow::bail!("SAPI output WAV contained zero samples");
-        }
-
-        let mut max_peak = 0.0f32;
-        for i in 0..count {
-            let p = lead_l[i].abs().max(lead_r[i].abs());
-            if p > max_peak {
-                max_peak = p;
-            }
-        }
-        let norm_gain = if max_peak > 0.01 { (0.88 / max_peak).clamp(0.5, 3.0) } else { 1.0 };
-
-        let mut mixed_lead_l = vec![0.0f32; count];
-        let mut mixed_lead_r = vec![0.0f32; count];
-        let mut mixed_yue_l = vec![0.0f32; count];
-        let mut mixed_yue_r = vec![0.0f32; count];
-
-        // Gentle 1-pole de-essing smoothing filter (~4.5 kHz) + 11ms stereo chorus doubler for yue_vocals
-        let mut lp_l = 0.0f32;
-        let mut lp_r = 0.0f32;
-        let doubler_delay = ((0.011 * sr as f32) as usize).max(1);
-
-        for i in 0..count {
-            let raw_l = lead_l[i] * norm_gain;
-            let raw_r = lead_r[i] * norm_gain;
-            lp_l = 0.45 * lp_l + 0.55 * raw_l;
-            lp_r = 0.45 * lp_r + 0.55 * raw_r;
-
-            let clean_l = (raw_l * 0.70 + lp_l * 0.30).clamp(-0.92, 0.92);
-            let clean_r = (raw_r * 0.70 + lp_r * 0.30).clamp(-0.92, 0.92);
-
-            mixed_lead_l[i] = clean_l;
-            mixed_lead_r[i] = clean_r;
-
-            let dbl_l = if i >= doubler_delay { mixed_lead_r[i - doubler_delay] * 0.18 } else { 0.0 };
-            let dbl_r = if i >= doubler_delay { mixed_lead_l[i - doubler_delay] * 0.18 } else { 0.0 };
-            mixed_yue_l[i] = (clean_l * 0.86 + dbl_l).clamp(-0.92, 0.92);
-            mixed_yue_r[i] = (clean_r * 0.86 + dbl_r).clamp(-0.92, 0.92);
-        }
-
-        Self::write_wav_pcm16_stereo(out_lead, &mixed_lead_l, &mixed_lead_r, sr)?;
-        Self::write_wav_pcm16_stereo(out_yue, &mixed_yue_l, &mixed_yue_r, sr)?;
-
-        // Clean up temporary script files
-        let _ = fs::remove_file(&script_file);
-        let _ = fs::remove_file(&lyrics_txt);
-        let _ = fs::remove_file(&temp_lead);
-
-        Ok(())
-    }
-
-    /// Pure-Rust Warm Vocal Synthesis fallback: Generates warm low-mid vowel resonances (180–480 Hz)
-    /// conforming strictly to 48,000 Hz 16-bit Stereo WAV format with zero high-pitch noise.
+    /// Pure-Rust Melodic Singing Synthesis Engine: Generates scale-locked singing
+    /// with sustained sung vowels, 5.5 Hz vibrato, 3-part harmony choir, and studio reverb.
     pub fn synthesize_pure_rust_formants(
         text: &str,
         model: &FusionTtsModel,
@@ -345,7 +125,7 @@ $leadSynth.Dispose()
         let sr = 48_000u32;
         let words: Vec<&str> = text.split_whitespace().collect();
         let num_words = words.len().max(1);
-        let word_duration_secs = 0.48f32;
+        let word_duration_secs = 0.55f32;
         let total_duration_secs = ((num_words as f32 * word_duration_secs) + 0.8f32).clamp(2.5, 65.0);
         let total_samples = (total_duration_secs * sr as f32) as usize;
 
@@ -354,32 +134,55 @@ $leadSynth.Dispose()
         let mut yue_l = vec![0.0f32; total_samples];
         let mut yue_r = vec![0.0f32; total_samples];
 
-        let (model_pitch_shift, vibrato_speed) = match model {
-            FusionTtsModel::F5Tts | FusionTtsModel::Kokoro82m => (0.0f32, 5.0f32),
-            FusionTtsModel::SunoBark => (0.5f32, 5.2f32),
-            FusionTtsModel::CoquiXttsV2 => (-0.5f32, 4.8f32),
-            FusionTtsModel::FishSpeech15 => (0.2f32, 5.1f32),
-            FusionTtsModel::ParlerTtsLarge => (0.5f32, 5.2f32),
-            FusionTtsModel::SeedVc => (0.0f32, 5.0f32),
-            FusionTtsModel::WindowsSapi => (0.0f32, 5.0f32),
+        let (_model_pitch_shift, vibrato_speed) = match model {
+            FusionTtsModel::F5Tts | FusionTtsModel::Kokoro82m => (0.0f32, 5.5f32),
+            FusionTtsModel::SunoBark => (0.5f32, 5.5f32),
+            FusionTtsModel::CoquiXttsV2 => (-0.5f32, 5.2f32),
+            FusionTtsModel::FishSpeech15 => (0.2f32, 5.5f32),
+            FusionTtsModel::ParlerTtsLarge => (0.5f32, 5.4f32),
+            FusionTtsModel::SeedVc => (0.0f32, 5.5f32),
+            FusionTtsModel::WindowsSapi => (0.0f32, 5.5f32),
         };
 
         let is_female = voice_style.to_ascii_lowercase().contains("female") || voice_style.to_ascii_lowercase().contains("soprano");
-        let base_f0 = if is_female { 220.0f32 } else { 146.83f32 }; // Warm A3 / D3 fundamental
+        let base_f0 = if is_female { 277.18f32 } else { 220.0f32 }; // A Major Pentatonic Tenor (220 Hz A3) or Soprano (277.18 Hz C#4)
 
-        let melodic_intervals = [0.0f32, 2.0, 4.0, 5.0, 7.0, 4.0, 2.0, 0.0];
+        // A Major Pentatonic scale ratios: Tonic, Maj 2nd, Maj 3rd, Perf 5th, Maj 6th, Octave
+        let scale_ratios = [1.0f32, 1.122_462, 1.259_921, 1.498_307, 1.681_793, 2.0];
+        let melodic_pattern = [0usize, 2, 3, 4, 3, 2, 1, 0];
+
+        // 12ms Stereo Doubler buffer
+        let doubler_delay = ((0.012 * sr as f32) as usize).max(1);
+
+        // Schroeder Reverb state
+        let c_delays = [1116usize, 1188, 1277, 1356];
+        let mut comb_buf_l: Vec<Vec<f32>> = c_delays.iter().map(|&d| vec![0.0f32; d]).collect();
+        let mut comb_buf_r: Vec<Vec<f32>> = c_delays.iter().map(|&d| vec![0.0f32; d + 23]).collect();
+        let mut comb_idx_l = vec![0usize; 4];
+        let mut comb_idx_r = vec![0usize; 4];
+        let mut comb_store_l = [0.0f32; 4];
+        let mut comb_store_r = [0.0f32; 4];
+
+        let ap_delays = [225usize, 341];
+        let mut ap_buf_l: Vec<Vec<f32>> = ap_delays.iter().map(|&d| vec![0.0f32; d]).collect();
+        let mut ap_buf_r: Vec<Vec<f32>> = ap_delays.iter().map(|&d| vec![0.0f32; d + 11]).collect();
+        let mut ap_idx_l = vec![0usize; 2];
+        let mut ap_idx_r = vec![0usize; 2];
 
         for (word_idx, _word) in words.iter().enumerate() {
-            let start_sample = (0.25 + (word_idx as f32 * word_duration_secs)) * sr as f32;
-            let end_sample = start_sample + (word_duration_secs * 0.85 * sr as f32);
+            let start_sample = (0.20 + (word_idx as f32 * word_duration_secs)) * sr as f32;
+            let end_sample = start_sample + (word_duration_secs * 0.88 * sr as f32);
             let start_i = start_sample as usize;
             let end_i = (end_sample as usize).min(total_samples);
             if start_i >= total_samples || end_i <= start_i {
                 break;
             }
 
-            let semitone = melodic_intervals[word_idx % melodic_intervals.len()];
-            let word_f0 = base_f0 * 2.0f32.powf((semitone + model_pitch_shift) / 12.0);
+            let degree = melodic_pattern[word_idx % melodic_pattern.len()];
+            let ratio = scale_ratios[degree % scale_ratios.len()];
+            let word_f0 = base_f0 * ratio;
+            let high_f0 = word_f0 * 1.259_921 * 1.001_733; // Major 3rd + 3 cents
+            let low_f0 = word_f0 * 1.498_307 * 0.998_270;  // Perfect 5th - 3 cents
             let dur_samples = (end_i - start_i) as f32;
 
             for i in start_i..end_i {
@@ -387,26 +190,122 @@ $leadSynth.Dispose()
                 let t_norm = local_idx as f32 / dur_samples;
                 let t_sec = local_idx as f32 / sr as f32;
 
-                let env = if t_norm < 0.15 {
-                    (t_norm / 0.15 * PI * 0.5).sin()
-                } else if t_norm > 0.75 {
-                    ((1.0 - t_norm) / 0.25 * PI * 0.5).sin().max(0.0)
+                // Sustained sung vowel envelope (35ms attack, held sustain, legato release)
+                let env = if t_norm < 0.10 {
+                    (t_norm / 0.10 * PI * 0.5).sin()
+                } else if t_norm > 0.80 {
+                    0.25 + 0.75 * (((1.0 - t_norm) / 0.20) * PI * 0.5).sin().max(0.0)
                 } else {
                     1.0
                 };
 
-                let vibrato = (2.0 * PI * vibrato_speed * t_sec).sin() * 0.008;
-                let inst_f0 = word_f0 * (1.0 + vibrato);
+                // Natural 5.5 Hz vibrato swelling during sustain
+                let vib_depth = if t_norm < 0.20 { (t_norm / 0.20) * 0.005 } else { 0.015 };
+                let vibrato = (2.0 * PI * vibrato_speed * t_sec).sin() * vib_depth;
 
-                let cord_pulse = (2.0 * PI * inst_f0 * t_sec).sin() * 0.55
-                    + (4.0 * PI * inst_f0 * t_sec).sin() * 0.25
-                    + (6.0 * PI * inst_f0 * t_sec).sin() * 0.10;
-                let vocal_sample = (cord_pulse * env * 0.75).clamp(-0.90, 0.90);
+                let inst_lead_f0 = word_f0 * (1.0 + vibrato);
+                let inst_high_f0 = high_f0 * (1.0 + vibrato * 0.9);
+                let inst_low_f0 = low_f0 * (1.0 + vibrato * 1.1);
 
-                lead_l[i] = vocal_sample;
-                lead_r[i] = vocal_sample;
-                yue_l[i] = vocal_sample * 0.92;
-                yue_r[i] = vocal_sample * 0.92;
+                // Lead glottal fold harmonics
+                let p_lead = 2.0 * PI * inst_lead_f0 * t_sec;
+                let lead_glottal = (p_lead).sin() * 0.52
+                    + (2.0 * p_lead).sin() * 0.26
+                    + (3.0 * p_lead).sin() * 0.14
+                    + (4.0 * p_lead).sin() * 0.06;
+
+                // High choir harmony glottal fold harmonics
+                let p_high = 2.0 * PI * inst_high_f0 * t_sec;
+                let high_glottal = (p_high).sin() * 0.50
+                    + (2.0 * p_high).sin() * 0.24
+                    + (3.0 * p_high).sin() * 0.12;
+
+                // Low choir harmony glottal fold harmonics
+                let p_low = 2.0 * PI * inst_low_f0 * t_sec;
+                let low_glottal = (p_low).sin() * 0.50
+                    + (2.0 * p_low).sin() * 0.24
+                    + (3.0 * p_low).sin() * 0.12;
+
+                let lead_sample = (lead_glottal * env * 0.82).tanh();
+                let high_sample = (high_glottal * env * 0.42).tanh();
+                let low_sample = (low_glottal * env * 0.42).tanh();
+
+                // 3-Part Stereo Panning (Lead: center; High: 70% L, 30% R; Low: 30% L, 70% R)
+                let sample_l = lead_sample + high_sample * 0.70 + low_sample * 0.30;
+                let sample_r = lead_sample + high_sample * 0.30 + low_sample * 0.70;
+
+                lead_l[i] = sample_l;
+                lead_r[i] = sample_r;
+            }
+        }
+
+        // Apply 12ms Stereo Doubler & Schroeder Studio Reverb
+        for i in 0..total_samples {
+            let dry_l = lead_l[i];
+            let dry_r = lead_r[i];
+
+            let dbl_l = if i >= doubler_delay { lead_r[i - doubler_delay] * 0.16 } else { 0.0 };
+            let dbl_r = if i >= doubler_delay { lead_l[i - doubler_delay] * 0.16 } else { 0.0 };
+
+            let in_l = dry_l + dbl_l;
+            let in_r = dry_r + dbl_r;
+
+            // Parallel Comb Filters
+            let mut comb_sum_l = 0.0f32;
+            let mut comb_sum_r = 0.0f32;
+            for c in 0..4 {
+                let out_cl = comb_buf_l[c][comb_idx_l[c]];
+                comb_store_l[c] = out_cl * 0.72 + comb_store_l[c] * 0.28;
+                comb_buf_l[c][comb_idx_l[c]] = in_l + comb_store_l[c] * 0.76;
+                comb_idx_l[c] = (comb_idx_l[c] + 1) % comb_buf_l[c].len();
+                comb_sum_l += out_cl;
+
+                let out_cr = comb_buf_r[c][comb_idx_r[c]];
+                comb_store_r[c] = out_cr * 0.72 + comb_store_r[c] * 0.28;
+                comb_buf_r[c][comb_idx_r[c]] = in_r + comb_store_r[c] * 0.76;
+                comb_idx_r[c] = (comb_idx_r[c] + 1) % comb_buf_r[c].len();
+                comb_sum_r += out_cr;
+            }
+            comb_sum_l *= 0.25;
+            comb_sum_r *= 0.25;
+
+            // Series Allpass Filters
+            for ap in 0..2 {
+                let b_l = ap_buf_l[ap][ap_idx_l[ap]];
+                let y_l = -comb_sum_l + b_l;
+                ap_buf_l[ap][ap_idx_l[ap]] = comb_sum_l + b_l * 0.5;
+                ap_idx_l[ap] = (ap_idx_l[ap] + 1) % ap_buf_l[ap].len();
+                comb_sum_l = y_l;
+
+                let b_r = ap_buf_r[ap][ap_idx_r[ap]];
+                let y_r = -comb_sum_r + b_r;
+                ap_buf_r[ap][ap_idx_r[ap]] = comb_sum_r + b_r * 0.5;
+                ap_idx_r[ap] = (ap_idx_r[ap] + 1) % ap_buf_r[ap].len();
+                comb_sum_r = y_r;
+            }
+
+            let rev_mix = 0.16f32;
+            let final_l = (in_l * (1.0 - rev_mix) + comb_sum_l * rev_mix).clamp(-0.95, 0.95);
+            let final_r = (in_r * (1.0 - rev_mix) + comb_sum_r * rev_mix).clamp(-0.95, 0.95);
+
+            lead_l[i] = final_l;
+            lead_r[i] = final_r;
+            yue_l[i] = final_l * 0.92;
+            yue_r[i] = final_r * 0.92;
+        }
+
+        // Peak normalize to 0.88 (-1.1 dBFS)
+        let mut max_p = 0.0f32;
+        for i in 0..total_samples {
+            max_p = max_p.max(lead_l[i].abs()).max(lead_r[i].abs());
+        }
+        if max_p > 0.01 {
+            let norm = (0.88 / max_p).clamp(0.5, 3.5);
+            for i in 0..total_samples {
+                lead_l[i] = (lead_l[i] * norm).clamp(-0.95, 0.95);
+                lead_r[i] = (lead_r[i] * norm).clamp(-0.95, 0.95);
+                yue_l[i] = (yue_l[i] * norm * 0.95).clamp(-0.95, 0.95);
+                yue_r[i] = (yue_r[i] * norm * 0.95).clamp(-0.95, 0.95);
             }
         }
 

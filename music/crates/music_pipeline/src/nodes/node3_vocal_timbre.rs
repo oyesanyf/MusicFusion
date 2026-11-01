@@ -97,9 +97,14 @@ impl VocalTimbreFusionNode {
             log::warn!("Node 3: yue_vocals not registered; using draft_groove as source bed");
             p.clone()
         } else {
-            // Generate synthetic fallback buffer if no stem exists
+            // Generate melodic singing fallback buffer if no stem exists
             let fallback_path = stems_dir.join("temp_guide_vocal.wav");
-            let buf = AudioBuffer::new_stereo(2.0);
+            let synth = music_dsp::melodic_singing::MelodicSingingSynthesizer::new(48000);
+            let root_hz = crate::nodes::node2_groove_yue::GrooveAndYueSynthesisNode::parse_key_signature_root_hz(
+                &state.key_signature,
+            ) * 2.0;
+            let lyrics = if !state.lyrics.trim().is_empty() { state.lyrics.as_str() } else { "Singing love and unity right through the night" };
+            let buf = synth.synthesize_melodic_vocal_track(8.0, state.bpm as f32, root_hz, lyrics);
             buf.to_wav_file_with_format(&fallback_path, WavBitDepth::Pcm16).map_err(|e| {
                 PipelineError::DspError(format!("Failed to write temp guide vocal: {}", e))
             })?;
@@ -223,9 +228,21 @@ impl VocalTimbreFusionNode {
         output_vocal_path: &Path,
     ) -> Result<(), PipelineError> {
         // 1. Read input audio buffer
-        let input_buf = AudioBuffer::from_wav_file(source_vocal_path).map_err(|e| {
+        let mut input_buf = AudioBuffer::from_wav_file(source_vocal_path).map_err(|e| {
             PipelineError::DspError(format!("Failed to load source vocal WAV {:?}: {}", source_vocal_path, e))
         })?;
+
+        // If guide vocal is silent or missing samples, synthesize melodic singing
+        let max_input_peak = input_buf.samples.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
+        if max_input_peak < 0.005 {
+            let synth = music_dsp::melodic_singing::MelodicSingingSynthesizer::new(input_buf.sample_rate);
+            let root_hz = crate::nodes::node2_groove_yue::GrooveAndYueSynthesisNode::parse_key_signature_root_hz(
+                &state.key_signature,
+            ) * 2.0;
+            let lyrics = if !state.lyrics.trim().is_empty() { state.lyrics.as_str() } else { "Singing love and freedom everywhere across the land" };
+            let dur = input_buf.duration_secs().max(4.0);
+            input_buf = synth.synthesize_melodic_vocal_track(dur, state.bpm as f32, root_hz, lyrics);
+        }
 
         // 2. Select universal vocal archetype based on genre and blueprint
         let archetype = Self::select_vocal_archetype(&state.genre, state);

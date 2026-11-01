@@ -15,7 +15,6 @@
 //! 4. Registers stems in `state.stem_paths` (`STEM_DRAFT_GROOVE`, `STEM_YUE_VOCALS`, `STEM_YUE_INSTRUMENTALS`).
 //! 5. Records transition in `state.history`.
 
-use std::f32::consts::PI;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -347,8 +346,8 @@ impl GrooveAndYueSynthesisNode {
             PipelineError::DspError(format!("Failed to write yue_instrumentals.wav: {}", e))
         })?;
 
-        // 2. Synthesize Guide Vocal Stem (yue_vocals.wav) with Real Articulated English Lyrics
-        let vocal_buf = Self::synthesize_articulated_vocal_stem(
+        // 2. Synthesize Guide Vocal Stem (yue_vocals.wav) with True Melodic Singing Synthesis
+        let vocal_buf = Self::synthesize_melodic_singing_vocal_stem(
             state,
             stems_dir,
             duration_secs,
@@ -365,344 +364,27 @@ impl GrooveAndYueSynthesisNode {
         Ok((vocals_path, inst_path))
     }
 
-    /// Synthesizes a richly articulated, intelligible vocal stem (`yue_vocals.wav`)
-    /// using Windows native SpeechSynthesizer at natural human pitch with studio de-essing
-    /// and subtle spatial room presence (zero carrier sine whine, zero overlapping voice chaos).
-    fn synthesize_articulated_vocal_stem(
+    /// Synthesizes a true melodic singing vocal stem (`yue_vocals.wav`)
+    /// locked strictly onto the musical scale (e.g. A Major Pentatonic at 76 BPM)
+    /// with sustained sung vowels, 5.5 Hz vibrato, 3-part harmony choir backing,
+    /// and warm studio reverb (never flat spoken desktop screen-reader TTS).
+    fn synthesize_melodic_singing_vocal_stem(
         state: &MusicProductionState,
-        stems_dir: &Path,
+        _stems_dir: &Path,
         duration_secs: f32,
         sample_rate: u32,
         bpm: f32,
         key_root_hz: f32,
     ) -> AudioBuffer {
-        let frames = (duration_secs * sample_rate as f32).round() as usize;
-        let beat_duration = 60.0 / bpm.max(40.0);
-        let vocal_root = if key_root_hz > 165.0 { key_root_hz } else { key_root_hz * 1.5 };
-
-        // Major pentatonic melody scale ratios: Root, 2nd, 3rd, 5th, 6th
-        let _melody_scale: [f32; 8] = [
-            1.0,       // Tonic
-            1.122_46,  // Major Second
-            1.259_92,  // Major Third
-            1.498_31,  // Perfect Fifth
-            1.681_79,  // Major Sixth
-            1.498_31,  // Perfect Fifth
-            1.259_92,  // Major Third
-            1.0,       // Tonic
-        ];
-
-        // Attempt real articulated English vocal synthesis when duration >= 4.0s
-        let mut speech_buf_opt = if duration_secs >= 4.0 {
-            Self::try_synthesize_windows_sapi_vocals(state, stems_dir, duration_secs)
-        } else {
-            None
-        };
-
-        let mut vocal_buf = AudioBuffer::new(sample_rate, 2, duration_secs);
-
-        if let Some(ref mut speech_buf) = speech_buf_opt {
-            // Normalize speech buffer peak to 0.88 so words are crystal clear
-            let mut max_peak = 0.0f32;
-            for &s in &speech_buf.samples {
-                let a = s.abs();
-                if a > max_peak {
-                    max_peak = a;
-                }
-            }
-            let norm_gain = if max_peak > 0.01 { (0.88 / max_peak).clamp(0.5, 3.0) } else { 1.0 };
-
-            let copy_frames = frames.min(speech_buf.frame_count());
-            let src_ch = speech_buf.channels as usize;
-            let mut lp_l = 0.0f32;
-            let mut lp_r = 0.0f32;
-
-            for i in 0..copy_frames {
-                let raw_l = speech_buf.samples[i * src_ch] * norm_gain;
-                let raw_r = if src_ch > 1 {
-                    speech_buf.samples[i * src_ch + 1] * norm_gain
-                } else {
-                    raw_l
-                };
-
-                // Gentle 1-pole de-esser smoothing (~4.5 kHz) — zero continuous sine carrier whine!
-                lp_l = 0.45 * lp_l + 0.55 * raw_l;
-                lp_r = 0.45 * lp_r + 0.55 * raw_r;
-
-                vocal_buf.samples[i * 2] = (raw_l * 0.72 + lp_l * 0.28).clamp(-0.94, 0.94);
-                vocal_buf.samples[i * 2 + 1] = (raw_r * 0.72 + lp_r * 0.28).clamp(-0.94, 0.94);
-            }
-        } else {
-            // Fast Pure-Rust Warm Syllable Synthesizer (for short unit tests / non-Windows)
-            // Uses phase-continuous accumulators, portamento glide, and smooth raised-cosine envelopes
-            let syllable_dur = (beat_duration * 0.5).max(0.18);
-            let sr = sample_rate as f32;
-            let mut vocal_phase = 0.0f32;
-            let mut smoothed_freq = vocal_root;
-            let mut smoothed_env = 0.0f32;
-            let glide_alpha = (1.0 - (-1.0 / (0.015 * sr)).exp()).clamp(0.0005, 0.05);
-            let env_alpha = (1.0 - (-1.0 / (0.010 * sr)).exp()).clamp(0.001, 0.08);
-
-            for i in 0..frames {
-                let t = i as f32 / sr;
-                let current_beat = (t / beat_duration) as usize;
-                let syl_phase = (t % syllable_dur) / syllable_dur;
-
-                // Continuous vocal delivery without silence gating dropouts
-                let target_env = if syl_phase < 0.15 {
-                    0.25 + 0.75 * (syl_phase / 0.15 * PI * 0.5).sin()
-                } else if syl_phase < 0.80 {
-                    1.0
-                } else {
-                    0.25 + 0.75 * (((1.0 - syl_phase) / 0.20) * PI * 0.5).sin().max(0.0)
-                };
-                smoothed_env += env_alpha * (target_env - smoothed_env);
-
-                // Locked strictly to A Major pentatonic frequencies [220.0, 246.94, 277.18, 329.63, 369.99, 440.0]
-                let penta = music_dsp::guitar_wah::A_MAJOR_PENTATONIC;
-                let target_penta_hz = penta[current_beat % penta.len()];
-                let note_freq = if vocal_root > 0.0 {
-                    (vocal_root / 220.0) * target_penta_hz
-                } else {
-                    target_penta_hz
-                };
-                let vibrato = (2.0 * PI * 5.0 * t).sin() * 1.5;
-                let target_freq = note_freq + vibrato;
-                smoothed_freq += glide_alpha * (target_freq - smoothed_freq);
-
-                vocal_phase = (vocal_phase + smoothed_freq / sr).fract();
-
-                let glottal = (2.0 * PI * vocal_phase).sin() * 0.52
-                    + (4.0 * PI * vocal_phase).sin() * 0.22
-                    + (6.0 * PI * vocal_phase).sin() * 0.08;
-
-                let raw_vocal = (glottal * smoothed_env).tanh() * 0.85;
-                vocal_buf.samples[i * 2] = raw_vocal;
-                vocal_buf.samples[i * 2 + 1] = raw_vocal * 0.95;
-            }
-        }
-
-        // Apply subtle 115ms Stereo Studio Room Ambience (0.08 wet mix) for natural depth
-        let delay_frames = ((0.115 * sample_rate as f32) as usize).max(1);
-        let mut delayed = vocal_buf.clone();
-        for i in delay_frames..frames {
-            let dry_l = vocal_buf.samples[i * 2];
-            let dry_r = vocal_buf.samples[i * 2 + 1];
-            let echo_l = vocal_buf.samples[(i - delay_frames) * 2 + 1] * 0.08;
-            let echo_r = vocal_buf.samples[(i - delay_frames) * 2] * 0.08;
-            delayed.samples[i * 2] = (dry_l + echo_l).clamp(-0.95, 0.95);
-            delayed.samples[i * 2 + 1] = (dry_r + echo_r).clamp(-0.95, 0.95);
-        }
-
-        delayed
-    }
-
-    /// Invokes Windows `System.Speech.Synthesis.SpeechSynthesizer` at 48,000 Hz 16-bit Stereo PCM
-    /// to render crystal-clear, natural-pitch Lead Vocals from the song's actual lyrics.
-    #[cfg(windows)]
-    fn try_synthesize_windows_sapi_vocals(
-        state: &MusicProductionState,
-        stems_dir: &Path,
-        duration_secs: f32,
-    ) -> Option<AudioBuffer> {
-        let raw_lyrics = if !state.lyrics.trim().is_empty() {
-            state.lyrics.clone()
+        let synth = music_dsp::melodic_singing::MelodicSingingSynthesizer::new(sample_rate);
+        let lyrics = if !state.lyrics.trim().is_empty() {
+            state.lyrics.as_str()
         } else if let Some(ref bp) = state.blueprint {
-            bp.to_yue_lyrics_txt()
+            bp.style_of_music.as_str()
         } else {
-            String::new()
+            "One love, one heart, let us get together and feel alright"
         };
-
-        // Strip section headers like [Verse 1], [Chorus] AND parenthetical stage notes (...)
-        let mut cleaned_text = String::with_capacity(raw_lyrics.len());
-        let mut in_brackets = false;
-        let mut in_parens = false;
-        for ch in raw_lyrics.chars() {
-            match ch {
-                '[' => {
-                    in_brackets = true;
-                    cleaned_text.push('\n');
-                }
-                ']' => {
-                    in_brackets = false;
-                    cleaned_text.push('\n');
-                }
-                '(' => in_parens = true,
-                ')' => in_parens = false,
-                _ if !in_brackets && !in_parens => cleaned_text.push(ch),
-                _ => {}
-            }
-        }
-
-        let mut lines: Vec<String> = cleaned_text
-            .lines()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .map(|l| {
-                l.chars()
-                    .filter(|c| c.is_alphanumeric() || " ,.!?'-\"".contains(*c))
-                    .collect::<String>()
-            })
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
-
-        if lines.is_empty() {
-            if state.genre.to_ascii_lowercase().contains("afrobeats") {
-                lines = vec![
-                    "Lagos to the world, feel the groove, we move to the sunrise beat!".to_string(),
-                    "Early morning sunshine rising over Lagos bay, feel the energy awaken as we start the brand new day.".to_string(),
-                    "Highlife sweet guitar is plucking melodies so clean, flipping through the rhythm like a cinematic scene.".to_string(),
-                    "Log drum is vibrating, shake the body, let it go! African connection got the whole world in a glow.".to_string(),
-                    "Celebrate the journey from the island to the street, nothing can compare to this syncopated beat.".to_string(),
-                    "Raise up your hands if you are ready for the sound, feel the joy spreading all across the town.".to_string(),
-                ];
-            } else {
-                lines = vec![
-                    "Walking down the trenchtown avenue early morning light, guiding all the children through the struggles of the night.".to_string(),
-                    "Hear the sweet Nyabinghi drums rolling down the street, every heavy burden falls before the one drop beat.".to_string(),
-                    "One love, one heart, let us get together and feel alright.".to_string(),
-                    "Give thanks and praises to the highest light, we are standing tall through the darkest night.".to_string(),
-                    "Rasta man vibration spreading joy across the land, healing every brother with a helping open hand.".to_string(),
-                    "Love is the answer, love is the righteous way, lighting up tomorrow from the dawn of yesterday.".to_string(),
-                ];
-            }
-        }
-
-        // Repeat lyrical stanzas so the vocal performance spans the full duration of the song
-        let target_line_count = ((duration_secs / 3.8).ceil() as usize).clamp(4, 90);
-        let mut expanded_lines = Vec::with_capacity(target_line_count);
-        for idx in 0..target_line_count {
-            expanded_lines.push(lines[idx % lines.len()].clone());
-        }
-
-        let lead_wav_path = stems_dir.join("_sapi_lead_vocal.wav");
-        let lyrics_txt_path = stems_dir.join("_sapi_lyrics.txt");
-
-        let joined_lyrics = expanded_lines.join("\n");
-        if fs::write(&lyrics_txt_path, &joined_lyrics).is_err() {
-            return None;
-        }
-
-        let ps_script = r#"
-Add-Type -AssemblyName System.Speech
-$ErrorActionPreference = 'Stop'
-$lyricsPath = $args[0]
-$leadOut = $args[1]
-
-$lines = Get-Content -Path $lyricsPath -Encoding UTF8 | Where-Object { $_.Trim().Length -gt 0 }
-$fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(48000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Stereo)
-
-$leadSynth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-try { $leadSynth.SelectVoice('Microsoft David Desktop') } catch {}
-$leadSynth.Volume = 100
-$leadSynth.SetOutputToWaveFile($leadOut, $fmt)
-
-$pitches = @('+0st', '+1st', '+2st', '+0st', '-1st', '+1st')
-$rates = @('-6%', '-5%', '-8%', '-6%')
-$sbLead = New-Object System.Text.StringBuilder
-[void]$sbLead.Append('<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">')
-[void]$sbLead.Append('<break time="450ms"/>')
-$idx = 0
-foreach ($line in $lines) {
-    $clean = [System.Security.SecurityElement]::Escape($line)
-    $p = $pitches[$idx % $pitches.Length]
-    $r = $rates[$idx % $rates.Length]
-    [void]$sbLead.Append("<prosody pitch='$p' rate='$r' volume='loud'>$clean</prosody><break time='500ms'/>")
-    $idx++
-}
-[void]$sbLead.Append('</speak>')
-$leadSynth.SpeakSsml($sbLead.ToString())
-$leadSynth.SetOutputToNull()
-$leadSynth.Dispose()
-"#;
-
-        let script_path = stems_dir.join("_synth_vocals.ps1");
-        if fs::write(&script_path, ps_script).is_err() {
-            return None;
-        }
-
-        use std::os::windows::process::CommandExt;
-        let status = std::process::Command::new("powershell")
-            .creation_flags(CREATE_NO_WINDOW)
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                &script_path.to_string_lossy(),
-                &lyrics_txt_path.to_string_lossy(),
-                &lead_wav_path.to_string_lossy(),
-            ])
-            .status();
-
-        let _ = fs::remove_file(&script_path);
-        let _ = fs::remove_file(&lyrics_txt_path);
-
-        if !status.map(|s| s.success()).unwrap_or(false) {
-            return None;
-        }
-
-        let lead_buf = AudioBuffer::from_wav_file(&lead_wav_path).ok()?;
-        let _ = fs::remove_file(&lead_wav_path);
-
-        let target_frames = (duration_secs * 48_000.0).round() as usize;
-        let mut combined = AudioBuffer::new(48_000, 2, duration_secs);
-
-        let lead_frames = lead_buf.frame_count().max(1);
-        let lead_ch = lead_buf.channels as usize;
-        let doubler_offset = 528usize; // 11ms sample-locked stereo doubler (never out of sync)
-        let loop_fade_frames = 960usize.min(lead_frames / 4).max(1); // 20ms smooth fade at loop boundaries
-
-        for f in 0..target_frames {
-            let lf = f % lead_frames;
-            // Apply smooth linear fade-in/fade-out at loop wrap boundaries to prevent clicks
-            let loop_env = if lf < loop_fade_frames {
-                lf as f32 / loop_fade_frames as f32
-            } else if lf >= lead_frames - loop_fade_frames {
-                (lead_frames - 1 - lf) as f32 / loop_fade_frames as f32
-            } else {
-                1.0
-            };
-
-            let l_lead = lead_buf.samples[lf * lead_ch] * loop_env;
-            let r_lead = if lead_ch > 1 {
-                lead_buf.samples[lf * lead_ch + 1] * loop_env
-            } else {
-                l_lead
-            };
-
-            let (dbl_l, dbl_r) = if f >= doubler_offset {
-                let df = (f - doubler_offset) % lead_frames;
-                let dbl_env = if df < loop_fade_frames {
-                    df as f32 / loop_fade_frames as f32
-                } else if df >= lead_frames - loop_fade_frames {
-                    (lead_frames - 1 - df) as f32 / loop_fade_frames as f32
-                } else {
-                    1.0
-                };
-                let dl = lead_buf.samples[df * lead_ch] * 0.16 * dbl_env;
-                let dr = if lead_ch > 1 { lead_buf.samples[df * lead_ch + 1] * 0.16 * dbl_env } else { dl };
-                (dr, dl)
-            } else {
-                (0.0, 0.0)
-            };
-
-            combined.samples[f * 2] = (l_lead * 0.88 + dbl_l).tanh() * 0.94;
-            combined.samples[f * 2 + 1] = (r_lead * 0.88 + dbl_r).tanh() * 0.94;
-        }
-
-        Some(combined)
-    }
-
-    #[cfg(not(windows))]
-    fn try_synthesize_windows_sapi_vocals(
-        _state: &MusicProductionState,
-        _stems_dir: &Path,
-        _duration_secs: f32,
-    ) -> Option<AudioBuffer> {
-        None
+        synth.synthesize_melodic_vocal_track(duration_secs, bpm, key_root_hz, lyrics)
     }
 
     /// Helper to convert key signature name into fundamental root frequency in Hz.
