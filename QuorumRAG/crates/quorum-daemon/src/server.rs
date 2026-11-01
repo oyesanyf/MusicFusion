@@ -41,6 +41,9 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         // Graceful Shutdown Endpoint
         .route("/api/shutdown", post(shutdown_handler))
 
+        // SPA Fallback & Direct Static Asset Resolution
+        .fallback(quorum_ui::static_handler)
+
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

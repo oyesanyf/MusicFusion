@@ -54,6 +54,8 @@ $proc = Start-Process -FilePath $exePath `
     -ArgumentList "--watch-dir `"$WorkspaceDir`" --port $Port --p2p-port $P2pPort --no-browser --data-dir `"$DataDir`"" `
     -PassThru -NoNewWindow
 
+$verifyHarnessDir = $null
+
 try {
     # 3. Poll Health Endpoint
     Write-Host "`n[Step 3/5] Polling /api/health..." -ForegroundColor Yellow
@@ -201,18 +203,17 @@ try {
         Write-Host "Extracted Rust Code Block:`n$extractedCode`n" -ForegroundColor DarkGray
 
         # Build a temporary verification crate harness to compile the generated code
-        $verifyHarnessDir = Join-Path $env:TEMP "quorumrag_codegen_verify"
-        if (Test-Path $verifyHarnessDir) { Remove-Item -Path $verifyHarnessDir -Recurse -Force }
+        $verifyHarnessDir = Join-Path $env:TEMP ("quorumrag_codegen_verify_" + [System.Guid]::NewGuid().ToString("N"))
+        if (Test-Path $verifyHarnessDir) { Remove-Item -Path $verifyHarnessDir -Recurse -Force -ErrorAction SilentlyContinue }
         New-Item -ItemType Directory -Path (Join-Path $verifyHarnessDir "src") -Force | Out-Null
 
         $harnessCargo = @"
 [package]
-name = "verify-codegen"
+name = "quorumrag-codegen-verify"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-quorum-coordinator = { path = "$($WorkspaceDir.Replace('\', '/'))/crates/quorum-coordinator" }
 "@
         Set-Content -Path (Join-Path $verifyHarnessDir "Cargo.toml") -Value $harnessCargo
         $harnessMain = @"
@@ -305,5 +306,9 @@ fn main() {
 
     if (Test-Path $DataDir) {
         Remove-Item -Path $DataDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($verifyHarnessDir -and (Test-Path $verifyHarnessDir)) {
+        Remove-Item -Path $verifyHarnessDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
