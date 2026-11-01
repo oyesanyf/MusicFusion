@@ -189,7 +189,6 @@ impl FilesystemCrawler {
 
     fn build_walker(&self, root: &Path) -> WalkParallel {
         let mut builder = WalkBuilder::new(root);
-        let is_drive_root = root.parent().is_none();
 
         builder
             .hidden(self.config.skip_hidden)
@@ -204,44 +203,50 @@ impl FilesystemCrawler {
             .same_file_system(self.config.same_file_system)
             .max_filesize(Some(self.config.max_file_size_bytes));
 
-        if is_drive_root {
-            builder.filter_entry(|entry| {
-                if entry.depth() == 0 {
-                    return true;
-                }
-                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-                    if let Some(name) = entry.file_name().to_str() {
-                        let lower = name.to_ascii_lowercase();
-                        if matches!(
-                            lower.as_str(),
-                            "$recycle.bin"
-                                | "system volume information"
-                                | "windows"
-                                | "program files"
-                                | "program files (x86)"
-                                | "programdata"
-                                | "recovery"
-                                | "perflogs"
-                                | "msocache"
-                                | "config.msi"
-                                | "appdata"
-                                | "node_modules"
-                                | "target"
-                                | ".git"
-                                | ".cargo"
-                                | ".rustup"
-                                | "__pycache__"
-                                | ".venv"
-                                | "venv"
-                                | ".pytest_cache"
-                        ) {
-                            return false;
-                        }
+        builder.filter_entry(|entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
+            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                if let Some(name) = entry.file_name().to_str() {
+                    let lower = name.to_ascii_lowercase();
+                    if matches!(
+                        lower.as_str(),
+                        "$recycle.bin"
+                            | "system volume information"
+                            | "windows"
+                            | "program files"
+                            | "program files (x86)"
+                            | "programdata"
+                            | "recovery"
+                            | "perflogs"
+                            | "msocache"
+                            | "config.msi"
+                            | "appdata"
+                            | "node_modules"
+                            | "target"
+                            | "osoosi_target"
+                            | "site-packages"
+                            | "dist-packages"
+                            | "docker"
+                            | "chrome_temp_profile"
+                            | ".git"
+                            | ".cargo"
+                            | ".rustup"
+                            | "__pycache__"
+                            | ".venv"
+                            | "venv"
+                            | ".pytest_cache"
+                            | ".lance"
+                            | ".tantivy"
+                            | ".quorumrag-live-data"
+                    ) {
+                        return false;
                     }
                 }
-                true
-            });
-        }
+            }
+            true
+        });
 
         if self.config.crawler_threads > 0 {
             builder.threads(self.config.crawler_threads);

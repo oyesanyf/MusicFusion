@@ -261,17 +261,18 @@ impl ReindexWorker {
         progress: Arc<RwLock<Option<ReindexProgress>>>,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<(), IngestError> {
-        let targets = if !options.target_paths.is_empty() {
+        let raw_targets = if !options.target_paths.is_empty() {
             options.target_paths.clone()
         } else {
             config.watch_paths.clone()
         };
 
-        if targets.is_empty() {
+        if raw_targets.is_empty() {
             info!("No target paths configured for reindexing");
             return Ok(());
         }
 
+        let targets = Self::expand_drive_roots(&raw_targets);
         let chunker = TextChunker::new(ChunkerConfig::default());
 
         for target in &targets {
@@ -478,6 +479,7 @@ impl ReindexWorker {
                 if batch_chunks.len() >= options.batch_size {
                     if !options.dry_run {
                         let _ = storage.insert_chunks(&batch_chunks).await?;
+                        let _ = storage.bump_index_epoch("reindex_micro_batch");
                     }
                     batch_chunks.clear();
                 }
@@ -491,6 +493,7 @@ impl ReindexWorker {
             // Flush remaining micro-batch
             if !batch_chunks.is_empty() && !options.dry_run {
                 let _ = storage.insert_chunks(&batch_chunks).await?;
+                let _ = storage.bump_index_epoch("reindex_slice_flush");
                 batch_chunks.clear();
             }
         }
@@ -523,5 +526,106 @@ impl ReindexWorker {
         }
 
         Ok(())
+    }
+
+    /// Expands drive roots (e.g., `D:\`, `C:\`) into incremental top-level slices so user documents
+    /// are indexed and searchable within seconds rather than waiting for a multi-terabyte full-drive walk.
+    fn expand_drive_roots(raw_targets: &[ std::path::PathBuf ]) -> Vec<std::path::PathBuf> {
+        const SKIP_DIRS: &[&str] = &[
+            "$recycle.bin",
+            "system volume information",
+            "windows",
+            "program files",
+            "program files (x86)",
+            "programdata",
+            "recovery",
+            "perflogs",
+            "msocache",
+            "config.msi",
+            "appdata",
+            "node_modules",
+            "target",
+            "osoosi_target",
+            "python311",
+            "docker",
+            "chrome_temp_profile",
+            ".git",
+            ".cargo",
+            ".rustup",
+            "__pycache__",
+            ".venv",
+            "venv",
+            ".tmp.driveupload",
+        ];
+
+        let mut expanded = Vec::new();
+        for target in raw_targets {
+            let is_drive_root = target.parent().is_none()
+                || target.to_string_lossy().len() <= 3;
+            if !is_drive_root {
+                expanded.push(target.clone());
+                continue;
+            }
+
+            let Ok(entries) = std::fs::read_dir(target) else {
+                expanded.push(target.clone());
+                continue;
+            };
+
+            let mut priority_slices = Vec::new();
+            let mut normal_slices = Vec::new();
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name_lower = entry
+                    .file_name()
+                    .to_string_lossy()
+                    .to_ascii_lowercase();
+                if SKIP_DIRS.contains(&name_lower.as_str()) || name_lower.starts_with('.') {
+                    continue;
+                }
+
+                // Expand large workspace containers (`harfile`, `users`) one level further
+                if path.is_dir() && matches!(name_lower.as_str(), "harfile" | "users") {
+                    if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                        for sub in sub_entries.flatten() {
+                            let sub_path = sub.path();
+                            let sub_name = sub.file_name().to_string_lossy().to_ascii_lowercase();
+                            if SKIP_DIRS.contains(&sub_name.as_str()) || sub_name.starts_with('.') {
+                                continue;
+                            }
+                            if sub_name.contains("mechanistic_interpretability")
+                                || sub_name.contains("quorumrag")
+                                || sub_name.contains("femi")
+                            {
+                                priority_slices.insert(0, sub_path);
+                            } else {
+                                normal_slices.push(sub_path);
+                            }
+                        }
+                        continue;
+                    }
+                }
+
+                if matches!(
+                    name_lower.as_str(),
+                    "femi" | "school" | "articles" | "rules" | "documents"
+                ) || path.is_file()
+                {
+                    priority_slices.push(path);
+                } else {
+                    normal_slices.push(path);
+                }
+            }
+
+            expanded.extend(priority_slices);
+            expanded.extend(normal_slices);
+        }
+
+        if expanded.is_empty() {
+            raw_targets.to_vec()
+        } else {
+            expanded
+        }
     }
 }
