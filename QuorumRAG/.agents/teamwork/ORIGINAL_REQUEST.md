@@ -222,3 +222,24 @@ Specifically, once Milestone 5 (`quorumrag.exe` single binary + ChatGPT Web UI +
 2. **Live Production Code Generation & Grounded RAG Test**:
    - Query the live running daemon / ChatGPT Web UI API (`/api/chat` / `/api/query` / `/api/langextract`) with real coding & architecture prompts to verify that it retrieves grounded AST/code chunks, runs the 5-node LangGraph Agentic State Graph + Multi-Model Fusion Router (`GLM-4-9B` / `Qwen 2.5` / `Gemma 3` / offline code synthesizer), and **generates real, compilable production code with exact `[Peer:File:Lines]` citations and grounded `char_interval` spans**.
    - Also launch the ChatGPT Web UI in the browser so the user can see and interact with it live in the IDE/browser!
+
+
+## Follow-up — 2026-11-01T03:51:04Z
+
+User requirement update — please incorporate this mandatory capability immediately into `ORIGINAL_REQUEST.md`, `PROJECT.md`, `BRIEFING.md`, and the active workspace (`quorum-coordinator`, `quorum-ingest`, `quorum-daemon`, `quorum-ui`, and E2E tests):
+
+"the code needs to have caching and re cache"
+
+Specifically, implement first-class **Caching and Re-Cache (`recache`)** across the coordinator, ingestion/storage layer, daemon CLI/REST API, and ChatGPT Web UI:
+
+1. **Multi-Layer BLAKE3 Caching Engine (`QueryCache` + `EmbeddingCache`)**:
+   - **Query, Retrieval & Synthesis Cache**: Cache query embeddings, hybrid/keyword/vector search results, LangExtract grounded extractions, and synthesized responses keyed by a deterministic BLAKE3 digest of `(normalized_query, search_mode, model_family, access_tier, index_epoch)` with configurable TTL & LRU/capacity bounds.
+   - **Cache Hit Telemetry**: Expose `cache_hit: bool`, `cache_hits: u64`, `cache_misses: u64`, `cached_entries: usize`, and `cache_epoch: u64` in `/api/chat`, `/api/query`, `/api/health`, and `GET /api/cache/stats` (while respecting the zero-trust rule that unpinned remote peer chunks remain strictly in volatile `ZeroizeOnDrop` memory).
+
+2. **Dedicated Re-Cache Process, API & Web UI Control (`recache`)**:
+   - **CLI Command**: `quorumrag recache [--clear] [--warm]` to flush stale caches, increment the cache epoch, synchronize with the current LanceDB + Tantivy index state, and pre-warm hot embeddings/queries.
+   - **REST API Endpoints**:
+     - `POST /api/cache/recache`: Invalidates stale cache entries, increments `cache_epoch`, rebuilds/warms the active embedding & query cache from the current index, and returns `{ status, cache_epoch, cleared_entries, warmed_entries, duration_ms }`.
+     - `GET /api/cache/stats`: Returns live cache metrics (`hits`, `misses`, `hit_rate`, `cached_queries`, `cached_embeddings`, `cache_epoch`).
+   - **Automatic Cache Coherence**: Automatically invalidate/re-cache affected entries when `reindex`, `fix-drift`, or the live OS file watcher modifies indexed files.
+   - **ChatGPT Web UI Integration**: Add a **"Re-Cache"** button and live Cache Hit / Cache Stats indicator in the ChatGPT Web UI sidebar/header so the user can inspect cache status and trigger a full re-cache with one click!

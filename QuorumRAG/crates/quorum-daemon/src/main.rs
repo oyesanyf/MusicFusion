@@ -37,6 +37,9 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::FixDrift { dry_run, drift_type }) => {
             run_standalone_fix_drift(cli.clone(), *dry_run, drift_type.clone()).await?;
         }
+        Some(Commands::Recache { clear, warm }) => {
+            run_standalone_recache(cli.clone(), *clear, *warm).await?;
+        }
         None => {
             run_daemon_and_ui(cli).await?;
         }
@@ -315,6 +318,76 @@ pub async fn run_standalone_fix_drift(
     println!("   - Fragments consolidated: {}", report.fragments_consolidated);
     println!("   - Tantivy segments merged: {}", report.tantivy_segments_merged);
     println!("============================================\n");
+
+    Ok(())
+}
+
+/// Executes standalone or client recache command.
+pub async fn run_standalone_recache(
+    cli: Cli,
+    clear: bool,
+    warm: bool,
+) -> anyhow::Result<()> {
+    info!(clear, warm, "Starting QuorumRAG recache process...");
+    let daemon_url = format!("http://{}:{}/api/cache/recache", cli.host, cli.port);
+
+    // 1. Attempt client call to active daemon
+    if let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(500))
+        .build()
+    {
+        let payload = serde_json::json!({
+            "clear": clear,
+            "warm": warm,
+        });
+
+        if let Ok(resp) = client.post(&daemon_url).json(&payload).send().await {
+            if resp.status().is_success() {
+                let json: serde_json::Value = resp.json().await?;
+                println!("\n=== QuorumRAG Cache Invalidation & Re-Cache Report ===");
+                println!("Status:           ok (via active daemon at {}:{})", cli.host, cli.port);
+                println!("Execution Time:   {}ms", json["duration_ms"]);
+                println!("New Cache Epoch:  {}", json["cache_epoch"]);
+                println!("Cleared Entries:  {}", json["cleared_entries"]);
+                println!("Warmed Entries:   {}", json["warmed_entries"]);
+                println!("======================================================\n");
+                return Ok(());
+            }
+        }
+    }
+
+    // 2. Standalone offline fallback
+    let start = Instant::now();
+    let storage_config = quorum_storage::StorageConfig::new(cli.data_dir.clone());
+    let storage = Arc::new(quorum_storage::StorageEngine::open(storage_config).await?);
+
+    let cleared_entries = 0;
+    let new_epoch = storage.bump_index_epoch("standalone_cli_recache")?;
+
+    let warmed_entries = if warm {
+        let embedder = Arc::new(quorum_contract::DeterministicOfflineEngine::new());
+        let dedup = Arc::new(quorum_ingest::TwoLevelDedupEngine::new());
+        let warmer = quorum_ingest::CacheWarmer::new(
+            Arc::clone(&storage),
+            embedder,
+            dedup,
+            quorum_ingest::WarmConfig::default(),
+        );
+        let warm_report = warmer.warm_top_candidates().await;
+        warm_report.warmed_embeddings + warm_report.warmed_queries
+    } else {
+        0
+    };
+
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    println!("\n=== QuorumRAG Cache Invalidation & Re-Cache Report ===");
+    println!("Status:           ok (standalone offline mode)");
+    println!("Execution Time:   {}ms", duration_ms);
+    println!("New Cache Epoch:  {}", new_epoch);
+    println!("Cleared Entries:  {}", cleared_entries);
+    println!("Warmed Entries:   {}", warmed_entries);
+    println!("======================================================\n");
 
     Ok(())
 }

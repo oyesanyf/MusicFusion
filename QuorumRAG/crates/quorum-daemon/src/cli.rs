@@ -75,4 +75,15 @@ pub enum Commands {
         #[arg(long)]
         drift_type: Option<String>,
     },
+
+    /// Invalidate, synchronize, and pre-warm BLAKE3 query and embedding caches
+    Recache {
+        /// Force full eviction of all cached query and embedding entries instead of soft epoch increment
+        #[arg(short, long, default_value_t = false)]
+        clear: bool,
+
+        /// Pre-warm hot query embeddings and high-frequency document chunks from persistent index
+        #[arg(short, long, default_value_t = false)]
+        warm: bool,
+    },
 }

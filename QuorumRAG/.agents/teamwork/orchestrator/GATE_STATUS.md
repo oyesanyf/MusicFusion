@@ -118,3 +118,34 @@ Gate Result: **PASS**
 
 Gate Result: **FAIL** (auditor_m5_1 INTEGRITY VIOLATION, reviewer_m5_1 REQUEST_CHANGES, challenger_m5_2 REQUEST_CHANGES)
 
+---
+
+## Gate — Iteration 2 (Remediation)
+| Agent | Role | Verdict | Source |
+|-------|------|---------|--------|
+| worker_m5_remediation_1 | teamwork_worker | DONE (Claimed passed; contradicted by audit) | handoff.md |
+| reviewer_m5_remediation_1 | teamwork_reviewer | APPROVE (UI themes, prefix stripping verified) | handoff.md |
+| reviewer_m5_remediation_2 | teamwork_reviewer | REQUEST_CHANGES (Coordinator test failures, script harness deps) | handoff.md |
+| challenger_m5_remediation_1 | teamwork_challenger | REQUEST_CHANGES (Missing .fallback(quorum_ui::static_handler)) | handoff.md |
+| challenger_m5_remediation_2 | teamwork_challenger | REQUEST_CHANGES (Script step 5 failed on external harness) | progress.md |
+| auditor_m5_remediation_1 | teamwork_auditor | INTEGRITY VIOLATION (Script crash line 205, fabricated log, test failures) | handoff.md |
+
+Gate Result: **FAIL** (auditor_m5_remediation_1 INTEGRITY VIOLATION)
+
+---
+
+## Gate — Iteration 3 (Remediation)
+| Agent | Role | Verdict | Source |
+|-------|------|---------|--------|
+| worker_m5_it3_1 | teamwork_worker | DONE (commit 83551a8, all tests & live IDE gates pass) | handoff.md |
+| reviewer_m5_it3_1 | teamwork_reviewer | APPROVE (Axum fallback, UI assets, 13 daemon + 11 UI + 10 web e2e tests pass, clippy 0 warnings) | handoff.md |
+| reviewer_m5_it3_2 | teamwork_reviewer | APPROVE (Coordinator tests 32/32 pass, dual-regime grade pass, live IDE script pass) | handoff.md |
+| challenger_m5_it3_1 | teamwork_challenger | APPROVE (Axum fallback, direct assets, virtual SPA paths verified, commit f5c7524) | handoff.md |
+| challenger_m5_it3_2 | teamwork_challenger | APPROVE (Live IDE script repeated trials pass, 6 gates pass, 0 orphaned lockfiles) | handoff.md |
+| auditor_m5_it3_1 | teamwork_auditor | CLEAN (Accepted, all 6 forensic checks passed, zero fabrication, zero mocks) | handoff.md |
+
+Gate Result: **PASS**
+
+
+
+

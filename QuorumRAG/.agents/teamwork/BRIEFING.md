@@ -40,14 +40,15 @@ Orchestrate execution of QuorumRAG: a local-first peer-to-peer retrieval-augment
 - LangExtract Two-Loop Architecture: (1) Ingestion-Time Preprocessor with 100% `char_interval` grounding gate (filtering ungrounded hallucinations where `char_interval` is None) storing grounded entities/attributes in LanceDB + Tantivy, and (2) Query-Time Decomposition in `ClassifyIntent` -> `RetrieveMesh` scalar/lexical prefiltering alongside `embeddinggemma-300m` dense vectors
 - `LlmFusionConsensus` Multi-Arm Architecture (adapted from `breakout_defense.rs` lines 3440–3697): Arm 1 SemanticSpanExtractor, Arm 2 SyntacticAstVerifier, Arm 3 CounterfactualJudge, and Arm 4 LangGraph calibration evaluating `confidence_bp` across local GLM-4-9B, Qwen 2.5, Gemma 3 setup
 - Live IDE Execution & Production Code Generation Gate: Once compiled in Milestone 5, start `quorumrag.exe` live in IDE against workspace, execute live coding query generating compilable production code with exact `[Peer:File:Lines]` citations & grounded `char_interval` spans, and auto-open ChatGPT Web UI in browser
+- First-Class Caching & Re-Cache (`recache`): Multi-layer BLAKE3 QueryCache & EmbeddingCache, cache hit telemetry (`/api/chat`, `/api/query`, `/api/health`, `GET /api/cache/stats`), CLI `quorumrag recache [--clear] [--warm]`, REST `POST /api/cache/recache`, automatic cache coherence on reindex/fix-drift/watcher, and ChatGPT Web UI "Re-Cache" button & live stats indicator
 
 ## User Context
-- **Last user request**: Run compiled `quorumrag.exe` live in IDE, verify it generates production code with citations & grounded spans, and auto-open ChatGPT Web UI in browser.
+- **Last user request**: "the code needs to have caching and re cache" (Multi-layer BLAKE3 QueryCache/EmbeddingCache, recache CLI, /api/cache/recache & /api/cache/stats endpoints, automatic cache coherence, and Web UI Re-Cache button & live stats)
 - **Pending clarifications**: none
 - **Delivered results**: none
 
 ## Project Status
-- **Phase**: in progress (Milestone 4 DONE; Milestone 5 Remediation: scripts/verify_live_ide_execution.ps1 executed live: 34 files & 528 chunks indexed with 0 Tantivy errors, fusion.rs:1-12 cited, RrfCombiner code block extracted; worker_m5_remediation_1 concluding verification)
+- **Phase**: in progress (Milestones 1–5 DONE; Milestone 5.5 Caching & Re-Cache Subsystem in active implementation: worker_m5_5_1 dispatched across coordinator, storage, ingest, daemon, and UI crates)
 - **Route**: General path (`teamwork_orchestrator`)
 - **Active Orchestrator**: e13403c5-b0e6-48a4-a1ec-a1f096f9f53e
 

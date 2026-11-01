@@ -38,11 +38,21 @@ pub async fn health_handler(
         "Tier 3: CPU Quantized / Deterministic Offline Engine"
     };
 
+    let cache_stats = state.coordinator.cache_stats();
+
     Json(serde_json::json!({
         "status": "healthy",
         "version": "0.1.0",
         "contract_hash": contract_hash,
         "uptime_secs": uptime_secs,
+        "cache": {
+            "cache_epoch": cache_stats.cache_epoch,
+            "cached_queries": cache_stats.cached_queries,
+            "cached_embeddings": cache_stats.cached_embeddings,
+            "hits": cache_stats.hits,
+            "misses": cache_stats.misses,
+            "hit_rate": cache_stats.hit_rate,
+        },
         "storage": {
             "total_chunks": total_chunks,
             "data_dir": state.data_dir.to_string_lossy(),

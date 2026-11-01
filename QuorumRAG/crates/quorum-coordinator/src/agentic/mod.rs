@@ -14,10 +14,13 @@ use retrieve::RetrieveMeshNode;
 use rewrite::RewriteQueryNode;
 use synthesize::SynthesizeWithCitationsNode;
 use tokio::sync::mpsc::Sender;
+use std::sync::Arc;
+use crate::cache::CacheManager;
 
 pub struct AgenticStateGraphRunner {
     pub max_hops: usize,
     pub relevance_threshold: f32,
+    pub cache_manager: Arc<CacheManager>,
 }
 
 impl Default for AgenticStateGraphRunner {
@@ -25,6 +28,7 @@ impl Default for AgenticStateGraphRunner {
         Self {
             max_hops: 3,
             relevance_threshold: 0.60,
+            cache_manager: Arc::new(CacheManager::default()),
         }
     }
 }
@@ -34,7 +38,13 @@ impl AgenticStateGraphRunner {
         Self {
             max_hops,
             relevance_threshold,
+            cache_manager: Arc::new(CacheManager::default()),
         }
+    }
+
+    pub fn with_cache_manager(mut self, cache_manager: Arc<CacheManager>) -> Self {
+        self.cache_manager = cache_manager;
+        self
     }
 
     /// Executes the LangGraph-style state graph with live SSE telemetry and mathematical termination guarantee.
@@ -75,6 +85,71 @@ impl AgenticStateGraphRunner {
             match state_name {
                 AgenticStateName::ClassifyIntent => {
                     ClassifyIntentNode::execute(&mut graph_state, &hw);
+
+                    let epoch = engine.local_storage.index_epoch();
+                    let maybe_cached = self.cache_manager.query_cache.get(
+                        &graph_state.original_prompt,
+                        graph_state.search_mode,
+                        graph_state.model_family,
+                        access_tier,
+                        epoch,
+                    );
+
+                    let cache_hit = maybe_cached.is_some();
+                    let telem = self.cache_manager.telemetry(cache_hit);
+
+                    if let Some(ref tx) = telemetry_tx {
+                        let _ = tx
+                            .send(AgenticTelemetryEvent::CacheTelemetry {
+                                cache_hit,
+                                cache_epoch: telem.cache_epoch,
+                                cached_queries: telem.cached_queries,
+                                cached_embeddings: telem.cached_embeddings,
+                                hits: telem.hits,
+                                misses: telem.misses,
+                                hit_rate: telem.hit_rate,
+                            })
+                            .await;
+                    }
+
+                    if let Some(cached) = maybe_cached {
+                        // FAST PATH: Short-circuit entire retrieval, grading, rewrite, and synthesis!
+                        graph_state.retrieved_chunks = cached.chunks.clone();
+                        graph_state.synthesized_response = cached.synthesized_response.clone();
+                        graph_state.citations = cached.citations.clone();
+                        graph_state.query_metadata_filters = cached.query_metadata_filters.clone();
+
+                        if let Some(ref tx) = telemetry_tx {
+                            for cit in &graph_state.citations {
+                                let _ = tx.send(AgenticTelemetryEvent::CitationEmitted { citation: cit.clone() }).await;
+                            }
+
+                            let _ = tx
+                                .send(AgenticTelemetryEvent::StateTransition {
+                                    from_state: AgenticStateName::ClassifyIntent,
+                                    to_state: AgenticStateName::Complete,
+                                    hop: 0,
+                                    timestamp_ms: graph_state.start_time.elapsed().as_millis() as u64,
+                                })
+                                .await;
+
+                            let _ = tx
+                                .send(AgenticTelemetryEvent::ExecutionFinished {
+                                    total_hops: 0,
+                                    total_duration_ms: graph_state.start_time.elapsed().as_millis() as u64,
+                                    total_tokens: graph_state
+                                        .synthesized_response
+                                        .as_ref()
+                                        .map(|s| s.len() / 4)
+                                        .unwrap_or(0),
+                                    final_state: AgenticStateName::Complete,
+                                    model_name: graph_state.selected_model_tag.clone(),
+                                })
+                                .await;
+                        }
+
+                        return Ok(graph_state);
+                    }
 
                     if let Some(ref tx) = telemetry_tx {
                         let _ = tx
@@ -226,6 +301,25 @@ impl AgenticStateGraphRunner {
                     }
 
                     SynthesizeWithCitationsNode::execute(&mut graph_state);
+
+                    // Insert into QueryCache
+                    let epoch = engine.local_storage.index_epoch();
+                    self.cache_manager.query_cache.insert(
+                        &graph_state.original_prompt,
+                        graph_state.search_mode,
+                        graph_state.model_family,
+                        access_tier,
+                        epoch,
+                        graph_state.retrieved_chunks.clone(),
+                        crate::offline_engine::DeterministicOfflineSynthesisEngine::build_synthesis_prompt(
+                            &graph_state.original_prompt,
+                            &graph_state.retrieved_chunks,
+                        ),
+                        graph_state.synthesized_response.clone(),
+                        graph_state.citations.clone(),
+                        None,
+                        graph_state.query_metadata_filters.clone(),
+                    );
 
                     if let Some(ref tx) = telemetry_tx {
                         for cit in &graph_state.citations {

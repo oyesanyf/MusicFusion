@@ -324,3 +324,43 @@ async fn test_storage_compaction_and_lifecycle() {
     let stats: CompactionStats = engine.compact().await.unwrap();
     assert!(stats.tantivy_segments_merged);
 }
+
+#[tokio::test]
+async fn test_storage_index_epoch_persistence_and_atomic_bump() {
+    let tmp = tempdir().unwrap();
+    let config = StorageConfig::new(tmp.path());
+    let meta_file = config.metadata_path();
+
+    // 1. Initial open creates .metadata.json with epoch = 1
+    {
+        let engine = StorageEngine::open(config.clone()).await.unwrap();
+        assert_eq!(engine.index_epoch(), 1);
+        assert!(meta_file.exists());
+
+        let new_epoch = engine.bump_index_epoch("test_first_bump").unwrap();
+        assert_eq!(new_epoch, 2);
+        assert_eq!(engine.index_epoch(), 2);
+
+        let meta = engine.metadata();
+        assert_eq!(meta.index_epoch, 2);
+        assert_eq!(meta.last_bump_reason, "test_first_bump");
+        assert_eq!(meta.mutation_count, 1);
+    }
+
+    // 2. Re-opening existing directory loads persisted index_epoch = 2
+    {
+        let engine = StorageEngine::open(config.clone()).await.unwrap();
+        assert_eq!(engine.index_epoch(), 2);
+
+        engine.set_index_epoch(10, "explicit_reset").unwrap();
+        assert_eq!(engine.index_epoch(), 10);
+    }
+
+    // 3. Confirm 10 persisted
+    {
+        let engine = StorageEngine::open(config).await.unwrap();
+        assert_eq!(engine.index_epoch(), 10);
+        let meta = engine.metadata();
+        assert_eq!(meta.last_bump_reason, "explicit_reset");
+    }
+}

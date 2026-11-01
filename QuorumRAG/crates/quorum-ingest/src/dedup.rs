@@ -259,6 +259,11 @@ impl Level2ChunkCache {
         }
     }
 
+    /// Check if chunk vector is present without counting as hit/miss.
+    pub fn has_chunk(&self, chunk_blake3: &str) -> bool {
+        self.inner.read().map(|i| i.map.contains_key(chunk_blake3)).unwrap_or(false)
+    }
+
     /// Retrieve cached embedding vector if present.
     pub fn get(&self, chunk_blake3: &str) -> Option<Vec<f32>> {
         let mut inner = self.inner.write().ok()?;

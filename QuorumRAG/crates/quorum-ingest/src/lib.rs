@@ -12,6 +12,7 @@ pub mod engine;
 pub mod error;
 pub mod image_indexer;
 pub mod reindex;
+pub mod warmer;
 pub mod watcher;
 
 // Re-exports
@@ -28,4 +29,5 @@ pub use engine::IngestEngine;
 pub use error::IngestError;
 pub use image_indexer::{ImageIndexer, ImageMetadata};
 pub use reindex::{ReindexPhase, ReindexProgress, ReindexWorker};
+pub use warmer::{CacheWarmReport, CacheWarmer, WarmConfig};
 pub use watcher::{FilesystemWatcher, WatcherEvent, WatcherHandle};

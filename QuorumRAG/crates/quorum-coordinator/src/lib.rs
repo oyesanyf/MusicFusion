@@ -1,5 +1,6 @@
 pub mod acl;
 pub mod agentic;
+pub mod cache;
 pub mod config;
 pub mod coordinator;
 pub mod crypto;
@@ -17,6 +18,10 @@ pub mod volatile;
 
 pub use acl::{AccessTierPolicy, PeerAclManager};
 pub use agentic::AgenticStateGraphRunner;
+pub use cache::{
+    derive_embedding_cache_key, derive_query_cache_key, normalize_text_for_caching,
+    CachedQueryEntry, CacheManager, EmbeddingCache, QueryCache,
+};
 pub use config::CoordinatorConfig;
 pub use coordinator::QueryCoordinator;
 pub use crypto::{

@@ -20,10 +20,11 @@ Build QuorumRAG: a production-grade local-first peer-to-peer retrieval-augmented
    - Milestone 2: LanceDB Storage & Tantivy FTS with Arrow Isolation [DONE].
    - Milestone 3: Filesystem Ingestion, OS Watcher, Image Indexing & Drift Healer [DONE].
    - Milestone 4: rust-libp2p Swarm, Coordinator, Agentic State Graph, Fusion GLM & LangExtract Grounding [DONE].
-   - Milestone 5: ChatGPT Web Interface, Single Executable, Reindex/Drift Triggers, LangExtract Visualizer, Live IDE Run & Code Generation [IN_PROGRESS].
+   - Milestone 5: ChatGPT Web Interface, Single Executable, Reindex/Drift Triggers, LangExtract Visualizer, Live IDE Run & Code Generation [DONE].
+   - Milestone 5.5: Multi-Layer Caching & Re-Cache Subsystem (recache) [IN_PROGRESS].
    - Milestone 6: Final Acceptance & Adversarial Hardening [pending].
 3. **On failure**: Retry -> Replace -> Skip -> Redistribute -> Redesign.
-4. **Succession**: Evaluated; spawn count 15 / 16.
+4. **Succession**: Evaluated; spawn count 25 / 128.
 - **Work items**:
   1. Survey phase [done]
   2. Decomposition & PROJECT.md [done]
@@ -32,10 +33,11 @@ Build QuorumRAG: a production-grade local-first peer-to-peer retrieval-augmented
   5. Milestone 2: LanceDB Storage & Tantivy FTS with Arrow Isolation [done]
   6. Milestone 3: Filesystem Ingestion & Two-Level BLAKE3 Dedup [done]
   7. Milestone 4: rust-libp2p Swarm, Coordinator, Agentic State Graph & LangExtract Grounding [done]
-  8. Milestone 5: ChatGPT Web Interface, Synthesis, Single Executable, Reindex/Drift Triggers, LangExtract Visualizer & Live IDE Execution [in-progress]
-  9. Milestone 6: Final Acceptance 100% E2E Pass & Adversarial Hardening [pending]
-- **Current phase**: Milestone 5 Execution (ChatGPT Web UI, Single Executable, Live IDE Run & Code Generation Gate)
-- **Current focus**: Milestone 5 Exploration & Implementation
+  8. Milestone 5: ChatGPT Web Interface, Synthesis, Single Executable, Reindex/Drift Triggers, LangExtract Visualizer & Live IDE Execution [done]
+  9. Milestone 5.5: Multi-Layer Caching & Re-Cache Subsystem (recache) [in-progress]
+  10. Milestone 6: Final Acceptance 100% E2E Pass & Adversarial Hardening [pending]
+- **Current phase**: Milestone 5.5 Execution (Multi-Layer Caching & Re-Cache Subsystem `recache`)
+- **Current focus**: Milestone 5.5 Worker Implementation
 
 ## 🔒 Key Constraints
 - NEVER write, modify, or create source code files directly.
@@ -70,18 +72,36 @@ Build QuorumRAG: a production-grade local-first peer-to-peer retrieval-augmented
 | challenger_m5_2 | teamwork_challenger | Milestone 5 Live IDE & Production Code Generation Challenger | completed | 793e128a-b1f3-4ec7-976d-97189bd08699 |
 | auditor_m5_1 | teamwork_auditor | Milestone 5 Forensic Integrity Auditor | completed | 9610be90-9554-43da-8cc0-b018038f74c6 |
 | explorer_m5_remediation_1 | teamwork_explorer | Milestone 5 Remediation Explorer (Tantivy Writer, Code Synthesis, Script Hardening, Static Handler) | completed | bbd0361e-e85d-4321-afc0-39071ba6c1fc |
-| worker_m5_remediation_1 | teamwork_worker | Milestone 5 Remediation Implementation Worker (Tantivy Resilience, Code Synthesis, Script Hardening, Assets Prefix) | in-progress | e7d33af4-22a0-45be-8a1f-25e1884a3ca8 |
+| worker_m5_remediation_1 | teamwork_worker | Milestone 5 Remediation Implementation Worker (Tantivy Resilience, Code Synthesis, Script Hardening, Assets Prefix) | completed | e7d33af4-22a0-45be-8a1f-25e1884a3ca8 |
+| reviewer_m5_remediation_1 | teamwork_reviewer | Milestone 5 UI Remediation Reviewer | completed | 8bbf1a23-d6e9-449b-be4b-f9e562c54692 |
+| reviewer_m5_remediation_2 | teamwork_reviewer | Milestone 5 Daemon & Storage Remediation Reviewer | completed | e86bd54a-5a31-4345-b766-486f4b12d96a |
+| challenger_m5_remediation_1 | teamwork_challenger | Milestone 5 Web Endpoints Challenger | completed | 8d2358b0-0f03-4eec-a9fd-f7886a356eeb |
+| challenger_m5_remediation_2 | teamwork_challenger | Milestone 5 Live IDE Gate Challenger | completed | 47ce8d43-62ae-4e03-a712-519e9a5851f8 |
+| auditor_m5_remediation_1 | teamwork_auditor | Milestone 5 Forensic Integrity Auditor | completed | 30268dc2-e5c9-440d-a36b-66884d0f7c36 |
+| explorer_m5_it3_1 | teamwork_explorer | Milestone 5 Daemon Fallback Routes Explorer | completed | 18361902-e8da-4e40-b3ed-ff42ee5ad620 |
+| explorer_m5_it3_2 | teamwork_explorer | Milestone 5 Agentic Grader Convergence Explorer | completed | e528277d-7ee3-4d7b-a05f-505080fe2196 |
+| explorer_m5_it3_3 | teamwork_explorer | Milestone 5 Live IDE Script & Verification Harness Explorer | completed | 5d9b0f84-3f36-47cd-9a2f-303bb177b842 |
+| worker_m5_it3_1 | teamwork_worker | Milestone 5 Iteration 3 Remediation Worker | completed | fef211f3-e848-42f8-94f3-2695ab8b52cb |
+| reviewer_m5_it3_1 | teamwork_reviewer | Milestone 5 Iteration 3 UI & Daemon Web Routes Reviewer | completed | a89c5a41-1e43-4eda-9ad4-31ee357a501f |
+| reviewer_m5_it3_2 | teamwork_reviewer | Milestone 5 Iteration 3 Coordinator & Live IDE Reviewer | completed | 374e68fc-9334-4178-93a5-ae235fbdcda8 |
+| challenger_m5_it3_1 | teamwork_challenger | Milestone 5 Iteration 3 Web Routes Challenger | completed | 69e530a2-9a51-4a40-a163-99e8b068ebc9 |
+| challenger_m5_it3_2 | teamwork_challenger | Milestone 5 Iteration 3 Live IDE Execution Challenger | completed | b263dd6d-51e0-44cc-ab4c-2a1d065ea2dc |
+| auditor_m5_it3_1 | teamwork_auditor | Milestone 5 Iteration 3 Forensic Integrity Auditor | completed | e9003f74-6e88-455f-87e1-a48c27c01f74 |
+| explorer_m5_5_1 | teamwork_explorer | Milestone 5.5 Coordinator Caching Engine Explorer | completed | 2ddf4d68-fb88-4d4e-9acc-9544cd071ce4 |
+| explorer_m5_5_2 | teamwork_explorer | Milestone 5.5 Storage Ingestion & Cache Coherence Explorer | completed | 257e0ff4-ce13-4057-b145-591ec5d5c798 |
+| explorer_m5_5_3 | teamwork_explorer | Milestone 5.5 CLI, REST API & Web UI Re-Cache Explorer | completed | 13aaa487-191d-41e7-8bf0-de08c42091bc |
+| worker_m5_5_1 | teamwork_worker | Milestone 5.5 Caching & Re-Cache Implementation Worker | in-progress | d14fbdf7-bec4-4c04-a05e-63042bf39140 |
 
 ## Succession Status
 - Succession required: no (Gen 5 active)
-- Spawn count: 11 / 16 (Milestone 5)
-- Pending subagents: worker_m5_remediation_1
+- Spawn count: 29 / 128
+- Pending subagents: d14fbdf7-bec4-4c04-a05e-63042bf39140
 - Predecessor: Gen 4
 - Successor: none
 
 ## Active Timers
 - Heartbeat cron: e13403c5-b0e6-48a4-a1ec-a1f096f9f53e/task-1170
-- Safety timer: e13403c5-b0e6-48a4-a1ec-a1f096f9f53e/task-3772
+- Safety timer: e13403c5-b0e6-48a4-a1ec-a1f096f9f53e/task-4681
 
 ## Artifact Index
 - d:\harfile\QuorumRAG\PROJECT.md — Global architecture, feature inventory, milestones, contracts, layout

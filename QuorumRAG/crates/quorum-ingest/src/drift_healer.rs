@@ -174,6 +174,10 @@ impl DriftHealer {
             "Drift healing scan and remediation finished"
         );
 
+        if !options.dry_run && report.total_anomalies_healed > 0 {
+            let _ = self.storage.bump_index_epoch("drift_healer_remediated");
+        }
+
         Ok(report)
     }
 

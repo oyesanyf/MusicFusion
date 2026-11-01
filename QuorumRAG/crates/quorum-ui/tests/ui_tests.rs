@@ -84,3 +84,19 @@ async fn test_static_handler_routes() {
     let resp = static_handler(Uri::from_static("/chat/conversation/123")).await;
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
 }
+
+#[test]
+fn test_recache_ui_elements_and_styling() {
+    let html = get_index_html();
+    assert!(html.contains("btn-open-recache"), "index.html must contain btn-open-recache");
+    assert!(html.contains("btn-quick-recache"), "index.html must contain btn-quick-recache");
+    assert!(html.contains("cache-stats-badge"), "index.html must contain cache-stats-badge");
+    assert!(html.contains("modal-recache"), "index.html must contain modal-recache");
+    assert!(html.contains("btn-execute-recache"), "index.html must contain btn-execute-recache");
+
+    let (css_bytes, _) = get_asset("styles.css").expect("styles.css must exist");
+    let css = String::from_utf8_lossy(&css_bytes);
+    assert!(css.contains(".btn-recache-header"), "styles.css must style .btn-recache-header");
+    assert!(css.contains(".cache-badge"), "styles.css must style .cache-badge");
+    assert!(css.contains(".cache-hit-pill"), "styles.css must style .cache-hit-pill");
+}

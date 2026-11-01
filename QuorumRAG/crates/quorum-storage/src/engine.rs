@@ -5,8 +5,11 @@
 //! Callers interact solely with pure domain types (`DocumentChunk`, `ScoredChunk`, `StorageError`).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+use parking_lot::Mutex;
 use quorum_types::{DocumentChunk, ScoredChunk};
 use serde::{Deserialize, Serialize};
 
@@ -89,11 +92,37 @@ pub struct CompactionStats {
     pub tantivy_segments_merged: bool,
 }
 
+/// Persistent storage metadata for cache coherence and index synchronization.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StorageMetadata {
+    /// Monotonically increasing epoch counter for cache coherence.
+    pub index_epoch: u64,
+    /// UTC timestamp of the last epoch modification.
+    pub last_epoch_bump_utc: DateTime<Utc>,
+    /// Source of the last bump ("init", "reindex", "drift_healer", "watcher", "recache").
+    pub last_bump_reason: String,
+    /// Cumulative count of write/delete transactions committed.
+    pub mutation_count: u64,
+}
+
+impl Default for StorageMetadata {
+    fn default() -> Self {
+        Self {
+            index_epoch: 1,
+            last_epoch_bump_utc: Utc::now(),
+            last_bump_reason: "init".to_string(),
+            mutation_count: 0,
+        }
+    }
+}
+
 /// Production-grade embedded storage engine for QuorumRAG.
 pub struct StorageEngine {
     config: StorageConfig,
     vector_store: Arc<VectorStore>,
     fts_index: Arc<TantivyFtsIndex>,
+    index_epoch: Arc<AtomicU64>,
+    metadata_lock: Arc<Mutex<StorageMetadata>>,
 }
 
 impl StorageEngine {
@@ -103,11 +132,111 @@ impl StorageEngine {
         let vector_store = Arc::new(VectorStore::open(&cfg).await?);
         let fts_index = Arc::new(TantivyFtsIndex::open(&cfg.tantivy_path())?);
 
+        // Load or initialize metadata
+        let meta_path = cfg.metadata_path();
+        let metadata = if meta_path.exists() {
+            match std::fs::read_to_string(&meta_path) {
+                Ok(content) => serde_json::from_str::<StorageMetadata>(&content).unwrap_or_default(),
+                Err(_) => StorageMetadata::default(),
+            }
+        } else {
+            let default_meta = StorageMetadata::default();
+            let _ = std::fs::create_dir_all(&cfg.storage_path);
+            if let Ok(content) = serde_json::to_string_pretty(&default_meta) {
+                let _ = std::fs::write(&meta_path, content);
+            }
+            default_meta
+        };
+
+        let index_epoch = Arc::new(AtomicU64::new(metadata.index_epoch));
+        let metadata_lock = Arc::new(Mutex::new(metadata));
+
         Ok(Self {
             config: cfg,
             vector_store,
             fts_index,
+            index_epoch,
+            metadata_lock,
         })
+    }
+
+    /// Returns the active index epoch for deterministic query cache key derivation.
+    /// Fast lock-free atomic load: ~10ns.
+    #[inline]
+    pub fn index_epoch(&self) -> u64 {
+        self.index_epoch.load(Ordering::Acquire)
+    }
+
+    /// Atomically increments the index epoch, persists metadata to disk, and returns the new epoch.
+    pub fn bump_index_epoch(&self, reason: &str) -> Result<u64, StorageError> {
+        let mut meta = self.metadata_lock.lock();
+        let new_epoch = self.index_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+        meta.index_epoch = new_epoch;
+        meta.last_epoch_bump_utc = chrono::Utc::now();
+        meta.last_bump_reason = reason.to_string();
+        meta.mutation_count = meta.mutation_count.saturating_add(1);
+
+        self.persist_metadata(&meta)?;
+
+        tracing::info!(
+            epoch = new_epoch,
+            reason = reason,
+            "Storage index_epoch incremented"
+        );
+
+        Ok(new_epoch)
+    }
+
+    /// Explicitly resets or sets the index epoch (used during recache with clear).
+    pub fn set_index_epoch(&self, epoch: u64, reason: &str) -> Result<u64, StorageError> {
+        let mut meta = self.metadata_lock.lock();
+        self.index_epoch.store(epoch, Ordering::SeqCst);
+        meta.index_epoch = epoch;
+        meta.last_epoch_bump_utc = chrono::Utc::now();
+        meta.last_bump_reason = reason.to_string();
+
+        self.persist_metadata(&meta)?;
+
+        tracing::info!(
+            epoch = epoch,
+            reason = reason,
+            "Storage index_epoch explicitly set"
+        );
+
+        Ok(epoch)
+    }
+
+    /// Returns current storage metadata snapshot.
+    pub fn metadata(&self) -> StorageMetadata {
+        self.metadata_lock.lock().clone()
+    }
+
+    /// Atomically writes metadata using atomic replace semantics.
+    fn persist_metadata(&self, meta: &StorageMetadata) -> Result<(), StorageError> {
+        let path = self.config.metadata_path();
+        let tmp_path = path.with_extension("tmp");
+
+        let content = serde_json::to_string_pretty(meta).map_err(|e| {
+            StorageError::Io {
+                path: path.clone(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+            }
+        })?;
+
+        std::fs::write(&tmp_path, content).map_err(|e| StorageError::Io {
+            path: tmp_path.clone(),
+            source: e,
+        })?;
+
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+        }
+        std::fs::rename(&tmp_path, &path).map_err(|e| StorageError::Io {
+            path: path.clone(),
+            source: e,
+        })?;
+
+        Ok(())
     }
 
     /// Inserts document chunks with automatic Level-2 BLAKE3 deduplication.
@@ -305,6 +434,16 @@ impl StorageEngine {
     /// Returns all chunks stored in LanceDB.
     pub async fn scan_all_chunks(&self) -> Result<Vec<DocumentChunk>, StorageError> {
         self.vector_store.scan_all_chunks().await
+    }
+
+    /// Returns up to `limit` chunks stored in LanceDB.
+    pub async fn get_all_chunks(&self, limit: usize) -> Result<Vec<DocumentChunk>, StorageError> {
+        let chunks = self.vector_store.scan_all_chunks().await?;
+        if chunks.len() > limit {
+            Ok(chunks.into_iter().take(limit).collect())
+        } else {
+            Ok(chunks)
+        }
     }
 
     /// Returns a map of `chunk_id -> blake3_hash` for all chunks in LanceDB.

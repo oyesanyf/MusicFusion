@@ -43,6 +43,20 @@
   const driftResultsBox = document.getElementById('drift-results-box');
   const driftReportBody = document.getElementById('drift-report-body');
 
+  // Cache DOM Elements
+  const btnQuickRecache = document.getElementById('btn-quick-recache');
+  const cacheStatsBadge = document.getElementById('cache-stats-badge');
+  const cacheBadgeText = document.getElementById('cache-badge-text');
+  const btnOpenRecache = document.getElementById('btn-open-recache');
+  const btnCloseRecache = document.getElementById('btn-close-recache');
+  const modalRecache = document.getElementById('modal-recache');
+  const btnExecuteRecache = document.getElementById('btn-execute-recache');
+  const recacheClear = document.getElementById('recache-clear');
+  const recacheWarm = document.getElementById('recache-warm');
+  const cacheStatusPill = document.getElementById('cache-status-pill');
+  const recacheResultBox = document.getElementById('recache-result-box');
+  const recacheResultText = document.getElementById('recache-result-text');
+
   // 1. THEME SWITCHER
   themeSelector.addEventListener('change', (e) => {
     document.body.className = e.target.value;
@@ -155,7 +169,7 @@
     promptInput.style.height = 'auto';
 
     // Create Assistant Message with typing cursor
-    const { msgEl, bodyEl, citationsEl } = createAssistantMessage();
+    const { msgEl, bodyEl, citationsEl, headerEl } = createAssistantMessage();
 
     try {
       const resp = await fetch('/api/chat', {
@@ -196,7 +210,7 @@
             if (jsonStr) {
               try {
                 const event = JSON.parse(jsonStr);
-                handleTelemetryEvent(event, bodyEl, citationsEl);
+                handleTelemetryEvent(event, bodyEl, citationsEl, headerEl);
               } catch (err) {
                 console.error('Failed to parse SSE event:', jsonStr, err);
               }
@@ -216,10 +230,21 @@
     }
   }
 
-  function handleTelemetryEvent(event, bodyEl, citationsEl) {
+  function handleTelemetryEvent(event, bodyEl, citationsEl, headerEl) {
     const type = event.type || event.event;
 
-    if (type === 'StateTransition') {
+    if (type === 'cache_telemetry' || type === 'CacheTelemetry') {
+      const data = event.data || event;
+      if (data.cache_hit) {
+        if (headerEl && !headerEl.querySelector('.cache-hit-pill')) {
+          const cachePill = document.createElement('span');
+          cachePill.className = 'cache-hit-pill';
+          cachePill.textContent = `⚡ Cache Hit (Epoch ${data.cache_epoch})`;
+          headerEl.appendChild(cachePill);
+        }
+      }
+      refreshCacheStats();
+    } else if (type === 'StateTransition') {
       const fromState = event.from_state;
       const toState = event.to_state;
       updateTelemetryStep(toState);
@@ -349,7 +374,7 @@
     chatStream.appendChild(msgDiv);
     scrollToBottom();
 
-    return { msgEl: msgDiv, bodyEl: body, citationsEl: citations };
+    return { msgEl: msgDiv, bodyEl: body, citationsEl: citations, headerEl: header };
   }
 
   function scrollToBottom() {
@@ -489,5 +514,108 @@
       btnRunDrift.textContent = 'Run Drift Remediation';
     }
   });
+
+  // 12. CACHE & RE-CACHE LOGIC
+  async function refreshCacheStats() {
+    try {
+      const resp = await fetch('/api/cache/stats');
+      if (!resp.ok) return;
+      const data = await resp.json();
+
+      const pct = (data.hit_rate * 100).toFixed(1);
+      if (cacheBadgeText) {
+        cacheBadgeText.textContent = `Cache: ${pct}% (${data.hits} hits)`;
+      }
+      if (cacheStatusPill) {
+        cacheStatusPill.textContent = `${data.hits} hits`;
+        cacheStatusPill.className = data.hits > 0 ? 'status-pill healthy' : 'status-pill idle';
+      }
+
+      const epochEl = document.getElementById('recache-epoch-val');
+      const hitsEl = document.getElementById('recache-hits-val');
+      const missesEl = document.getElementById('recache-misses-val');
+      const rateEl = document.getElementById('recache-hitrate-val');
+      const qEl = document.getElementById('recache-queries-val');
+      const eEl = document.getElementById('recache-embeddings-val');
+
+      if (epochEl) epochEl.textContent = data.cache_epoch;
+      if (hitsEl) hitsEl.textContent = data.hits;
+      if (missesEl) missesEl.textContent = data.misses;
+      if (rateEl) rateEl.textContent = `${pct}%`;
+      if (qEl) qEl.textContent = data.cached_queries;
+      if (eEl) eEl.textContent = data.cached_embeddings;
+    } catch (_) {}
+  }
+
+  // Poll cache stats on load and every 10 seconds
+  refreshCacheStats();
+  setInterval(refreshCacheStats, 10000);
+
+  // Quick Re-Cache from Top Header
+  if (btnQuickRecache) {
+    btnQuickRecache.addEventListener('click', async () => {
+      btnQuickRecache.classList.add('loading');
+      btnQuickRecache.innerHTML = `<span class="icon">⏳</span> <span>Re-Caching...</span>`;
+      try {
+        await fetch('/api/cache/recache', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clear: false, warm: true })
+        });
+        await refreshCacheStats();
+        btnQuickRecache.innerHTML = `<span class="icon">✓</span> <span>Re-Cached!</span>`;
+        setTimeout(() => {
+          btnQuickRecache.innerHTML = `<span class="icon">⚡</span> <span>Re-Cache</span>`;
+          btnQuickRecache.classList.remove('loading');
+        }, 1500);
+      } catch (err) {
+        btnQuickRecache.innerHTML = `<span class="icon">⚠️</span> <span>Error</span>`;
+        setTimeout(() => {
+          btnQuickRecache.innerHTML = `<span class="icon">⚡</span> <span>Re-Cache</span>`;
+          btnQuickRecache.classList.remove('loading');
+        }, 2000);
+      }
+    });
+  }
+
+  // Modal Open/Close
+  if (btnOpenRecache) {
+    btnOpenRecache.addEventListener('click', () => {
+      modalRecache.classList.remove('hidden');
+      refreshCacheStats();
+    });
+  }
+  if (btnCloseRecache) {
+    btnCloseRecache.addEventListener('click', () => modalRecache.classList.add('hidden'));
+  }
+
+  // Modal Execute Re-Cache
+  if (btnExecuteRecache) {
+    btnExecuteRecache.addEventListener('click', async () => {
+      btnExecuteRecache.disabled = true;
+      btnExecuteRecache.textContent = 'Executing...';
+      recacheResultBox.classList.remove('hidden');
+      recacheResultText.textContent = 'Purging stale entries and pre-warming...';
+
+      try {
+        const resp = await fetch('/api/cache/recache', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clear: recacheClear.checked,
+            warm: recacheWarm.checked
+          })
+        });
+        const result = await resp.json();
+        recacheResultText.innerHTML = `<strong>Success:</strong> Cache Epoch bumped to <strong>${result.cache_epoch}</strong>. Cleared ${result.cleared_entries} entries, pre-warmed ${result.warmed_entries} entries in ${result.duration_ms}ms.`;
+        await refreshCacheStats();
+      } catch (e) {
+        recacheResultText.innerHTML = `<span style="color:var(--danger)">Error: ${e.message}</span>`;
+      } finally {
+        btnExecuteRecache.disabled = false;
+        btnExecuteRecache.textContent = 'Execute Re-Cache';
+      }
+    });
+  }
 
 })();

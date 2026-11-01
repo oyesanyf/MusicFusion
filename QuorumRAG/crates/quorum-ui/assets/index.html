@@ -59,6 +59,11 @@
           <span>Drift Remediation</span>
           <span id="drift-status-pill" class="status-pill healthy">100%</span>
         </button>
+        <button id="btn-open-recache" class="sidebar-nav-btn" title="Re-Cache queries and embeddings">
+          <span>⚡</span>
+          <span>Re-Cache Engine</span>
+          <span id="cache-status-pill" class="status-pill idle">0 hits</span>
+        </button>
         <a href="/assets/langextract.html" target="_blank" class="sidebar-nav-btn">
           <span>🔬</span>
           <span>LangExtract Visualizer</span>
@@ -111,6 +116,18 @@
         </div>
 
         <div class="nav-right">
+          <!-- Re-Cache Button & Live Cache Stats Badge -->
+          <div class="cache-control-group">
+            <button id="btn-quick-recache" class="btn-recache-header" title="Invalidate and pre-warm BLAKE3 cache (POST /api/cache/recache)">
+              <span class="icon">⚡</span>
+              <span class="btn-text">Re-Cache</span>
+            </button>
+            <div id="cache-stats-badge" class="cache-badge" title="Live BLAKE3 Cache Hit Rate">
+              <span class="pulse-dot-cache"></span>
+              <span id="cache-badge-text">Cache: --%</span>
+            </div>
+          </div>
+
           <!-- 3-Way Search Mode Toggle -->
           <div class="search-mode-toggle">
             <button class="search-pill" data-mode="Keyword" title="Tantivy BM25 Lexical Search">BM25 Keyword</button>
@@ -240,6 +257,39 @@
       </div>
       <div class="modal-footer">
         <button id="btn-run-drift" class="btn-primary">Run Drift Remediation</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RE-CACHE MODAL -->
+  <div id="modal-recache" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>⚡ Multi-Layer BLAKE3 Re-Cache Engine</h3>
+        <button class="btn-close-modal" id="btn-close-recache">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Invalidates stale query synthesis and dense embeddings, increments the global cache epoch, and synchronizes with LanceDB + Tantivy indices.
+        </p>
+        <div class="form-group checkbox-group">
+          <label><input type="checkbox" id="recache-clear"> Clear All (force full eviction of query &amp; embedding cache)</label>
+          <label><input type="checkbox" id="recache-warm" checked> Pre-warm Cache (pre-compute embeddings for top documents)</label>
+        </div>
+        <div id="recache-stats-box" class="cache-stats-card">
+          <div class="stat-row"><span>Cache Epoch:</span><strong id="recache-epoch-val">--</strong></div>
+          <div class="stat-row"><span>Total Hits:</span><strong id="recache-hits-val">0</strong></div>
+          <div class="stat-row"><span>Total Misses:</span><strong id="recache-misses-val">0</strong></div>
+          <div class="stat-row"><span>Hit Rate:</span><strong id="recache-hitrate-val">--%</strong></div>
+          <div class="stat-row"><span>Cached Queries:</span><strong id="recache-queries-val">0</strong></div>
+          <div class="stat-row"><span>Cached Embeddings:</span><strong id="recache-embeddings-val">0</strong></div>
+        </div>
+        <div id="recache-result-box" class="progress-box hidden">
+          <div id="recache-result-text" class="progress-status"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-execute-recache" class="btn-primary">Execute Re-Cache</button>
       </div>
     </div>
   </div>

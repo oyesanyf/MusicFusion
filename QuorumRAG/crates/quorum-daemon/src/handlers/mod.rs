@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod chat;
 pub mod drift;
 pub mod health;

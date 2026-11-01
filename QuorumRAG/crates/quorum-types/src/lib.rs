@@ -629,6 +629,71 @@ pub struct QueryResult {
 
     /// Extracted citations for all referenced sources.
     pub sources_cited: Vec<Citation>,
+
+    /// Flag indicating whether this result was served directly from the BLAKE3 QueryCache.
+    #[serde(default)]
+    pub cache_hit: bool,
+
+    /// The index/cache epoch at the time of retrieval.
+    #[serde(default)]
+    pub cache_epoch: u64,
+}
+
+/// Live telemetry metrics for multi-layer query and embedding caching.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct CacheTelemetry {
+    /// Whether the active request resulted in a cache hit.
+    pub cache_hit: bool,
+    /// Total cumulative cache hits across coordinator lifetime.
+    pub hits: u64,
+    /// Total cumulative cache misses across coordinator lifetime.
+    pub misses: u64,
+    /// Calculated cache hit rate: hits / (hits + misses).
+    pub hit_rate: f32,
+    /// Number of active entries currently retained in QueryCache.
+    pub cached_queries: usize,
+    /// Number of active vectors currently retained in EmbeddingCache.
+    pub cached_embeddings: usize,
+    /// Monotonically increasing cache epoch counter.
+    pub cache_epoch: u64,
+}
+
+impl CacheTelemetry {
+    pub fn new(
+        cache_hit: bool,
+        hits: u64,
+        misses: u64,
+        cached_queries: usize,
+        cached_embeddings: usize,
+        cache_epoch: u64,
+    ) -> Self {
+        let total = hits.saturating_add(misses);
+        let hit_rate = if total == 0 {
+            0.0
+        } else {
+            hits as f32 / total as f32
+        };
+
+        Self {
+            cache_hit,
+            hits,
+            misses,
+            hit_rate,
+            cached_queries,
+            cached_embeddings,
+            cache_epoch,
+        }
+    }
+}
+
+/// Status response returned by `POST /api/cache/recache` and `quorumrag recache`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecacheResponse {
+    pub status: String,
+    pub cache_epoch: u64,
+    pub cleared_entries: usize,
+    pub warmed_entries: usize,
+    pub duration_ms: u64,
 }
 
 #[cfg(test)]
@@ -811,5 +876,37 @@ mod tests {
             serde_json::from_str(&serialized).expect("deserialize chunk");
 
         assert_eq!(chunk, deserialized);
+    }
+
+    #[test]
+    fn test_cache_telemetry_and_query_result_serde() {
+        let telem = CacheTelemetry::new(true, 8, 2, 10, 50, 3);
+        assert!(telem.cache_hit);
+        assert_eq!(telem.hits, 8);
+        assert_eq!(telem.misses, 2);
+        assert!((telem.hit_rate - 0.8).abs() < 1e-5);
+        assert_eq!(telem.cache_epoch, 3);
+
+        // Verify QueryResult default deserialization without cache fields
+        let json_str = r#"{
+            "chunks": [],
+            "synthesis_prompt": "hello",
+            "execution_time_ms": 12,
+            "sources_cited": []
+        }"#;
+        let qr: QueryResult = serde_json::from_str(json_str).expect("deserialize legacy QueryResult");
+        assert!(!qr.cache_hit);
+        assert_eq!(qr.cache_epoch, 0);
+
+        let recache = RecacheResponse {
+            status: "ok".to_string(),
+            cache_epoch: 4,
+            cleared_entries: 10,
+            warmed_entries: 5,
+            duration_ms: 22,
+        };
+        let recache_json = serde_json::to_string(&recache).unwrap();
+        let recache_de: RecacheResponse = serde_json::from_str(&recache_json).unwrap();
+        assert_eq!(recache, recache_de);
     }
 }

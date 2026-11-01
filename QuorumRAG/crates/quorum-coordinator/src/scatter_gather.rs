@@ -22,6 +22,10 @@ pub trait StorageSearcher: Send + Sync {
         max_tier: u8,
         top_k: usize,
     ) -> Vec<ScoredChunk>;
+
+    fn index_epoch(&self) -> u64 {
+        1
+    }
 }
 
 #[async_trait::async_trait]
@@ -37,6 +41,10 @@ impl StorageSearcher for quorum_storage::StorageEngine {
             .await
             .unwrap_or_default()
     }
+
+    fn index_epoch(&self) -> u64 {
+        self.index_epoch()
+    }
 }
 
 #[async_trait::async_trait]
@@ -51,6 +59,10 @@ impl<T: StorageSearcher + ?Sized> StorageSearcher for Arc<T> {
         (**self)
             .search_hybrid(query_text, query_vec, max_tier, top_k)
             .await
+    }
+
+    fn index_epoch(&self) -> u64 {
+        (**self).index_epoch()
     }
 }
 

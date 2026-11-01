@@ -233,25 +233,41 @@ impl IngestEngine {
     }
 
     /// Handles a real-time event from the OS watcher.
-    pub async fn handle_watcher_event(&self, event: WatcherEvent) -> Result<(), IngestError> {
+    pub async fn handle_watcher_event(&self, event: WatcherEvent) -> Result<bool, IngestError> {
+        let mut storage_mutated = false;
+
         match event {
             WatcherEvent::Create(path) | WatcherEvent::Modify(path) => {
                 if path.is_file() {
-                    let _ = self.ingest_file(&path).await?;
+                    if let Some(chunks) = self.ingest_file(&path).await? {
+                        if !chunks.is_empty() {
+                            storage_mutated = true;
+                        }
+                    }
                 }
             }
             WatcherEvent::Remove(path) => {
                 let path_str = path.to_string_lossy().to_string();
-                let _ = self.storage.delete_by_file_path(&path_str).await?;
+                let count = self.storage.delete_by_file_path(&path_str).await?;
                 self.dedup.remove_file(&path);
+                if count > 0 {
+                    storage_mutated = true;
+                }
                 debug!(path = %path.display(), "Removed deleted file from storage and catalog");
             }
             WatcherEvent::Rename { from, to } => {
                 let from_str = from.to_string_lossy().to_string();
-                let _ = self.storage.delete_by_file_path(&from_str).await?;
+                let count = self.storage.delete_by_file_path(&from_str).await?;
                 self.dedup.remove_file(&from);
+                if count > 0 {
+                    storage_mutated = true;
+                }
                 if to.is_file() {
-                    let _ = self.ingest_file(&to).await?;
+                    if let Some(chunks) = self.ingest_file(&to).await? {
+                        if !chunks.is_empty() {
+                            storage_mutated = true;
+                        }
+                    }
                 }
             }
             WatcherEvent::QueueOverflow { root, details } => {
@@ -262,7 +278,12 @@ impl IngestEngine {
                 });
             }
         }
-        Ok(())
+
+        if storage_mutated {
+            let _ = self.storage.bump_index_epoch("watcher_filesystem_mutation")?;
+        }
+
+        Ok(storage_mutated)
     }
 
     /// Starts the real-time continuous ingestion daemon with OS watcher and periodic drift healer.

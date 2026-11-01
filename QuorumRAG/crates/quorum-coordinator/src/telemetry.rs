@@ -95,6 +95,17 @@ pub enum AgenticTelemetryEvent {
         error_message: String,
         fallback_action: String,
     },
+    /// Cache telemetry emitted when query check completes
+    #[serde(rename = "cache_telemetry")]
+    CacheTelemetry {
+        cache_hit: bool,
+        cache_epoch: u64,
+        cached_queries: usize,
+        cached_embeddings: usize,
+        hits: u64,
+        misses: u64,
+        hit_rate: f32,
+    },
 }
 
 impl AgenticTelemetryEvent {

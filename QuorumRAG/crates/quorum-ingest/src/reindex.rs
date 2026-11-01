@@ -498,6 +498,23 @@ impl ReindexWorker {
             let _ = storage.compact().await;
         }
 
+        // Cache coherence hook: bump index_epoch if any mutations occurred
+        let has_mutated = {
+            let lock = progress.read().await;
+            lock.as_ref()
+                .map(|p| p.files_indexed > 0 || p.chunks_newly_embedded > 0 || options.full_rebuild)
+                .unwrap_or(false)
+        };
+
+        if has_mutated && !options.dry_run {
+            let reason = if options.full_rebuild {
+                "reindex_full_rebuild"
+            } else {
+                "reindex_completed"
+            };
+            let _ = storage.bump_index_epoch(reason)?;
+        }
+
         Ok(())
     }
 }

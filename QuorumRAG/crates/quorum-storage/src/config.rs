@@ -65,6 +65,11 @@ impl StorageConfig {
     pub fn tantivy_path(&self) -> PathBuf {
         self.storage_path.join(".tantivy")
     }
+
+    /// Path to persistent metadata file storing index_epoch and synchronization state.
+    pub fn metadata_path(&self) -> PathBuf {
+        self.storage_path.join(".metadata.json")
+    }
 }
 
 impl<P: AsRef<Path>> From<P> for StorageConfig {
