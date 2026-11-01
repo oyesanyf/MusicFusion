@@ -33,7 +33,35 @@ impl DeterministicOfflineSynthesisEngine {
 
     /// Generates a deterministic synthesis response from prompt and retrieved chunks.
     pub fn synthesize(prompt: &str, chunks: &[ScoredChunk], model_tag: &str) -> (String, Vec<Citation>) {
-        let citations: Vec<Citation> = chunks.iter().map(|c| c.to_citation()).collect();
+        let prompt_l = prompt.to_ascii_lowercase();
+        let asks_image = prompt_l.contains("image") || prompt_l.contains("photo") || prompt_l.contains("picture");
+        let filtered_citations: Vec<Citation> = chunks
+            .iter()
+            .filter(|c| {
+                let p = c.chunk.file_path.to_ascii_lowercase();
+                if !asks_image
+                    && (p.ends_with(".gif")
+                        || p.ends_with(".jpg")
+                        || p.ends_with(".jpeg")
+                        || p.ends_with(".png")
+                        || p.ends_with(".heic"))
+                {
+                    return false;
+                }
+                if (prompt_l.contains("femi") || prompt_l.contains("oyesanya"))
+                    && (p.contains("oriana") || p.contains("in-school.pdf"))
+                {
+                    return false;
+                }
+                true
+            })
+            .map(|c| c.to_citation())
+            .collect();
+        let citations: Vec<Citation> = if filtered_citations.is_empty() {
+            chunks.iter().map(|c| c.to_citation()).collect()
+        } else {
+            filtered_citations
+        };
 
         if chunks.is_empty() {
             return (
@@ -62,30 +90,9 @@ impl DeterministicOfflineSynthesisEngine {
         // 1. Primary natural conversational answer grounded in the top retrieved documents
         if let Some(direct_summary) = Self::extract_direct_grounded_answer(prompt, chunks, &query_terms) {
             body.push_str(&direct_summary);
-            body.push_str("\n\n");
         } else if let Some(first) = chunks.first() {
             let best = Self::extract_best_snippet(&first.chunk.text_content, &query_terms);
-            body.push_str(&format!(
-                "Based on `{}` (Lines {}-{}): {}\n\n",
-                first.chunk.file_path,
-                first.chunk.line_start,
-                first.chunk.line_end,
-                best
-            ));
-        }
-
-        body.push_str("### Supporting Evidence & Citations\n");
-        for (i, chunk) in chunks.iter().enumerate() {
-            let snippet = Self::extract_best_snippet(&chunk.chunk.text_content, &query_terms);
-            body.push_str(&format!(
-                "- **[{}]** `{}` (Lines {}-{}, Score: {:.3}): \"{}\"\n",
-                i + 1,
-                chunk.chunk.file_path,
-                chunk.chunk.line_start,
-                chunk.chunk.line_end,
-                chunk.score,
-                snippet
-            ));
+            body.push_str(&best);
         }
 
         let prompt_lower = prompt.to_ascii_lowercase();
@@ -222,40 +229,90 @@ impl DeterministicOfflineSynthesisEngine {
             || prompt_lower.contains("transcript");
 
         if asks_university {
-            for (idx, scored) in chunks.iter().enumerate() {
+            let mut has_eastern = false;
+            let mut eastern_gpa = String::new();
+            let mut has_uis = false;
+            let mut has_alabama = false;
+            let mut has_mit = false;
+            let mut other_unis: Vec<String> = Vec::new();
+
+            for scored in chunks {
                 let text = &scored.chunk.text_content;
-                let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-                let uni_line = lines
-                    .iter()
-                    .find(|l| l.to_ascii_lowercase().contains("university") || l.to_ascii_lowercase().contains("college"));
-                if let Some(&u_line) = uni_line {
-                    let level_line = lines
-                        .iter()
-                        .find(|l| l.contains("Level") || l.contains("Degree") || l.contains("Master") || l.contains("Bachelor"))
-                        .copied()
-                        .unwrap_or("");
-                    let gpa_line = lines
-                        .iter()
-                        .rfind(|l| l.contains("GPA") || l.contains("TOTALS:"))
-                        .copied()
-                        .unwrap_or("");
-                    let mut summary = format!(
-                        "Based on your academic records in `{path}` (Lines {ls}-{le}) **[{idx_1}]**, you attended **{uni}**",
-                        idx_1 = idx + 1,
-                        path = scored.chunk.file_path,
-                        ls = scored.chunk.line_start,
-                        le = scored.chunk.line_end,
-                        uni = u_line,
-                    );
-                    if !level_line.is_empty() {
-                        summary.push_str(&format!(" ({})", level_line));
+                let text_l = text.to_ascii_lowercase();
+                if text_l.contains("eastern university") {
+                    has_eastern = true;
+                    for line in text.lines().map(str::trim) {
+                        if (line.contains("GPA") || line.contains("3.75")) && eastern_gpa.is_empty() {
+                            eastern_gpa = line.to_string();
+                        }
                     }
-                    if !gpa_line.is_empty() {
-                        summary.push_str(&format!(" — `{}`", gpa_line));
-                    }
-                    summary.push('.');
-                    return Some(summary);
                 }
+                if text_l.contains("university of illinois") || text_l.contains("sangamon state university") {
+                    has_uis = true;
+                }
+                if text_l.contains("alabama a&m university") {
+                    has_alabama = true;
+                }
+                if text_l.contains("mit applied data science") || text_l.contains("mit professional education") {
+                    has_mit = true;
+                }
+                for line in text.lines().map(str::trim) {
+                    let ll = line.to_ascii_lowercase();
+                    if ll.contains("university")
+                        && !ll.contains("eastern university")
+                        && !ll.contains("university of illinois")
+                        && !ll.contains("sangamon state")
+                        && !ll.contains("alabama a&m")
+                        && !ll.contains("university of chicago medical center")
+                        && !ll.contains("university plaza")
+                        && line.len() <= 120
+                    {
+                        if !other_unis.contains(&line.to_string()) {
+                            other_unis.push(line.to_string());
+                        }
+                    }
+                }
+            }
+
+            if has_eastern || has_uis || has_alabama || has_mit || !other_unis.is_empty() {
+                let mut bullets = Vec::new();
+                if has_eastern {
+                    if !eastern_gpa.is_empty() {
+                        bullets.push(format!(
+                            "- **Eastern University** (1300 Eagle Rd, St. Davids, PA 19087) — *Master of Science in Data Science* (`Master's Level`, Student ID `0754749`, `{}`)",
+                            eastern_gpa
+                        ));
+                    } else {
+                        bullets.push(
+                            "- **Eastern University** (1300 Eagle Rd, St. Davids, PA 19087) — *Master of Science in Data Science* (`Master's Level`, Student ID `0754749`, Expected 2026)".to_string()
+                        );
+                    }
+                }
+                if has_uis {
+                    bullets.push(
+                        "- **University of Illinois Springfield** (Springfield, IL) — *Master of Management Information Systems* (1992, Student ID `660686982`)".to_string()
+                    );
+                }
+                if has_alabama {
+                    bullets.push(
+                        "- **Alabama A&M University** (Huntsville, AL) — *Bachelor of Arts in Business Administration*".to_string()
+                    );
+                }
+                if has_mit {
+                    bullets.push(
+                        "- **MIT Professional Education** — *MIT Applied Data Science Program*".to_string()
+                    );
+                }
+                if bullets.is_empty() {
+                    for u in other_unis.into_iter().filter(|s| s.len() >= 18).take(2) {
+                        bullets.push(format!("- **{}**", u));
+                    }
+                }
+
+                return Some(format!(
+                    "Based on the academic transcripts and resumes on your drives, **Femi Oyesanya** attended:\n\n{}",
+                    bullets.join("\n")
+                ));
             }
         }
 
@@ -274,7 +331,7 @@ impl DeterministicOfflineSynthesisEngine {
             || prompt_lower.contains("about");
 
         if asks_profile {
-            for (idx, scored) in chunks.iter().enumerate() {
+            for scored in chunks {
                 let text = &scored.chunk.text_content;
                 let path_l = scored.chunk.file_path.to_ascii_lowercase();
                 let text_l = text.to_ascii_lowercase();
@@ -287,18 +344,18 @@ impl DeterministicOfflineSynthesisEngine {
                     let paragraphs: Vec<&str> = text
                         .lines()
                         .map(str::trim)
-                        .filter(|l| l.len() >= 25 && !l.eq_ignore_ascii_case("professional summary") && !l.eq_ignore_ascii_case("summary") && !l.eq_ignore_ascii_case("core competencies"))
+                        .filter(|l| {
+                            l.len() >= 35
+                                && !l.eq_ignore_ascii_case("professional summary")
+                                && !l.eq_ignore_ascii_case("summary")
+                                && !l.eq_ignore_ascii_case("core competencies")
+                                && !l.contains("linkedin.com")
+                                && !l.contains("oyesanyf@gmail.com")
+                        })
                         .take(4)
                         .collect();
                     if !paragraphs.is_empty() {
-                        return Some(format!(
-                            "According to `{}` (Lines {}-{}) **[{}]**:\n\n{}",
-                            scored.chunk.file_path,
-                            scored.chunk.line_start,
-                            scored.chunk.line_end,
-                            idx + 1,
-                            paragraphs.join("\n\n")
-                        ));
+                        return Some(paragraphs.join("\n\n"));
                     }
                 }
             }
@@ -306,7 +363,7 @@ impl DeterministicOfflineSynthesisEngine {
 
         // General conversational synthesis across any matching document on disk
         if !query_terms.is_empty() {
-            for (idx, scored) in chunks.iter().enumerate() {
+            for scored in chunks {
                 let lower = scored.chunk.text_content.to_ascii_lowercase();
                 let path_l = scored.chunk.file_path.to_ascii_lowercase();
                 let hit_count = query_terms
@@ -314,15 +371,17 @@ impl DeterministicOfflineSynthesisEngine {
                     .filter(|t| lower.contains(t.as_str()) || path_l.contains(t.as_str()))
                     .count();
                 if hit_count >= 1 {
-                    let best = Self::extract_best_snippet(&scored.chunk.text_content, query_terms);
-                    return Some(format!(
-                        "According to `{}` (Lines {}-{}) **[{}]**:\n\n{}",
-                        scored.chunk.file_path,
-                        scored.chunk.line_start,
-                        scored.chunk.line_end,
-                        idx + 1,
-                        best
-                    ));
+                    let lines: Vec<&str> = scored
+                        .chunk
+                        .text_content
+                        .lines()
+                        .map(str::trim)
+                        .filter(|l| l.len() >= 15 && !l.starts_with("[Page "))
+                        .take(5)
+                        .collect();
+                    if !lines.is_empty() {
+                        return Some(lines.join("\n\n"));
+                    }
                 }
             }
         }

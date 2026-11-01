@@ -117,34 +117,65 @@ impl ScatterGatherEngine {
             .await;
 
         // 2. Parallel Remote Peer Queries bounded by 400ms hard deadline
-        let mut req = FederatedQueryRequest {
-            query_id: Uuid::new_v4(),
-            sender_peer_id: self.sender_peer_id.clone(),
-            sender_pubkey: [0u8; 32],
-            query_text: query_text.to_string(),
-            embedding: query_vec.to_vec(),
-            top_k,
-            timestamp: Utc::now().timestamp(),
-            signature: [0u8; 64],
+        // Enforces OshoosiClaw P2P Mesh gate & PHI/PII DLP on both outbound queries and inbound remote chunks
+        let controller = crate::dlp_mesh::global_mesh_dlp_controller();
+        let p2p_enabled = controller
+            .settings
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .mesh
+            .p2p_enabled;
+
+        let remote_responses = if p2p_enabled {
+            if let Some(sanitized_query) = controller.sanitize_outbound_query(query_text) {
+                let mut req = FederatedQueryRequest {
+                    query_id: Uuid::new_v4(),
+                    sender_peer_id: self.sender_peer_id.clone(),
+                    sender_pubkey: [0u8; 32],
+                    query_text: sanitized_query,
+                    embedding: query_vec.to_vec(),
+                    top_k,
+                    timestamp: Utc::now().timestamp(),
+                    signature: [0u8; 64],
+                };
+                let tier = AccessTier::from_u8(access_tier).unwrap_or(AccessTier::Tier0Public);
+                sign_request(&self.secret_seed, &mut req, tier);
+
+                let timeout_dur = Duration::from_millis(self.config.timeout_ms);
+                self.mesh_dispatcher
+                    .query_peers(&req, timeout_dur)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
         };
-        let tier = AccessTier::from_u8(access_tier).unwrap_or(AccessTier::Tier0Public);
-        sign_request(&self.secret_seed, &mut req, tier);
 
-        let timeout_dur = Duration::from_millis(self.config.timeout_ms);
-        let remote_responses = self
-            .mesh_dispatcher
-            .query_peers(&req, timeout_dur)
-            .await
-            .unwrap_or_default();
-
-        // 3. Ingest candidate chunks into volatile memory containers
+        // 3. Ingest candidate chunks into volatile memory containers after inbound PHI/PII DLP gate
         let mut volatile_chunks = Vec::new();
         let mut remote_lists = Vec::new();
         for resp in remote_responses {
-            for chunk in &resp.chunks {
-                volatile_chunks.push(chunk.to_volatile_remote_chunk(&resp.responder_peer_id));
+            let mut clean_peer_chunks = Vec::new();
+            for mut chunk in resp.chunks {
+                let dlp_res = controller.inspect_and_enforce_text(
+                    &chunk.content,
+                    &chunk.file_path,
+                    &resp.responder_peer_id,
+                    "InboundMesh",
+                    None,
+                    false,
+                );
+                if dlp_res.allowed_to_share {
+                    chunk.content = dlp_res.scrubbed_text;
+                    volatile_chunks.push(chunk.to_volatile_remote_chunk(&resp.responder_peer_id));
+                    clean_peer_chunks.push(chunk);
+                }
             }
-            remote_lists.push(resp.chunks);
+            if !clean_peer_chunks.is_empty() {
+                remote_lists.push(clean_peer_chunks);
+            }
         }
 
         // 4. Reciprocal Rank Fusion

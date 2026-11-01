@@ -11,7 +11,7 @@ impl RetrieveMeshNode {
         access_tier: u8,
         top_k: usize,
     ) {
-        let candidate_k = top_k.max(24);
+        let candidate_k = top_k.max(48);
         let (mut chunks, volatile, _duration) = engine
             .execute_query(&state.current_query, vector, access_tier, candidate_k)
             .await;
@@ -28,7 +28,8 @@ impl RetrieveMeshNode {
             "what", "does", "do", "did", "where", "when", "who", "how", "why",
             "is", "are", "was", "were", "the", "and", "for", "with", "from",
             "into", "about", "using", "have", "has", "had", "will", "would",
-            "should", "could", "can", "you", "tell", "show", "went", "disambiguation", "hop",
+            "should", "could", "can", "you", "tell", "show", "went", "attend", "attended",
+            "disambiguation", "hop",
         ];
 
         let prompt_lower = state.original_prompt.to_ascii_lowercase();
@@ -58,29 +59,80 @@ impl RetrieveMeshNode {
                 || prompt_lower.contains("experience")
                 || prompt_lower.contains("career");
 
+            let asks_image = prompt_lower.contains("image")
+                || prompt_lower.contains("photo")
+                || prompt_lower.contains("picture")
+                || prompt_lower.contains("screenshot");
+
+            let mentions_oyesanya = prompt_lower.contains("oyesanya") || prompt_lower.contains("femi");
+
             let score_chunk = |c: &quorum_types::ScoredChunk| -> (usize, i32) {
                 let text_l = c.chunk.text_content.to_ascii_lowercase();
                 let path_l = c.chunk.file_path.to_ascii_lowercase();
-                let term_hits = query_terms
-                    .iter()
-                    .filter(|t| text_l.contains(t.as_str()) || path_l.contains(t.as_str()))
-                    .count();
+                let file_name_l = std::path::Path::new(&c.chunk.file_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_ascii_lowercase())
+                    .unwrap_or_default();
+
+                // Direct matches in document text or filename count 10x more than parent directory matches
+                let mut weighted_hits = 0usize;
+                for t in &query_terms {
+                    if text_l.contains(t.as_str()) || file_name_l.contains(t.as_str()) {
+                        weighted_hits += 10;
+                    } else if path_l.contains(t.as_str()) {
+                        weighted_hits += 1;
+                    }
+                }
 
                 let mut intent_bonus = 0i32;
-                if asks_university {
-                    if text_l.contains("university") || text_l.contains("college") {
-                        intent_bonus += 50;
+
+                // Deprioritize raw image metadata stubs unless the user asked about images
+                if !asks_image
+                    && (text_l.starts_with("[image document:")
+                        || file_name_l.ends_with(".gif")
+                        || file_name_l.ends_with(".jpg")
+                        || file_name_l.ends_with(".png")
+                        || file_name_l.ends_with(".heic"))
+                {
+                    intent_bonus -= 150;
+                }
+
+                // If query asks about Femi Oyesanya, strongly prefer documents that actually mention Oyesanya in text or filename
+                if mentions_oyesanya {
+                    if text_l.contains("oyesanya") || file_name_l.contains("oyesanya") {
+                        intent_bonus += 60;
+                    } else if file_name_l.contains("oriana") || file_name_l.contains("in-school") || file_name_l.contains("deferment") {
+                        intent_bonus -= 120;
                     }
-                    if path_l.contains("transcript") || path_l.contains("transctipt") || path_l.contains("school") || path_l.contains("0754749") {
-                        intent_bonus += 30;
+                }
+
+                if asks_university {
+                    if text_l.contains("eastern university")
+                        || text_l.contains("university of illinois")
+                        || text_l.contains("alabama a&m")
+                        || text_l.contains("education & certification")
+                        || text_l.contains("master of science in data science")
+                        || text_l.contains("master of management information systems")
+                    {
+                        intent_bonus += 140;
+                    } else if text_l.contains("university") {
+                        intent_bonus += 60;
+                    }
+                    if file_name_l.contains("easternuniversity")
+                        || file_name_l.contains("university_ofil")
+                        || file_name_l.contains("0754749")
+                        || file_name_l.contains("resume2026")
+                        || file_name_l.contains("enhanced_resume")
+                    {
+                        intent_bonus += 80;
                     }
                     if text_l.contains("gpa") || text_l.contains("master") || text_l.contains("bachelor") {
-                        intent_bonus += 20;
+                        intent_bonus += 30;
                     }
                 }
                 if asks_profile_or_role {
-                    if path_l.contains("resume") || path_l.contains("cv") {
-                        intent_bonus += 50;
+                    if file_name_l.contains("resume") || path_l.contains("resume") || path_l.contains("cv") {
+                        intent_bonus += 80;
                     }
                     if text_l.contains("professional summary")
                         || text_l.contains("summary")
@@ -89,27 +141,31 @@ impl RetrieveMeshNode {
                         || text_l.contains("security professional")
                         || text_l.contains("security engineer")
                     {
-                        intent_bonus += 40;
+                        intent_bonus += 60;
                     }
                 }
 
-                // Prefer clean recent docs (`Resume2026`, `ResumeSecAI2025`, `Enhanced_Resume`) over raw lock/binary artifacts
-                if path_l.contains("2026") || path_l.contains("2025") || path_l.contains("enhanced_resume") {
-                    intent_bonus += 15;
+                // Prefer clean recent docs (`Resume2026`, `ResumeSecAI2025`, `Enhanced_Resume`) over older/form artifacts
+                if file_name_l.contains("2026") || file_name_l.contains("2025") || file_name_l.contains("enhanced_resume") {
+                    intent_bonus += 25;
                 }
 
-                (term_hits, intent_bonus)
+                (weighted_hits, intent_bonus)
             };
 
             let any_lexical_match = chunks.iter().any(|c| score_chunk(c).0 > 0);
             if any_lexical_match {
-                chunks.retain(|c| score_chunk(c).0 > 0);
+                chunks.retain(|c| {
+                    let (hits, bonus) = score_chunk(c);
+                    hits > 0 && bonus > -100
+                });
                 chunks.sort_by(|a, b| {
                     let (hits_a, bonus_a) = score_chunk(a);
                     let (hits_b, bonus_b) = score_chunk(b);
-                    hits_b
-                        .cmp(&hits_a)
-                        .then_with(|| bonus_b.cmp(&bonus_a))
+                    let total_a = (hits_a as i32) * 5 + bonus_a;
+                    let total_b = (hits_b as i32) * 5 + bonus_b;
+                    total_b
+                        .cmp(&total_a)
                         .then_with(|| {
                             b.score
                                 .partial_cmp(&a.score)

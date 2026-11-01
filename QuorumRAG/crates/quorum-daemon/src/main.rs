@@ -106,7 +106,24 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
     let (listener, bound_http_port) = bind_next_open_http_port(&cli.host, cli.port).await?;
     let chosen_p2p_port = find_next_open_p2p_port(&cli.host, cli.p2p_port, bound_http_port);
 
-    // 4. Network Swarm & Query Coordinator
+    // Initialize OshoosiClaw Mesh & PHI/PII DLP persistence in `cli.data_dir`
+    let mesh_dlp_controller = quorum_coordinator::global_mesh_dlp_controller();
+    mesh_dlp_controller.init_persistence(&cli.data_dir);
+    {
+        let mut guard = mesh_dlp_controller
+            .settings
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.mesh.mesh_port = chosen_p2p_port;
+    }
+
+    // 4. Network Swarm & Query Coordinator (with OshoosiMeshInboundHandler enforcing Shared Folders & PHI DLP)
+    let inbound_handler: Arc<dyn quorum_network::InboundQueryHandler> = Arc::new(
+        quorum_coordinator::OsoosiMeshInboundHandler::new(
+            Arc::clone(&storage) as Arc<dyn quorum_coordinator::StorageSearcher>,
+            "local_quorum_node",
+        ),
+    );
     let (mesh_dispatcher, swarm_handle): (Arc<dyn quorum_coordinator::MeshQueryDispatcher>, Option<quorum_network::NetworkSwarmHandle>) = if cli.local_only {
         info!("Running in local-only mode (P2P swarm networking disabled).");
         (Arc::new(quorum_coordinator::LocalOnlyDispatcher), None)
@@ -116,7 +133,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
             quic_listen_addrs: vec![format!("/ip4/{}/udp/{}/quic-v1", cli.host, chosen_p2p_port).parse()?],
             ..Default::default()
         };
-        match quorum_network::start_network_node(net_config, None).await {
+        match quorum_network::start_network_node(net_config, Some(inbound_handler)).await {
             Ok((_join, handle)) => {
                 let disp = Arc::new(quorum_coordinator::SwarmMeshDispatcher {
                     handle: handle.clone(),

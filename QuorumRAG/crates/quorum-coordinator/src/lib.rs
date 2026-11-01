@@ -4,6 +4,7 @@ pub mod cache;
 pub mod config;
 pub mod coordinator;
 pub mod crypto;
+pub mod dlp_mesh;
 pub mod error;
 pub mod fusion;
 pub mod hardware;
@@ -33,7 +34,7 @@ pub use fusion::RrfCombiner;
 pub use hardware::HardwareTelemetry;
 pub use mesh::{
     LocalOnlyDispatcher, MeshQueryDispatcher, MockMeshDispatcher, MockRemotePeer,
-    SwarmMeshDispatcher,
+    OsoosiMeshInboundHandler, SwarmMeshDispatcher,
 };
 pub use model_router::AutoFusionRouter;
 pub use offline_engine::DeterministicOfflineSynthesisEngine;
@@ -46,4 +47,9 @@ pub use volatile::{scrub_volatile, wrap_candidates, VolatileRemoteChunk};
 pub use langextract::{
     extract_query_metadata_filters, filter_grounded, ground_extraction, ConsensusExtractionResult,
     ExampleData, Extraction, LlmFusionArmReport, LlmFusionConsensus,
+};
+pub use dlp_mesh::{
+    global_mesh_dlp_controller, ArchivedChatEntry, ChatGptUiSettings, DetectedPhiSpan,
+    DlpAuditEvent, DlpEnforcementMode, DlpInspectionResult, DlpTelemetryStats, MeshDlpPolicy,
+    OsoosiMeshDlpController, OsoosiMeshSettings, PersistedDaemonSettings, SharedFolderEntry,
 };

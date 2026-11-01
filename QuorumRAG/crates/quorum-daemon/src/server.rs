@@ -5,7 +5,7 @@ use axum::routing::{get, post};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
-use crate::handlers::{cache, chat, drift, health, langextract, reindex};
+use crate::handlers::{cache, chat, drift, health, langextract, reindex, settings};
 use crate::state::DaemonState;
 
 /// Constructs the complete Axum 0.7 web server Router.
@@ -20,6 +20,16 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         .route("/api/chat", post(chat::chat_sse_handler))
         .route("/api/chat/stream", get(chat_stream_compat_handler))
         .route("/api/query", post(chat::query_handler))
+
+        // ChatGPT Settings, OshoosiClaw P2P Mesh, Shared Folders & HIPAA PHI DLP Endpoints
+        .route("/api/settings", get(settings::get_settings_handler).post(settings::update_settings_handler))
+        .route("/api/mesh/status", get(settings::mesh_status_handler))
+        .route("/api/mesh/config", post(settings::update_mesh_config_handler))
+        .route("/api/mesh/shared-folders", post(settings::manage_shared_folders_handler))
+        .route("/api/mesh/browse-folders", get(settings::browse_folders_handler))
+        .route("/api/dlp/status", get(settings::dlp_status_handler))
+        .route("/api/dlp/policy", post(settings::update_dlp_policy_handler))
+        .route("/api/dlp/test", post(settings::test_dlp_inspection_handler))
 
         // Cache Management Endpoints
         .route("/api/cache/recache", post(cache::recache_handler))

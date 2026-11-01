@@ -177,3 +177,70 @@ impl MeshQueryDispatcher for LocalOnlyDispatcher {
         0
     }
 }
+
+/// Production inbound Mesh query handler enforcing OshoosiClaw Shared Folder ACLs
+/// and Two-Tier HIPAA PHI / PII Data Loss Prevention (`Redact` or `Block`).
+pub struct OsoosiMeshInboundHandler {
+    pub local_storage: Arc<dyn crate::scatter_gather::StorageSearcher>,
+    pub local_peer_id: String,
+}
+
+impl OsoosiMeshInboundHandler {
+    pub fn new(
+        local_storage: Arc<dyn crate::scatter_gather::StorageSearcher>,
+        local_peer_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            local_storage,
+            local_peer_id: local_peer_id.into(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl quorum_network::InboundQueryHandler for OsoosiMeshInboundHandler {
+    async fn handle_query(&self, req: FederatedQueryRequest) -> FederatedQueryResponse {
+        let controller = crate::dlp_mesh::global_mesh_dlp_controller();
+        let (p2p_enabled, is_quarantined, max_tier) = {
+            let guard = controller.settings.read().unwrap_or_else(|e| e.into_inner());
+            let q = guard
+                .mesh
+                .quarantined_peers
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case(&req.sender_peer_id));
+            (
+                guard.mesh.p2p_enabled,
+                q,
+                guard.ui.default_peer_access_tier,
+            )
+        };
+
+        if !p2p_enabled || is_quarantined {
+            return FederatedQueryResponse {
+                query_id: req.query_id,
+                responder_peer_id: self.local_peer_id.clone(),
+                chunks: Vec::new(),
+            };
+        }
+
+        let scored = self
+            .local_storage
+            .search_hybrid(&req.query_text, &req.embedding, max_tier, req.top_k.min(16))
+            .await;
+
+        let candidate_dtos: Vec<CandidateChunkDto> = scored
+            .iter()
+            .map(CandidateChunkDto::from_scored_chunk)
+            .collect();
+
+        // Filter strictly to user's shared_folders and enforce PHI/PII Redact or Block
+        let safe_chunks =
+            controller.filter_and_enforce_outbound_mesh_chunks(candidate_dtos, &req.sender_peer_id);
+
+        FederatedQueryResponse {
+            query_id: req.query_id,
+            responder_peer_id: self.local_peer_id.clone(),
+            chunks: safe_chunks,
+        }
+    }
+}

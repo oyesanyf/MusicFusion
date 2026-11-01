@@ -328,17 +328,22 @@ impl TantivyFtsIndex {
             const QUESTION_STOPWORDS: &[&str] = &[
                 "what", "does", "do", "did", "where", "when", "who", "how", "why",
                 "is", "are", "was", "were", "the", "a", "an", "to", "for", "of",
-                "in", "on", "at", "with", "from", "by", "about", "go", "went",
-                "tell", "me", "can", "you", "please", "his", "her", "their",
+                "in", "on", "at", "with", "from", "by", "about", "go", "fo", "went",
+                "attend", "attended", "tell", "me", "can", "you", "please", "his", "her", "their",
             ];
             let sanitized: String = trimmed
                 .chars()
                 .map(|c| if c.is_alphanumeric() || c == '_' { c } else { ' ' })
                 .collect();
-            let content_terms: Vec<&str> = sanitized
+            let mut content_terms: Vec<&str> = sanitized
                 .split_whitespace()
                 .filter(|w| !QUESTION_STOPWORDS.contains(&w.to_ascii_lowercase().as_str()))
                 .collect();
+            let lower_q = trimmed.to_ascii_lowercase();
+            if lower_q.contains("school") || lower_q.contains("college") || lower_q.contains("education") {
+                content_terms.push("university");
+                content_terms.push("transcript");
+            }
             if content_terms.is_empty() {
                 trimmed.to_string()
             } else {

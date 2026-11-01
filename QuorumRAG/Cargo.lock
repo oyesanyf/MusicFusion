@@ -6716,6 +6716,7 @@ dependencies = [
  "quorum-storage",
  "quorum-types",
  "quorum-ui",
+ "regex",
  "serde",
  "serde_json",
  "subtle",

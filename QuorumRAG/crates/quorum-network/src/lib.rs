@@ -13,6 +13,7 @@ pub use handle::{NetworkCommand, NetworkEvent, NetworkSwarmHandle};
 pub use handshake::{
     extract_contract_hash, make_agent_version, make_protocol_version, verify_peer_contract,
 };
+pub use libp2p::Multiaddr;
 
 use quorum_types::{FederatedQueryRequest, FederatedQueryResponse};
 use std::collections::HashMap;
