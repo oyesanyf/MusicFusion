@@ -33,6 +33,9 @@ pub enum PipelineError {
     #[error("Duplicate node error: node '{0}' is already registered in graph")]
     DuplicateNode(String),
 
+    #[error("Dead-end node '{0}' in graph: non-terminal node has no outgoing edges (must route to another node or END)")]
+    DeadEndNode(String),
+
     #[error("Missing entry point: graph has no entry node defined (call set_entry_point or add_edge(START, ...))")]
     MissingEntryPoint,
 

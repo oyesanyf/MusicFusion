@@ -65,7 +65,8 @@ impl CheckpointManager {
         &self.base_dir
     }
 
-    /// Validates path component preventing directory traversal and NT ADS breakouts.
+    /// Validates path component preventing directory traversal, NT ADS breakouts,
+    /// Windows reserved device names, and filesystem quirks.
     pub fn sanitize_path_component(component: &str) -> Result<String> {
         let comp_lower = component.to_ascii_lowercase();
         if component.is_empty()
@@ -78,9 +79,26 @@ impl CheckpointManager {
             || comp_lower.contains("%2f")
             || comp_lower.contains("%5c")
             || comp_lower.contains("%00")
+            || component.ends_with('.')
+            || component.ends_with(' ')
         {
             return Err(PipelineError::SecurityError(format!(
                 "Invalid path component: '{}'",
+                component
+            )));
+        }
+
+        // Windows reserved DOS device names (case-insensitive, alone or with any extension)
+        const WINDOWS_RESERVED_NAMES: &[&str] = &[
+            "con", "prn", "aux", "nul",
+            "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+            "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+        ];
+
+        let base_stem = comp_lower.split('.').next().unwrap_or(&comp_lower);
+        if WINDOWS_RESERVED_NAMES.contains(&base_stem) {
+            return Err(PipelineError::SecurityError(format!(
+                "Windows reserved device name rejected: '{}'",
                 component
             )));
         }

@@ -40,6 +40,50 @@ async fn test_node1_strip_think_tags() {
 }
 
 #[tokio::test]
+async fn test_node1_unclosed_think_tag_preserves_prompt_lyrics() {
+    let raw = "[Intro]\nOne love shining bright\n<think>Generating next verse with rhyming lyrics...";
+    let formatted = OllamaProducerPanelNode::enforce_structural_bracket_tags(raw, "", "Roots Reggae");
+    assert!(formatted.contains("[Intro]"));
+    assert!(formatted.contains("One love shining bright"));
+    assert!(!formatted.contains("<think>"));
+    assert!(!formatted.contains("Generating next verse"));
+}
+
+#[tokio::test]
+async fn test_node1_unclosed_think_tag_from_start_falls_back_to_structure() {
+    let raw = "<think>Internal thinking only with no closing tag";
+    let formatted = OllamaProducerPanelNode::enforce_structural_bracket_tags(raw, "", "Roots Reggae");
+    assert!(!formatted.contains("<think>"));
+    assert!(!formatted.contains("Internal thinking"));
+    assert!(formatted.contains("[Intro]"));
+    assert!(formatted.contains("[Verse 1]"));
+    assert!(formatted.contains("[Chorus]"));
+    assert!(formatted.contains("[Outro]"));
+}
+
+#[tokio::test]
+async fn test_node1_user_bpm_key_time_signature_preservation() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let mut state = MusicProductionState::new("test-preservation", "Rock", 140, "F# Minor");
+    state.time_signature = "3/4".to_string();
+    state.engine_mode = "pure_rust".to_string();
+
+    let node1 = OllamaProducerPanelNode::new().with_storage_dir(temp_dir.path());
+    let res = node1.execute_node(&mut state).await;
+    assert!(res.is_ok());
+
+    // Assert user values are preserved, NOT clobbered by Rock genre defaults (116 BPM, E Minor, 4/4)
+    assert_eq!(state.bpm, 140);
+    assert_eq!(state.key_signature, "F# Minor");
+    assert_eq!(state.time_signature, "3/4");
+
+    let bp = state.blueprint.as_ref().unwrap();
+    assert_eq!(bp.bpm, 140.0);
+    assert_eq!(bp.key_signature, "F# Minor");
+    assert_eq!(bp.time_signature, "3/4");
+}
+
+#[tokio::test]
 async fn test_node1_execution_pure_rust_blueprint_emission() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let mut state = MusicProductionState::new("test-song-n1", "Roots Reggae", 76, "A Major");
@@ -215,10 +259,17 @@ async fn test_node5_conditional_edge_retry_routing() {
     state_stem.telemetry.tempo_drift_score = 0.10;
     assert_eq!(judge_gate_condition(&state_stem), ROUTE_RETRY_STEM);
 
-    // 4. Retry exhausted (retry_count >= 2) -> advances to mastering to prevent loop
+    // 4. Retry cycle 2 (retry_count == 2) -> still routes to retry
+    let mut state_retry2 = MusicProductionState::default();
+    state_retry2.quality_passed = false;
+    state_retry2.retry_count = 2;
+    state_retry2.telemetry.tempo_drift_score = 0.10;
+    assert_eq!(judge_gate_condition(&state_retry2), ROUTE_RETRY_STEM);
+
+    // 5. Retry exhausted (retry_count >= 3) -> advances to mastering to prevent loop
     let mut state_exhausted = MusicProductionState::default();
     state_exhausted.quality_passed = false;
-    state_exhausted.retry_count = 2;
+    state_exhausted.retry_count = 3;
     assert_eq!(judge_gate_condition(&state_exhausted), ROUTE_MASTERING);
 }
 

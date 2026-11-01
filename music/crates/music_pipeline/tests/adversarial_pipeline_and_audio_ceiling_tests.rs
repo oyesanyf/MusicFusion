@@ -121,8 +121,8 @@ async fn test_full_pipeline_multi_genre_afrobeats_108bpm() {
 
     let final_state = runner.execute_song(state).await.expect("execute_song afrobeats");
 
-    // Note: Node 1 in pure_rust mode synchronizes to genre preset default (105 BPM)
-    assert!(final_state.bpm == 108 || final_state.bpm == 105, "BPM was {}", final_state.bpm);
+    assert_eq!(final_state.bpm, 108);
+    assert_eq!(final_state.key_signature, "F# Minor");
     assert!(final_state.has_stem(STEM_FINAL_MASTER));
     let master_path = final_state.get_stem(STEM_FINAL_MASTER).unwrap();
     let master_buf = AudioBuffer::from_wav_file(master_path).expect("Read master");
@@ -152,8 +152,8 @@ async fn test_full_pipeline_multi_genre_pop_120bpm() {
 
     let final_state = runner.execute_song(state).await.expect("execute_song pop");
 
-    // Note: Node 1 in pure_rust mode synchronizes to genre preset default (122 BPM)
-    assert!(final_state.bpm == 120 || final_state.bpm == 122, "BPM was {}", final_state.bpm);
+    assert_eq!(final_state.bpm, 120);
+    assert_eq!(final_state.key_signature, "C Major");
     assert!(final_state.has_stem(STEM_FINAL_MASTER));
     let master_path = final_state.get_stem(STEM_FINAL_MASTER).unwrap();
     let master_buf = AudioBuffer::from_wav_file(master_path).expect("Read master");
@@ -183,8 +183,8 @@ async fn test_full_pipeline_multi_genre_rock_metal_140bpm() {
 
     let final_state = runner.execute_song(state).await.expect("execute_song rock");
 
-    // Note: Node 1 in pure_rust mode synchronizes to genre preset default (116 BPM)
-    assert!(final_state.bpm == 140 || final_state.bpm == 116, "BPM was {}", final_state.bpm);
+    assert_eq!(final_state.bpm, 140);
+    assert_eq!(final_state.key_signature, "E Minor");
     assert!(final_state.has_stem(STEM_FINAL_MASTER));
     assert!(final_state.has_stem(STEM_INPAINTED_GUITAR));
     let master_path = final_state.get_stem(STEM_FINAL_MASTER).unwrap();
@@ -288,9 +288,9 @@ fn test_adversarial_retry_routing_stem_clipping_and_headroom_violation() {
 
 #[test]
 fn test_adversarial_retry_routing_retry_exhaustion_forces_mastering() {
-    // When retry_count >= 2, the pipeline must ALWAYS advance to Node 6 (mastering)
+    // When retry_count >= 3, the pipeline must ALWAYS advance to Node 6 (mastering)
     // regardless of severe drift, clipping, or zero quality score, preventing loops.
-    for retries in [2, 3, 5, 255] {
+    for retries in [3, 4, 5, 255] {
         let mut state = MusicProductionState::default();
         state.quality_passed = false;
         state.retry_count = retries;
@@ -374,10 +374,10 @@ async fn test_stategraph_live_retry_loop_execution_and_termination() {
     let n5 = InjectingQualityGateNode { eval_count: eval_count.clone() };
     let n6 = CounterNode { name: "node6_mastering".to_string(), call_count: node6_count.clone() };
 
-    graph.add_node("node2_groove", n2);
-    graph.add_node("node4_stem", n4);
-    graph.add_node("node5_gate", n5);
-    graph.add_node("node6_mastering", n6);
+    graph.add_node("node2_groove", n2).expect("add node2_groove");
+    graph.add_node("node4_stem", n4).expect("add node4_stem");
+    graph.add_node("node5_gate", n5).expect("add node5_gate");
+    graph.add_node("node6_mastering", n6).expect("add node6_mastering");
 
     graph.set_entry_point("node2_groove");
     graph.add_edge("node2_groove", "node4_stem");
@@ -398,15 +398,17 @@ async fn test_stategraph_live_retry_loop_execution_and_termination() {
 
     // Execution trace:
     // Pass 1: Entry -> N2 (count=1) -> N4 (count=1) -> N5 (eval=1, retry increments 0 -> 1)
-    //         Branch check: drift 0.85 > 0.50 and retry=1 < 2 -> routes to N2 (groove retry)
+    //         Branch check: drift 0.85 > 0.50 and retry=1 <= 2 -> routes to N2 (groove retry 1/2)
     // Pass 2: N2 (count=2) -> N4 (count=2) -> N5 (eval=2, retry increments 1 -> 2)
-    //         Branch check: retry=2 >= 2 -> retry exhausted, forces forward to N6!
+    //         Branch check: drift 0.10 <= 0.50, clipping=true, retry=2 <= 2 -> routes to N4 (stem retry 2/2)
+    // Pass 3: N4 (count=3) -> N5 (eval=3, quality_passed=true) -> routes forward to N6 (mastering)
     // Completion: N6 (count=1) -> END
-    assert_eq!(eval_count.load(Ordering::SeqCst), 2, "Gate evaluated 2 times before exhaustion cutoff");
+    assert_eq!(eval_count.load(Ordering::SeqCst), 3, "Gate evaluated 3 times (initial + 2 retries)");
     assert_eq!(node2_count.load(Ordering::SeqCst), 2, "Node 2 executed twice (initial + 1 groove retry)");
-    assert_eq!(node4_count.load(Ordering::SeqCst), 2, "Node 4 executed twice");
-    assert_eq!(node6_count.load(Ordering::SeqCst), 1, "Node 6 executed once upon forced forward");
+    assert_eq!(node4_count.load(Ordering::SeqCst), 3, "Node 4 executed 3 times");
+    assert_eq!(node6_count.load(Ordering::SeqCst), 1, "Node 6 executed once upon mastering");
     assert_eq!(final_state.retry_count, 2, "Final state retry_count is 2");
+    assert!(final_state.quality_passed, "Final state quality passed");
 }
 
 // =========================================================================

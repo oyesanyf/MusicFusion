@@ -118,19 +118,36 @@ impl OllamaProducerPanelNode {
         state.lyrics = structured_lyrics.clone();
 
         // 6. Synchronize SongBlueprint into state
-        let blueprint = Self::convert_evaluated_blueprint_to_schema(
+        let mut blueprint = Self::convert_evaluated_blueprint_to_schema(
             &judge_evaluation,
             state,
             &yue_genre_txt,
             &structured_lyrics,
         );
+
+        // If user explicitly configured BPM, key, or time signature, preserve them in blueprint and state
+        if state.bpm > 0 {
+            blueprint.bpm = state.bpm as f64;
+        } else {
+            state.bpm = blueprint.bpm.round() as u32;
+        }
+
+        if !state.key_signature.is_empty() {
+            blueprint.key_signature = state.key_signature.clone();
+        } else {
+            state.key_signature = blueprint.key_signature.clone();
+        }
+
+        if !state.time_signature.is_empty() {
+            blueprint.time_signature = state.time_signature.clone();
+        } else {
+            state.time_signature = blueprint.time_signature.clone();
+        }
+
         state.blueprint = Some(blueprint.clone());
         if state.style_prompt.is_empty() {
             state.style_prompt = blueprint.style_of_music.clone();
         }
-        state.bpm = blueprint.bpm.round() as u32;
-        state.key_signature = blueprint.key_signature.clone();
-        state.time_signature = blueprint.time_signature.clone();
 
         // 7. Persist genre.txt and lyrics.txt into versioned song storage
         let version_dir = self.resolve_version_dir(&state.song_id, state.version);
@@ -172,11 +189,13 @@ impl OllamaProducerPanelNode {
         };
 
         // 1. Strip reasoning blocks: <think>...</think>
-        if let Some(start) = raw.find("<think>") {
-            if let Some(end) = raw.find("</think>") {
+        while let Some(start) = raw.find("<think>") {
+            if let Some(end_offset) = raw[start..].find("</think>") {
+                let end = start + end_offset;
                 raw = format!("{}{}", &raw[..start], &raw[end + 8..]);
             } else {
-                raw = raw[start + 7..].to_string();
+                raw = raw[..start].to_string();
+                break;
             }
         }
 
@@ -265,9 +284,9 @@ impl OllamaProducerPanelNode {
             title: evaluated.title.clone(),
             subtitle: format!("Universal AI Music Production in {}", state.genre),
             style_of_music: genre_txt.trim().trim_end_matches('.').to_string(),
-            bpm: evaluated.bpm,
-            key_signature: evaluated.key_signature.clone(),
-            time_signature: evaluated.time_signature.clone(),
+            bpm: if state.bpm > 0 { state.bpm as f64 } else { evaluated.bpm },
+            key_signature: if !state.key_signature.is_empty() { state.key_signature.clone() } else { evaluated.key_signature.clone() },
+            time_signature: if !state.time_signature.is_empty() { state.time_signature.clone() } else { evaluated.time_signature.clone() },
             sections,
             stem_mix: StemMixConfig::default(),
             pipeline_models: PipelineModelStack::default(),

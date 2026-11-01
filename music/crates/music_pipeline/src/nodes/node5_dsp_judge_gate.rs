@@ -196,7 +196,7 @@ impl DspAndJudgeGateNode {
         state.set_judge_result(score, quality_passed);
 
         // If quality failed and retries not exhausted, increment retry count
-        if !quality_passed && state.retry_count < 2 {
+        if !quality_passed && state.retry_count <= 2 {
             state.increment_retry();
         }
 
@@ -226,7 +226,7 @@ pub fn judge_gate_condition(state: &MusicProductionState) -> String {
     if state.quality_passed {
         info!("Quality gate PASSED. Routing forward to analog_mastering_node.");
         ROUTE_MASTERING.to_string()
-    } else if state.retry_count < 2 {
+    } else if state.retry_count <= 2 {
         if state.telemetry.tempo_drift_score > 0.50 {
             warn!(
                 "Severe vocal/tempo drift detected ({:.4} > 0.50). Routing back to groove_and_yue_synthesis_node (retry {}/2).",

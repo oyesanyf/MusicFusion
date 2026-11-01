@@ -42,13 +42,22 @@ impl StateGraph {
         }
     }
 
-    /// Registers a node in the graph.
-    pub fn add_node<N>(&mut self, name: &str, node: N) -> &mut Self
+    /// Registers a node in the graph. Returns an error if a node with that name already exists.
+    pub fn add_node<N>(&mut self, name: &str, node: N) -> Result<&mut Self>
     where
         N: GraphNode + 'static,
     {
+        if name == START || name == END {
+            return Err(PipelineError::General(format!(
+                "Cannot register node with reserved pseudo-node identifier '{}'",
+                name
+            )));
+        }
+        if self.nodes.contains_key(name) {
+            return Err(PipelineError::DuplicateNode(name.to_string()));
+        }
         self.nodes.insert(name.to_string(), Arc::new(node));
-        self
+        Ok(self)
     }
 
     /// Explicitly designates the graph's entry node.
@@ -118,6 +127,17 @@ impl StateGraph {
                             return Err(PipelineError::NodeNotFound(to.clone()));
                         }
                     }
+                }
+            }
+        }
+
+        // Validate all registered non-terminal nodes have at least one outgoing edge or route to END
+        for node_name in self.nodes.keys() {
+            match self.edges.get(node_name) {
+                Some(Edge::Direct(_)) => {}
+                Some(Edge::Conditional { branches, .. }) if !branches.is_empty() => {}
+                _ => {
+                    return Err(PipelineError::DeadEndNode(node_name.clone()));
                 }
             }
         }
@@ -246,10 +266,20 @@ impl CompiledGraph {
                         obs.on_node_complete(&current_node, state, duration_ms).await;
                     }
 
-                    // Save checkpoint if enabled
+                    // Save checkpoint if enabled - fail closed on security errors
                     if let Some(cp) = checkpointer {
                         if let Err(e) = cp.save_checkpoint(state, &current_node).await {
-                            log::warn!("Checkpointer warning at node {}: {}", current_node, e);
+                            match e {
+                                PipelineError::SecurityError(_) => {
+                                    if let Some(obs) = observer {
+                                        obs.on_node_error(&current_node, &e).await;
+                                    }
+                                    return Err(e);
+                                }
+                                other => {
+                                    log::warn!("Checkpointer warning at node {}: {}", current_node, other);
+                                }
+                            }
                         }
                     }
 
@@ -281,7 +311,14 @@ impl CompiledGraph {
                             }
                         }
                         None => {
-                            current_node = END.to_string();
+                            let err = PipelineError::RoutingError {
+                                node: current_node.clone(),
+                                reason: "No outgoing edge registered for node".to_string(),
+                            };
+                            if let Some(obs) = observer {
+                                obs.on_node_error(&current_node, &err).await;
+                            }
+                            return Err(err);
                         }
                     }
                 }

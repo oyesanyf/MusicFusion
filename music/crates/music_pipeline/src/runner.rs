@@ -90,12 +90,12 @@ pub fn build_production_pipeline(config: &PipelineConfig) -> Result<(CompiledGra
 
     let mut graph = StateGraph::new();
 
-    graph.add_node("ollama_producer_panel_node", node1);
-    graph.add_node("groove_and_yue_synthesis_node", node2);
-    graph.add_node("vocal_timbre_fusion_node", node3);
-    graph.add_node("virtuoso_stem_inpainting_node", node4);
-    graph.add_node("dsp_and_judge_gate_node", node5);
-    graph.add_node("analog_mastering_node", node6);
+    graph.add_node("ollama_producer_panel_node", node1)?;
+    graph.add_node("groove_and_yue_synthesis_node", node2)?;
+    graph.add_node("vocal_timbre_fusion_node", node3)?;
+    graph.add_node("virtuoso_stem_inpainting_node", node4)?;
+    graph.add_node("dsp_and_judge_gate_node", node5)?;
+    graph.add_node("analog_mastering_node", node6)?;
 
     graph.set_entry_point("ollama_producer_panel_node");
 

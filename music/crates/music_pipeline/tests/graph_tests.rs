@@ -43,8 +43,8 @@ async fn test_stategraph_registration_and_compilation() {
         counter: counter.clone(),
     };
 
-    graph.add_node("node1", n1);
-    graph.add_node("node2", n2);
+    graph.add_node("node1", n1).expect("add node1");
+    graph.add_node("node2", n2).expect("add node2");
     graph.add_edge(START, "node1");
     graph.add_edge("node1", "node2");
     graph.add_edge("node2", END);
@@ -65,7 +65,7 @@ async fn test_stategraph_registration_and_compilation() {
 async fn test_stategraph_missing_entry_point() {
     let mut graph = StateGraph::new();
     let counter = Arc::new(AtomicUsize::new(0));
-    graph.add_node("n1", IncrementNode { name: "n1".to_string(), counter });
+    graph.add_node("n1", IncrementNode { name: "n1".to_string(), counter }).expect("add n1");
 
     let res = graph.compile();
     assert!(matches!(res, Err(PipelineError::MissingEntryPoint)));
@@ -75,7 +75,7 @@ async fn test_stategraph_missing_entry_point() {
 async fn test_stategraph_invalid_node_reference() {
     let mut graph = StateGraph::new();
     let counter = Arc::new(AtomicUsize::new(0));
-    graph.add_node("n1", IncrementNode { name: "n1".to_string(), counter });
+    graph.add_node("n1", IncrementNode { name: "n1".to_string(), counter }).expect("add n1");
     graph.set_entry_point("n1");
     graph.add_edge("n1", "non_existent_node");
 
@@ -104,9 +104,9 @@ async fn test_stategraph_conditional_edge_routing() {
         counter: counter_branch_b.clone(),
     };
 
-    graph.add_node("evaluator", evaluator);
-    graph.add_node("branch_fast", branch_a);
-    graph.add_node("branch_slow", branch_b);
+    graph.add_node("evaluator", evaluator).expect("add evaluator");
+    graph.add_node("branch_fast", branch_a).expect("add branch_fast");
+    graph.add_node("branch_slow", branch_b).expect("add branch_slow");
 
     graph.set_entry_point("evaluator");
 
@@ -156,7 +156,7 @@ async fn test_stategraph_max_iterations_loop_guard() {
         counter: loop_counter.clone(),
     };
 
-    graph.add_node("looper", looper);
+    graph.add_node("looper", looper).expect("add looper");
     graph.set_entry_point("looper");
     // Infinite cycle back to looper
     graph.add_edge("looper", "looper");
@@ -221,9 +221,12 @@ async fn test_checkpoint_manager_path_traversal_defense() {
     let checkpointer = CheckpointManager::new(temp_dir.path());
 
     let bad_ids = [
+        // Standard path traversal
         "../escape",
         "..\\escape",
+        "../../etc/passwd",
         "c:/windows/system32",
+        "C:\\Windows\\System32",
         "foo/bar",
         "foo\\bar",
         "foo:bar",
@@ -231,7 +234,67 @@ async fn test_checkpoint_manager_path_traversal_defense() {
         "foo%2ebar",
         "foo%2fbar",
         "foo%5cbar",
+        "foo%00bar",
         "",
+        // Windows filesystem quirks (trailing dot / space)
+        "foo.",
+        "foo ",
+        "song.",
+        "song ",
+        // Windows reserved device names (uppercase)
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+        // Windows reserved device names (lowercase)
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        "com1",
+        "com2",
+        "com3",
+        "com4",
+        "com5",
+        "com6",
+        "com7",
+        "com8",
+        "com9",
+        "lpt1",
+        "lpt2",
+        "lpt3",
+        "lpt4",
+        "lpt5",
+        "lpt6",
+        "lpt7",
+        "lpt8",
+        "lpt9",
+        // Windows reserved device names with extensions
+        "CON.txt",
+        "prn.wav",
+        "aux.json",
+        "nul.dat",
+        "com1.wav",
+        "COM2.state",
+        "LPT1.log",
     ];
 
     for bad in &bad_ids {
@@ -301,7 +364,7 @@ impl GraphObserver for TrackingObserver {
 async fn test_observer_lifecycle_events() {
     let mut graph = StateGraph::new();
     let counter = Arc::new(AtomicUsize::new(0));
-    graph.add_node("n1", IncrementNode { name: "n1".to_string(), counter });
+    graph.add_node("n1", IncrementNode { name: "n1".to_string(), counter }).expect("add n1");
     graph.set_entry_point("n1");
     graph.add_edge("n1", END);
 
@@ -316,4 +379,214 @@ async fn test_observer_lifecycle_events() {
 
     let logged = events.lock().unwrap().clone();
     assert_eq!(logged, vec!["start:n1", "complete:n1"]);
+}
+
+#[tokio::test]
+async fn test_checkpoint_security_error_fails_closed() {
+    let temp_dir = tempfile::tempdir().expect("tempdir creation");
+    let checkpointer = CheckpointManager::new(temp_dir.path());
+
+    let mut graph = StateGraph::new();
+    let counter_1 = Arc::new(AtomicUsize::new(0));
+    let counter_2 = Arc::new(AtomicUsize::new(0));
+
+    let n1 = IncrementNode {
+        name: "node1".to_string(),
+        counter: counter_1.clone(),
+    };
+    let n2 = IncrementNode {
+        name: "node2".to_string(),
+        counter: counter_2.clone(),
+    };
+
+    graph.add_node("node1", n1).expect("add node1");
+    graph.add_node("node2", n2).expect("add node2");
+    graph.set_entry_point("node1");
+    graph.add_edge("node1", "node2");
+    graph.add_edge("node2", END);
+
+    let compiled = graph.compile().expect("Graph should compile cleanly");
+
+    let bad_state = MusicProductionState::new(
+        "../../etc/passwd",
+        "Roots Reggae",
+        76,
+        "A Major",
+    );
+
+    let res = compiled.execute_with_checkpointer(bad_state, &checkpointer).await;
+
+    match res {
+        Err(PipelineError::SecurityError(msg)) => {
+            assert!(
+                msg.contains("Path traversal") || msg.contains("Invalid path component"),
+                "Security error message should identify path traversal rejection: {}",
+                msg
+            );
+        }
+        other => panic!("Expected Err(PipelineError::SecurityError), got: {:?}", other),
+    }
+
+    assert_eq!(counter_1.load(Ordering::SeqCst), 1, "Node 1 should run before checkpoint");
+    assert_eq!(counter_2.load(Ordering::SeqCst), 0, "Node 2 must NEVER run after security violation");
+}
+
+#[tokio::test]
+async fn test_checkpoint_security_error_notifies_observer() {
+    let temp_dir = tempfile::tempdir().expect("tempdir creation");
+    let checkpointer = CheckpointManager::new(temp_dir.path());
+
+    let mut graph = StateGraph::new();
+    let counter = Arc::new(AtomicUsize::new(0));
+    let n1 = IncrementNode {
+        name: "node1".to_string(),
+        counter,
+    };
+
+    graph.add_node("node1", n1).expect("add node1");
+    graph.set_entry_point("node1");
+    graph.add_edge("node1", END);
+
+    let compiled = graph.compile().expect("compile");
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observer: Arc<dyn GraphObserver> = Arc::new(TrackingObserver {
+        events: events.clone(),
+    });
+
+    let bad_state = MusicProductionState::new("COM1", "Roots Reggae", 76, "A Major");
+    let res = compiled
+        .execute_with_observer(bad_state, Some(&checkpointer), Some(&observer))
+        .await;
+
+    assert!(matches!(res, Err(PipelineError::SecurityError(_))));
+    let logged = events.lock().unwrap().clone();
+    assert!(logged.contains(&"start:node1".to_string()));
+    assert!(logged.contains(&"complete:node1".to_string()));
+    assert!(logged.contains(&"error:node1".to_string()), "Observer must receive error:node1 event on security error");
+}
+
+#[tokio::test]
+async fn test_stategraph_duplicate_node_rejection() {
+    let mut graph = StateGraph::new();
+    let counter = Arc::new(AtomicUsize::new(0));
+
+    let n1 = IncrementNode {
+        name: "duplicate_stage".to_string(),
+        counter: counter.clone(),
+    };
+    let n2 = IncrementNode {
+        name: "duplicate_stage".to_string(),
+        counter: counter.clone(),
+    };
+
+    let res1 = graph.add_node("duplicate_stage", n1);
+    assert!(res1.is_ok(), "First add_node call should succeed");
+
+    let res2 = graph.add_node("duplicate_stage", n2);
+    match res2 {
+        Err(PipelineError::DuplicateNode(name)) => {
+            assert_eq!(name, "duplicate_stage", "Error should report duplicate node name");
+        }
+        Err(e) => panic!("Expected Err(PipelineError::DuplicateNode), got: {:?}", e),
+        Ok(_) => panic!("Expected Err(PipelineError::DuplicateNode), got Ok"),
+    }
+}
+
+#[tokio::test]
+async fn test_stategraph_reserved_pseudo_node_rejection() {
+    let mut graph = StateGraph::new();
+    let counter = Arc::new(AtomicUsize::new(0));
+
+    let n_start = IncrementNode {
+        name: START.to_string(),
+        counter: counter.clone(),
+    };
+    let n_end = IncrementNode {
+        name: END.to_string(),
+        counter: counter.clone(),
+    };
+
+    let res_start = graph.add_node(START, n_start);
+    assert!(res_start.is_err(), "Adding START node must be rejected");
+
+    let res_end = graph.add_node(END, n_end);
+    assert!(res_end.is_err(), "Adding END node must be rejected");
+}
+
+#[tokio::test]
+async fn test_stategraph_dangling_entry_node_compile_time_rejection() {
+    let mut graph = StateGraph::new();
+    let counter = Arc::new(AtomicUsize::new(0));
+
+    let n1 = IncrementNode {
+        name: "dangling_entry".to_string(),
+        counter: counter.clone(),
+    };
+
+    graph.add_node("dangling_entry", n1).expect("add node");
+    graph.set_entry_point("dangling_entry");
+
+    let res = graph.compile();
+    match res {
+        Err(PipelineError::DeadEndNode(name)) => {
+            assert_eq!(name, "dangling_entry", "Should identify dangling entry node");
+        }
+        Err(e) => panic!("Expected Err(PipelineError::DeadEndNode), got: {:?}", e),
+        Ok(_) => panic!("Expected Err(PipelineError::DeadEndNode), got Ok"),
+    }
+}
+
+#[tokio::test]
+async fn test_stategraph_downstream_dead_end_node_compile_time_rejection() {
+    let mut graph = StateGraph::new();
+    let counter = Arc::new(AtomicUsize::new(0));
+
+    let n1 = IncrementNode {
+        name: "node1".to_string(),
+        counter: counter.clone(),
+    };
+    let n2 = IncrementNode {
+        name: "dead_end_stage".to_string(),
+        counter: counter.clone(),
+    };
+
+    graph.add_node("node1", n1).expect("add node1");
+    graph.add_node("dead_end_stage", n2).expect("add node2");
+    graph.set_entry_point("node1");
+    graph.add_edge("node1", "dead_end_stage");
+
+    let res = graph.compile();
+    match res {
+        Err(PipelineError::DeadEndNode(name)) => {
+            assert_eq!(name, "dead_end_stage", "Should catch dead_end_stage at compile time");
+        }
+        Err(e) => panic!("Expected Err(PipelineError::DeadEndNode), got: {:?}", e),
+        Ok(_) => panic!("Expected Err(PipelineError::DeadEndNode), got Ok"),
+    }
+}
+
+#[tokio::test]
+async fn test_stategraph_conditional_edge_empty_branches_rejection() {
+    let mut graph = StateGraph::new();
+    let counter = Arc::new(AtomicUsize::new(0));
+
+    let n1 = IncrementNode {
+        name: "cond_node".to_string(),
+        counter,
+    };
+
+    graph.add_node("cond_node", n1).expect("add node");
+    graph.set_entry_point("cond_node");
+    let empty_branches: HashMap<String, String> = HashMap::new();
+    graph.add_conditional_edges("cond_node", |_| "any".to_string(), empty_branches);
+
+    let res = graph.compile();
+    match res {
+        Err(PipelineError::DeadEndNode(name)) => {
+            assert_eq!(name, "cond_node", "Should catch node with empty conditional branches");
+        }
+        Err(e) => panic!("Expected Err(PipelineError::DeadEndNode), got: {:?}", e),
+        Ok(_) => panic!("Expected Err(PipelineError::DeadEndNode), got Ok"),
+    }
 }
