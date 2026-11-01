@@ -187,11 +187,11 @@ impl OllamaProducerPanelNode {
         existing_lyrics: &str,
         genre_name: &str,
     ) -> String {
-        // Source selection
-        let mut raw = if !yue_lyrics.trim().is_empty() {
-            yue_lyrics.trim().to_string()
-        } else if !existing_lyrics.trim().is_empty() {
+        // Source selection: prioritize user-supplied existing_lyrics when present
+        let mut raw = if !existing_lyrics.trim().is_empty() {
             existing_lyrics.trim().to_string()
+        } else if !yue_lyrics.trim().is_empty() {
+            yue_lyrics.trim().to_string()
         } else {
             String::new()
         };
@@ -209,9 +209,14 @@ impl OllamaProducerPanelNode {
 
         raw = raw.trim().to_string();
 
-        // 2. If raw lyrics have no bracket tags, wrap into canonical sections
+        // 2. If raw lyrics have no bracket tags, preserve user's custom lyrics if provided, or use canonical defaults
         if !raw.contains('[') || !raw.contains(']') {
-            if genre_name.to_ascii_lowercase().contains("afrobeats") {
+            if !raw.is_empty() {
+                return format!(
+                    "[Intro]\n{}\n\n[Verse 1]\n{}\n\n[Chorus]\n{}\n\n[Verse 2]\n{}\n\n[Guitar Solo]\n(Instrumental lead guitar solo)\n\n[Bridge]\n{}\n\n[Outro]\n{}",
+                    raw, raw, raw, raw, raw, raw
+                );
+            } else if genre_name.to_ascii_lowercase().contains("afrobeats") {
                 return "[Intro]\nLagos to the world, feel the groove, we move to the sunrise beat!\n\n[Verse 1]\nEarly morning sunshine rising over Lagos bay,\nFeel the energy awaken as we start the brand new day.\n\n[Chorus]\nLog-drum is vibrating, shake the body, let it go!\nAfrican connection got the whole world in a glow.\n\n[Verse 2]\nHighlife sweet guitar is plucking melodies so clean,\nFlipping through the rhythm like a cinematic scene.\n\n[Guitar Solo]\n(Highlife guitar solo interlocks with syncopated log-drum bassline)\n\n[Bridge]\nCelebrate the journey from the island to the street,\nNothing can compare to this syncopated beat.\n\n[Outro]\nRaise up your hands if you are ready for the sound,\nFeel the joy spreading all across the town!".to_string();
             } else {
                 return "[Intro]\nYeah man, roots rock reggae from the heart of Kingston town, feel the rhythm in the morning sun.\n\n[Verse 1]\nWalking down the trenchtown avenue early morning light,\nGuiding all the children through the struggles of the night.\n\n[Chorus]\nOne love, one heart, let us get together and feel alright.\nGive thanks and praises to the highest light.\n\n[Verse 2]\nRasta man vibration spreading joy across the land,\nHealing every brother with a helping open hand.\n\n[Guitar Solo]\n(Soaring psychedelic wah-wah guitar echoes through the hills of Zion)\n\n[Bridge]\nLove is the answer, love is the righteous way,\nLighting up tomorrow from the dawn of yesterday.\n\n[Outro]\nOne love, one heart, let the music play on and on,\nJah guide and protect us till the morning dawn, yeah!".to_string();

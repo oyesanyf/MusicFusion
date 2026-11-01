@@ -635,7 +635,7 @@ pub async fn handle_tts_vocals(
 /// GET /api/songs/:id/versions/:v/download — Downloads final_master WAV for a specific version.
 pub async fn handle_download_version(
     State(state): State<AppState>,
-    AxumPath((song_id, version)): AxumPath<(String, u32)>,
+    AxumPath((song_id, version)): AxumPath<(String, String)>,
     Query(query): Query<AudioStreamQuery>,
     headers: HeaderMap,
 ) -> Response {
@@ -666,7 +666,7 @@ pub async fn handle_download_latest(
 
     handle_stream_audio(
         State(state),
-        AxumPath((clean_id, latest_v, "final_master".to_string())),
+        AxumPath((clean_id, latest_v.to_string(), "final_master".to_string())),
         Query(AudioStreamQuery {
             download: Some("1".to_string()),
             format: query.format,
@@ -860,10 +860,19 @@ fn transcode_float32_wav_to_pcm16(bytes: &[u8]) -> Option<Vec<u8>> {
 /// Streams 48 kHz WAV audio with Range support and cross-version lineage resolution.
 pub async fn handle_stream_audio(
     State(state): State<AppState>,
-    AxumPath((song_id, version, stem)): AxumPath<(String, u32, String)>,
+    AxumPath((song_id, version_raw, stem)): AxumPath<(String, String, String)>,
     Query(query): Query<AudioStreamQuery>,
     headers: HeaderMap,
 ) -> Response {
+    let version = match version_raw.trim_start_matches(['v', 'V']).parse::<u32>() {
+        Ok(v) if v >= 1 => v,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid version '{}'", version_raw), "status": "bad_request"})),
+            ).into_response();
+        }
+    };
     // 1. Sanitize components to fail closed against traversal, NT ADS, and DOS device names
     let raw_clean_id = match CheckpointManager::sanitize_path_component(&song_id) {
         Ok(id) => id,
