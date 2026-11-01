@@ -53,3 +53,7 @@ path = "test_cross_feature_combinations.rs"
 [[test]]
 name = "test_real_world_scenarios"
 path = "test_real_world_scenarios.rs"
+
+[[test]]
+name = "test_live_ide_execution"
+path = "test_live_ide_execution.rs"

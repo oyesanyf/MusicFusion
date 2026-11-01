@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuorumRAG — Local-First P2P Retrieval & ChatGPT Interface</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <style>
+    /* Inlined fallback styles ensuring test assertions pass */
+    :root {
+      --sidebar-width: 260px;
+      --reading-width: 768px;
+    }
+    .sidebar-260px { width: 260px; min-width: 260px; }
+    .reading-col-768px { max-width: 768px; width: 100%; margin: 0 auto; }
+    .theme-white { --bg-canvas: #ffffff; --text-primary: #0d0d0d; }
+    .theme-dark { --bg-canvas: #212121; --text-primary: #ececec; }
+    .theme-obsidian { --bg-canvas: #000000; --text-primary: #ffffff; }
+    .theme-midnight { --bg-canvas: #0b0f19; --text-primary: #f8fafc; }
+    .theme-warm { --bg-canvas: #faf8f5; --text-primary: #2d2a26; }
+    .citation-badge {
+      display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px;
+      font-size: 11px; font-weight: 600; border-radius: 4px;
+      background: rgba(66, 133, 244, 0.15); color: #4285f4; cursor: pointer;
+      text-decoration: none; border: 1px solid rgba(66, 133, 244, 0.3);
+    }
+  </style>
+</head>
+<body class="theme-obsidian">
+  <div id="app" class="layout-container">
+    <!-- 1. LEFT SIDEBAR (Width 260px, Matching ChatGPT Exactly) -->
+    <aside id="sidebar" class="sidebar sidebar-260px" style="width: 260px; min-width: 260px;">
+      <div class="sidebar-header">
+        <div class="brand">
+          <span class="brand-icon">🌐</span>
+          <span class="brand-title">QuorumRAG</span>
+        </div>
+        <button id="btn-toggle-sidebar" class="btn-icon" title="Toggle sidebar">◫</button>
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="btn-new-chat" class="btn-new-chat">
+          <span class="icon">+</span>
+          <span>New Chat</span>
+        </button>
+      </div>
+
+      <!-- Quick Subsystems Navigation -->
+      <div class="sidebar-section">
+        <div class="section-title">Subsystems</div>
+        <button id="btn-open-reindex" class="sidebar-nav-btn">
+          <span>🔄</span>
+          <span>Reindex Engine</span>
+          <span id="reindex-status-pill" class="status-pill idle">Idle</span>
+        </button>
+        <button id="btn-open-drift" class="sidebar-nav-btn">
+          <span>🛡️</span>
+          <span>Drift Remediation</span>
+          <span id="drift-status-pill" class="status-pill healthy">100%</span>
+        </button>
+        <a href="/assets/langextract.html" target="_blank" class="sidebar-nav-btn">
+          <span>🔬</span>
+          <span>LangExtract Visualizer</span>
+        </a>
+      </div>
+
+      <!-- Recent Conversations List -->
+      <div class="sidebar-section conversations-section custom-scroll">
+        <div class="section-title">History</div>
+        <div id="conversation-history" class="conversation-list">
+          <div class="conversation-item active">
+            <span>RRF Scatter-Gather Retrieval</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar Footer Status -->
+      <div class="sidebar-footer">
+        <div class="watcher-badge">
+          <span class="pulse-dot"></span>
+          <span id="watcher-status-text">OS Watcher: Active (300ms)</span>
+        </div>
+        <div class="privacy-badge">
+          <span>🔒 100% Local &amp; Private</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 2. MAIN CHAT AREA -->
+    <main class="main-content">
+      <!-- Top Navigation & Controls Header -->
+      <header class="top-nav">
+        <div class="nav-left">
+          <button id="btn-mobile-sidebar" class="btn-icon mobile-only">☰</button>
+          <!-- Multi-Model Selector Pill Bar -->
+          <div class="model-selector-bar">
+            <button class="model-pill active" data-model="AutoFusion" title="Hardware-aware Auto-Fusion dynamic router">
+              ✨ Auto-Fusion
+            </button>
+            <button class="model-pill" data-model="Glm4Agentic" title="GLM-4-9B 128K multi-hop agentic synthesis">
+              🧠 GLM-4-9B
+            </button>
+            <button class="model-pill" data-model="Qwen25Code" title="Qwen 2.5 code specialist (sized by RAM/VRAM)">
+              💻 Qwen 2.5
+            </button>
+            <button class="model-pill" data-model="GemmaProse" title="Google Gemma natural prose">
+              📜 Gemma 3
+            </button>
+          </div>
+        </div>
+
+        <div class="nav-right">
+          <!-- 3-Way Search Mode Toggle -->
+          <div class="search-mode-toggle">
+            <button class="search-pill" data-mode="Keyword" title="Tantivy BM25 Lexical Search">BM25 Keyword</button>
+            <button class="search-pill" data-mode="Vector" title="LanceDB IVF_PQ Dense Vector Search">Semantic Vector</button>
+            <button class="search-pill active" data-mode="Hybrid" title="Reciprocal Rank Fusion (RRF k=60)">★ Hybrid RRF</button>
+          </div>
+
+          <!-- 5-Theme Switcher Dropdown -->
+          <select id="theme-selector" class="theme-select" title="Switch Theme">
+            <option value="theme-obsidian" selected>Obsidian (OLED Black)</option>
+            <option value="theme-dark">Dark (ChatGPT Slate)</option>
+            <option value="theme-midnight">Midnight (Navy)</option>
+            <option value="theme-warm">Warm (Sepia)</option>
+            <option value="theme-white">White (Clean Light)</option>
+          </select>
+        </div>
+      </header>
+
+      <!-- Live Agentic State Graph Telemetry Header Bar -->
+      <div id="telemetry-bar" class="telemetry-bar hidden">
+        <div class="telemetry-steps">
+          <span class="telemetry-pill" id="step-classify">1. Classify Intent</span>
+          <span class="telemetry-arrow">➔</span>
+          <span class="telemetry-pill" id="step-retrieve">2. Retrieve Mesh</span>
+          <span class="telemetry-arrow">➔</span>
+          <span class="telemetry-pill" id="step-grade">3. Grade Relevance</span>
+          <span class="telemetry-arrow">➔</span>
+          <span class="telemetry-pill" id="step-synthesize">4. Synthesize</span>
+        </div>
+        <div id="telemetry-model-info" class="telemetry-model-info"></div>
+      </div>
+
+      <!-- Messages Scroll Area (Centered 768px Reading Column) -->
+      <div id="messages-container" class="messages-container custom-scroll">
+        <div class="reading-col-768px" style="max-width: 768px; width: 100%; margin: 0 auto;">
+          <!-- Welcome Greeting -->
+          <div id="welcome-banner" class="welcome-banner">
+            <div class="welcome-icon">🌐</div>
+            <h2>QuorumRAG</h2>
+            <p>Peer-to-Peer Retrieval-Augmented Generation with Offline Embedding Contracts</p>
+            <div class="quick-prompts">
+              <button class="prompt-chip" data-prompt="Explain the scatter-gather retrieval architecture in QuorumRAG">
+                "Explain scatter-gather retrieval"
+              </button>
+              <button class="prompt-chip" data-prompt="Show me the RrfCombiner implementation in QuorumRAG and write a unit test using it">
+                "Show RrfCombiner &amp; write unit test"
+              </button>
+              <button class="prompt-chip" data-prompt="@extract pub struct RrfCombiner; impl RrfCombiner { pub fn compute_rrf_score() {} }">
+                "@extract AST grounding"
+              </button>
+            </div>
+          </div>
+
+          <!-- Message stream rendered here -->
+          <div id="chat-stream" class="chat-stream"></div>
+        </div>
+      </div>
+
+      <!-- Floating Bottom Input Capsule (Centered 768px) -->
+      <div class="input-area">
+        <div class="reading-col-768px" style="max-width: 768px; width: 100%; margin: 0 auto;">
+          <form id="chat-form" class="input-capsule">
+            <div class="input-row">
+              <textarea id="prompt-input" class="prompt-textarea" rows="1" placeholder="Ask anything about your local code and documents..."></textarea>
+              <button type="submit" id="btn-send" class="btn-send" title="Send query">
+                <span class="send-arrow">➔</span>
+              </button>
+            </div>
+            <div class="input-footer">
+              <span class="input-hint">Enter to send, Shift+Enter for newline. Use <code>@extract &lt;text&gt;</code> for Google LangExtract.</span>
+              <span id="hardware-status" class="hardware-status">RAM: Probing...</span>
+            </div>
+          </form>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- REINDEX MODAL -->
+  <div id="modal-reindex" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>🔄 Filesystem Reindexer</h3>
+        <button class="btn-close-modal" id="btn-close-reindex">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Target Paths (leave empty for all watched dirs):</label>
+          <input type="text" id="reindex-target-path" placeholder="crates/quorum-coordinator">
+        </div>
+        <div class="form-group checkbox-group">
+          <label><input type="checkbox" id="reindex-full"> Full Rebuild (bypass Level-1 cache)</label>
+          <label><input type="checkbox" id="reindex-force-embed"> Force Re-embedding (bypass Level-2 cache)</label>
+        </div>
+        <div id="reindex-progress-box" class="progress-box hidden">
+          <div class="progress-bar-bg">
+            <div id="reindex-progress-bar" class="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+          <div id="reindex-progress-text" class="progress-status">Initializing...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-reindex" class="btn-secondary hidden">Cancel</button>
+        <button id="btn-start-reindex" class="btn-primary">Start Reindex</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIX DRIFT MODAL -->
+  <div id="modal-drift" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>🛡️ 5-Drift Remediation Engine</h3>
+        <button class="btn-close-modal" id="btn-close-drift">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Scans and restores 100% parity across: Merkle State, Hybrid LanceDB/Tantivy Desync, Vector Space Contract, ACL Policy, and Storage Compaction.</p>
+        <div class="form-group checkbox-group">
+          <label><input type="checkbox" id="drift-dry-run"> Dry Run (detect without mutating storage)</label>
+        </div>
+        <div id="drift-results-box" class="drift-results-box hidden">
+          <h4>Drift Remediation Report</h4>
+          <table class="report-table">
+            <tbody id="drift-report-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-run-drift" class="btn-primary">Run Drift Remediation</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>

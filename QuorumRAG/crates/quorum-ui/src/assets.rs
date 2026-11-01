@@ -1,0 +1,69 @@
+use axum::{
+    body::Body,
+    http::{header, HeaderValue, StatusCode, Uri},
+    response::{IntoResponse, Response},
+};
+use rust_embed::RustEmbed;
+use std::borrow::Cow;
+
+#[derive(RustEmbed)]
+#[folder = "assets/"]
+pub struct WebAssets;
+
+/// Retrieves embedded static asset bytes and its MIME content-type.
+pub fn get_asset(path: &str) -> Option<(Cow<'static, [u8]>, &'static str)> {
+    let clean_path = path.trim_start_matches('/');
+    let target = if clean_path.is_empty() {
+        "index.html"
+    } else {
+        clean_path
+    };
+
+    WebAssets::get(target).map(|file| {
+        let mime = mime_guess::from_path(target)
+            .first_raw()
+            .unwrap_or("application/octet-stream");
+        (file.data, mime)
+    })
+}
+
+/// Returns the embedded index.html string.
+pub fn get_index_html() -> String {
+    WebAssets::get("index.html")
+        .map(|f| String::from_utf8_lossy(&f.data).to_string())
+        .unwrap_or_else(|| "<html><body><h3>QuorumRAG Web UI</h3></body></html>".to_string())
+}
+
+/// Static asset handler with SPA fallback to index.html.
+pub async fn static_handler(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let target_path = if path.is_empty() { "index.html" } else { path };
+
+    match WebAssets::get(target_path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(target_path)
+                .first_raw()
+                .unwrap_or("application/octet-stream");
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_str(mime).unwrap_or(HeaderValue::from_static("application/octet-stream")),
+                )
+                .header(header::CACHE_CONTROL, "public, max-age=3600")
+                .body(Body::from(content.data))
+                .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Response building failed").into_response())
+        }
+        None => match WebAssets::get("index.html") {
+            Some(content) => Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .body(Body::from(content.data))
+                .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Response building failed").into_response()),
+            None => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("404 Not Found"))
+                .unwrap_or_else(|_| (StatusCode::NOT_FOUND, "Not Found").into_response()),
+        },
+    }
+}
