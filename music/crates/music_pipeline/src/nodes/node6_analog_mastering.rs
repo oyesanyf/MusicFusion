@@ -69,40 +69,56 @@ impl AnalogMasteringNode {
     pub fn mix_stems_to_premaster(&self, state: &MusicProductionState) -> AudioBuffer {
         let mut premaster = AudioBuffer::new_stereo(0.1);
 
+        let (vocal_gain, guitar_gain, drums_gain, bass_gain, other_gain) = if let Some(ref bp) = state.blueprint {
+            let m = &bp.stem_mix;
+            let db_to_linear = |db: f32, nominal: f32| -> f32 {
+                (nominal * 10.0f32.powf(db / 20.0)).clamp(0.2, 1.4)
+            };
+            (
+                db_to_linear(m.lead_vocal_db, 0.85),
+                db_to_linear(m.guitar_db, 0.75),
+                db_to_linear(m.drums_db, 0.85),
+                db_to_linear(m.dub_bass_db, 0.70),
+                db_to_linear(m.organ_brass_db, 0.75),
+            )
+        } else {
+            (0.95, 0.85, 0.90, 0.82, 0.75)
+        };
+
         // 1. Lead Vocal (vocal headroom)
         let vocal_path = state.get_stem(STEM_RASPY_TENOR_VOCALS)
             .or_else(|| state.get_stem(STEM_YUE_VOCALS));
         if let Some(p) = vocal_path {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, 0.95);
+                mix_buffers(&mut premaster, &buf, vocal_gain);
             }
         }
 
         // 2. Inpainted Guitar Solo / Lead
         if let Some(p) = state.get_stem(STEM_INPAINTED_GUITAR) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, 0.85);
+                mix_buffers(&mut premaster, &buf, guitar_gain);
             }
         }
 
         // 3. Inpainted Drums & Percussion
         if let Some(p) = state.get_stem(STEM_INPAINTED_DRUMS) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, 0.90);
+                mix_buffers(&mut premaster, &buf, drums_gain);
             }
         }
 
         // 4. Bass Foundation
         if let Some(p) = state.get_stem(STEM_BASS) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, 0.82);
+                mix_buffers(&mut premaster, &buf, bass_gain);
             }
         }
 
         // 5. Other (Keyboards, Horns, Ambient)
         if let Some(p) = state.get_stem(STEM_OTHER) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, 0.75);
+                mix_buffers(&mut premaster, &buf, other_gain);
             }
         }
 
@@ -131,7 +147,12 @@ impl AnalogMasteringNode {
         } else {
             let profile = Self::resolve_profile(&state.genre);
             info!("Applying pure-Rust analog mastering profile: {:?}", profile);
-            apply_analog_mastering(&premaster, profile)
+            if let Some(ref bp) = state.blueprint {
+                // Apply tuned sub-bass boost from blueprint
+                music_dsp::tape_mastering::apply_analog_tape_mastering(&premaster, bp.stem_mix.sub_bass_boost_db)
+            } else {
+                apply_analog_mastering(&premaster, profile)
+            }
         };
 
         // 3. Inspect final master telemetry

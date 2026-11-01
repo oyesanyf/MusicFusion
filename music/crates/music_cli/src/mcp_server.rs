@@ -306,25 +306,24 @@ pub async fn handle_tool_call(params: &Value, runner: &PipelineRunner) -> anyhow
         "music_assist_iteration" => {
             let song_id = args.get("song_id").and_then(|v| v.as_str()).unwrap_or("");
             let version = args.get("version").and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or(1);
+            let focus = args.get("focus").and_then(|v| v.as_str());
 
             let state = runner.checkpointer().load_checkpoint(song_id, version).await?;
-            let suggestions = vec![
-                format!("🔥 Boost guitar solo wah envelope and sustain in [Guitar Solo] (BPM: {})", state.bpm),
-                "🥁 Add syncopated Nyabinghi percussion fills in [Verse 2]".to_string(),
-                "🎤 Elevate gospel choir call-and-response harmonies in [Chorus]".to_string(),
-                "🔊 Boost 55-85 Hz analog sub-bass warmth on bass stem".to_string(),
-            ];
+            let mem = music_fusion::memory::SystemMemory::detect_live();
+            let panel = music_fusion::iteration_panel::IterationFusionPanel::new_auto_configured(&mem).await;
+            let resp = panel.assist_song_iteration(&state, focus).await
+                .unwrap_or_else(|_| panel.offline_fallback_assist(&state));
 
             Ok(json!({
                 "status": "completed",
                 "song_id": song_id,
                 "version": version,
-                "critique": format!("Song '{}' v{} has peak {} dBFS with {} BPM in {}. Dynamic range is {} dB.",
-                    state.song_id, state.version, state.telemetry.peak_dbfs, state.bpm, state.key_signature, state.telemetry.dynamic_range_db),
-                "suggested_next_iterations": suggestions,
+                "copilot_model": resp.copilot_model,
+                "critique": resp.critique,
+                "suggested_next_iterations": resp.suggested_next_iterations,
                 "content": [{
                     "type": "text",
-                    "text": format!("Iteration Co-Pilot suggestions for {}: {:?}", song_id, suggestions)
+                    "text": format!("Iteration Co-Pilot ({}) suggestions for {}: {:?}", resp.copilot_model, song_id, resp.suggested_next_iterations)
                 }]
             }))
         }

@@ -201,20 +201,145 @@ impl PipelineRunner {
         ).await
     }
 
-    /// Song iteration: creates a new version branch with optional updated style prompt or lyrics.
+    /// Song iteration: creates a new version branch with updated parameters and executed pipeline.
     pub async fn iterate_song(
         &self,
         song_id: &str,
         from_version: u32,
         prompt_update: Option<&str>,
     ) -> Result<MusicProductionState> {
-        let mut state = self.checkpointer.load_checkpoint(song_id, from_version).await?;
-        state.advance_version();
-        if let Some(p) = prompt_update {
-            state.style_prompt = p.to_string();
-        }
-        state.history.push(format!("Iterating song from v{} to v{}", from_version, state.version));
+        self.iterate_song_with_tweaks(song_id, from_version, prompt_update, None).await
+    }
 
-        self.compiled.execute_with_checkpointer(state, &self.checkpointer).await
+    /// Enhanced song iteration: accepts explicit ParameterTweaks or parses them from critique string,
+    /// invokes IterationFusionPanel, applies diff blueprint & stem adjustments, and runs pipeline.
+    pub async fn iterate_song_with_tweaks(
+        &self,
+        song_id: &str,
+        from_version: u32,
+        prompt_update: Option<&str>,
+        explicit_tweaks: Option<music_fusion::iteration_panel::ParameterTweaks>,
+    ) -> Result<MusicProductionState> {
+        let prev_state = self.checkpointer.load_checkpoint(song_id, from_version).await?;
+        let critique = prompt_update.unwrap_or("").trim();
+
+        // 1. Prepare base ParameterTweaks
+        let tweaks = explicit_tweaks.unwrap_or_default();
+
+        // 2. Run IterationFusionPanel (or deterministic fallback)
+        let mem = music_fusion::memory::SystemMemory::detect_live();
+        let panel = music_fusion::iteration_panel::IterationFusionPanel::new_auto_configured(&mem).await;
+        let iteration_result = panel.run_iteration_fusion(&prev_state, critique, &tweaks).await
+            .unwrap_or_else(|_| panel.offline_fallback_iteration(&prev_state, critique, &tweaks));
+
+        // 3. Modulate state parameters
+        let mut next_state = prev_state.clone();
+        next_state.advance_version();
+
+        // 3a. BPM modulation: prioritize explicit tweak, extracted BPM, or genre-bounded delta
+        let genre_preset = music_core::genre::GenreTaxonomy::find_or_create(&prev_state.genre);
+        let next_bpm = if let Some(b) = tweaks.bpm {
+            b
+        } else if let Some(b) = music_fusion::iteration_panel::parse_bpm_from_critique(critique) {
+            b
+        } else {
+            let candidate_bpm = iteration_result.blueprint.bpm.round() as u32;
+            if candidate_bpm != prev_state.bpm && (genre_preset.bpm_range.0..=genre_preset.bpm_range.1).contains(&candidate_bpm) {
+                candidate_bpm
+            } else if !critique.is_empty() {
+                let delta: i32 = if next_state.version.is_multiple_of(2) { 2 } else { -2 };
+                let cand = (prev_state.bpm as i32 + delta)
+                    .clamp(genre_preset.bpm_range.0 as i32, genre_preset.bpm_range.1 as i32) as u32;
+                if cand != prev_state.bpm {
+                    cand
+                } else if prev_state.bpm + 2 <= genre_preset.bpm_range.1 {
+                    prev_state.bpm + 2
+                } else if prev_state.bpm >= genre_preset.bpm_range.0 + 2 {
+                    prev_state.bpm - 2
+                } else {
+                    prev_state.bpm
+                }
+            } else {
+                prev_state.bpm
+            }
+        };
+        next_state.bpm = next_bpm;
+
+        // 3b. Key signature modulation
+        if let Some(ref k) = tweaks.key_signature {
+            next_state.key_signature = k.clone();
+        } else if let Some(k) = music_fusion::iteration_panel::parse_key_from_critique(critique) {
+            next_state.key_signature = k;
+        } else if !iteration_result.blueprint.key_signature.is_empty() && iteration_result.blueprint.key_signature != prev_state.key_signature {
+            next_state.key_signature = iteration_result.blueprint.key_signature.clone();
+        }
+
+        // 3c. Style prompt & lyrics
+        if let Some(p) = prompt_update {
+            next_state.style_prompt = p.to_string();
+        }
+        if !iteration_result.blueprint.lyrics_text.is_empty() {
+            next_state.lyrics = iteration_result.blueprint.lyrics_text.clone();
+        }
+
+        // 3d. Diff-architected blueprint and stem mix modulation
+        let mut blueprint = prev_state.blueprint.clone().unwrap_or_else(|| {
+            music_core::schema::SongBlueprint::default_one_love_shining_anthem()
+        });
+        blueprint.version = next_state.version;
+        blueprint.parent_version = Some(from_version);
+        blueprint.bpm = next_state.bpm as f64;
+        blueprint.key_signature = next_state.key_signature.clone();
+        blueprint.iteration_notes = iteration_result.iteration_summary.clone();
+
+        // Modulate stem mix parameters based on tweaks or critique
+        let crit_lower = critique.to_ascii_lowercase();
+        if let Some(rasp) = tweaks.vocal_rasp {
+            blueprint.stem_mix.vocal_rasp_intensity = rasp;
+        } else if crit_lower.contains("rasp") || crit_lower.contains("vocal") {
+            blueprint.stem_mix.vocal_rasp_intensity = (blueprint.stem_mix.vocal_rasp_intensity + 0.15).min(1.0);
+        }
+
+        if let Some(bass) = tweaks.sub_bass_weight {
+            blueprint.stem_mix.sub_bass_boost_db = bass * 6.0;
+            blueprint.stem_mix.dub_bass_db += 1.5;
+        } else if crit_lower.contains("bass") || crit_lower.contains("sub") {
+            blueprint.stem_mix.sub_bass_boost_db = (blueprint.stem_mix.sub_bass_boost_db + 1.8).min(6.0);
+            blueprint.stem_mix.dub_bass_db += 1.2;
+        }
+
+        if let Some(wah) = tweaks.guitar_wah {
+            blueprint.stem_mix.guitar_db += 1.0;
+            for sec in &mut blueprint.sections {
+                sec.wah_pedal_depth = wah;
+                sec.guitar_solo_intensity = wah;
+            }
+        } else if crit_lower.contains("guitar") || crit_lower.contains("wah") || crit_lower.contains("solo") {
+            blueprint.stem_mix.guitar_db += 1.5;
+            for sec in &mut blueprint.sections {
+                sec.wah_pedal_depth = (sec.wah_pedal_depth + 0.20).min(1.0);
+                sec.guitar_solo_intensity = (sec.guitar_solo_intensity + 0.15).min(1.0);
+            }
+        }
+
+        if let Some(drum) = tweaks.drum_fill_complexity {
+            blueprint.stem_mix.drums_db += 0.8;
+            for sec in &mut blueprint.sections {
+                sec.drum_fill_complexity = drum;
+            }
+        } else if crit_lower.contains("drum") || crit_lower.contains("fill") || crit_lower.contains("nyabinghi") {
+            blueprint.stem_mix.drums_db += 1.0;
+            for sec in &mut blueprint.sections {
+                sec.drum_fill_complexity = (sec.drum_fill_complexity + 0.20).min(1.0);
+            }
+        }
+
+        next_state.blueprint = Some(blueprint);
+        next_state.history.push(format!(
+            "Iterating song from v{} to v{}: {} (BPM: {}, Key: {})",
+            from_version, next_state.version, critique, next_state.bpm, next_state.key_signature
+        ));
+
+        self.compiled.execute_with_checkpointer(next_state, &self.checkpointer).await
     }
 }

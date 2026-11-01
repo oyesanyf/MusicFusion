@@ -32,11 +32,27 @@ pub fn open_browser_raw(url: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Determines if browser opening should be suppressed based on user flags (`no_browser`, `mcp`)
+/// or headless / continuous integration environment variables:
+/// `CI`, `GITHUB_ACTIONS`, `TF_BUILD`, and `AGENT_OS`.
+pub fn should_suppress_browser(no_browser: bool, mcp: bool) -> bool {
+    if no_browser || mcp {
+        return true;
+    }
+    const CI_VARS: &[&str] = &["CI", "GITHUB_ACTIONS", "TF_BUILD", "AGENT_OS"];
+    for var in CI_VARS {
+        if std::env::var(var).map(|v| !v.trim().is_empty()).unwrap_or(false) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Spawns a background delayed browser launch task.
 /// Delay allows the HTTP listener to complete socket bind before browser connects.
 /// Strictly suppressed if `suppressed` is true (e.g. `--no-browser`, `--mcp`, CI).
 pub fn spawn_browser_delayed(url: String, delay_ms: u64, suppressed: bool) {
-    if suppressed || std::env::var("CI").is_ok() {
+    if suppressed || should_suppress_browser(false, false) {
         info!("Browser launch suppressed by flag or headless/CI environment");
         return;
     }

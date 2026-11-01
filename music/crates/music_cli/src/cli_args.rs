@@ -78,7 +78,7 @@ pub struct CliArgs {
     pub master: bool,
 
     /// Mastering profile ('analog_tape', 'modern_pop', 'club_sub', 'cinematic', 'acoustic_jazz')
-    #[arg(long, default_value = "analog_tape")]
+    #[arg(long, alias = "mastering-profile", default_value = "analog_tape")]
     pub profile: String,
 
     /// Launch Tokio HTTP REST server and ChatGPT-like Web Studio UI

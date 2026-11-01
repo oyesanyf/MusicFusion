@@ -475,11 +475,41 @@ impl IterationFusionPanel {
         };
         let genre = GenreTaxonomy::find_or_create(genre_query);
 
-        // 1. Determine updated BPM
+        // 1. Determine updated BPM with intelligent tempo parsing and guaranteed sonic variation
         let mut target_bpm = tweaks.bpm.unwrap_or(current_state.bpm);
         if target_bpm == current_state.bpm {
             if let Some(bpm_val) = parse_bpm_from_critique(critique) {
                 target_bpm = bpm_val;
+            } else {
+                let crit_lower = critique.to_ascii_lowercase();
+                if crit_lower.contains("faster")
+                    || crit_lower.contains("speed up")
+                    || crit_lower.contains("quicker")
+                    || crit_lower.contains("upbeat")
+                    || crit_lower.contains("accelerate")
+                {
+                    target_bpm = (current_state.bpm + 4).min(genre.bpm_range.1);
+                } else if crit_lower.contains("slower")
+                    || crit_lower.contains("slow down")
+                    || crit_lower.contains("relax")
+                    || crit_lower.contains("laid back")
+                    || crit_lower.contains("chill")
+                    || crit_lower.contains("half time")
+                {
+                    target_bpm = (current_state.bpm.saturating_sub(4)).max(genre.bpm_range.0);
+                } else if !critique.trim().is_empty() {
+                    // Non-empty critique without explicit tempo: apply deterministic +/- 2 to 4 BPM variation
+                    // within canonical genre boundaries to guarantee audibly and digitally distinct waveforms.
+                    let delta: i32 = if (current_state.version + 1).is_multiple_of(2) { 2 } else { -2 };
+                    let candidate = (current_state.bpm as i32 + delta).clamp(genre.bpm_range.0 as i32, genre.bpm_range.1 as i32) as u32;
+                    if candidate != current_state.bpm {
+                        target_bpm = candidate;
+                    } else if current_state.bpm + 2 <= genre.bpm_range.1 {
+                        target_bpm = current_state.bpm + 2;
+                    } else if current_state.bpm >= genre.bpm_range.0 + 2 {
+                        target_bpm = current_state.bpm - 2;
+                    }
+                }
             }
         }
 

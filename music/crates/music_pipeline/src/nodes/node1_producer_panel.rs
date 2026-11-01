@@ -125,6 +125,14 @@ impl OllamaProducerPanelNode {
             &structured_lyrics,
         );
 
+        // Preserve pre-configured stem mix and iteration notes if state already had a blueprint
+        if let Some(ref existing) = state.blueprint {
+            blueprint.stem_mix = existing.stem_mix.clone();
+            if !existing.iteration_notes.is_empty() {
+                blueprint.iteration_notes = existing.iteration_notes.clone();
+            }
+        }
+
         // If user explicitly configured BPM, key, or time signature, preserve them in blueprint and state
         if state.bpm > 0 {
             blueprint.bpm = state.bpm as f64;

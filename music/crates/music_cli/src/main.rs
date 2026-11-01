@@ -28,13 +28,19 @@ async fn main() -> anyhow::Result<()> {
     // 2. Flagship Roots Reggae Anthem CLI command
     if args.create_reggae_anthem {
         println!("🇯🇲 Generating 1977 Roots Reggae 'One Love' Anthem...");
-        let state = presets::flagship_reggae_anthem_state(args.bpm, args.key.as_deref(), args.pure_rust);
+        let song_id = args.song_id.as_deref().unwrap_or("roots_reggae_anthem");
+        let state = presets::flagship_reggae_anthem_state_with_id(
+            Some(song_id),
+            args.bpm,
+            args.key.as_deref(),
+            args.pure_rust,
+        );
         let result = runner.execute_song(state).await?;
         println!("✨ Completed Anthem generation: song_id={}, version={}", result.song_id, result.version);
         if let Some(master) = result.stem_paths.get("final_master") {
             println!("🔊 Final Master: {}", master.display());
         }
-        if args.open_ui && !args.no_browser {
+        if args.open_ui && !browser::should_suppress_browser(args.no_browser, args.mcp) {
             let url = format!("http://{}:{}/?song_id={}", args.host, args.port, result.song_id);
             browser::open_browser_raw(&url)?;
         }
@@ -50,24 +56,34 @@ async fn main() -> anyhow::Result<()> {
         if let Some(master) = result.stem_paths.get("final_master") {
             println!("🔊 Final Master: {}", master.display());
         }
-        if args.open_ui && !args.no_browser {
+        if args.open_ui && !browser::should_suppress_browser(args.no_browser, args.mcp) {
             let url = format!("http://{}:{}/?song_id={}", args.host, args.port, result.song_id);
             browser::open_browser_raw(&url)?;
         }
         return Ok(());
     }
 
-    // 4. Prompt-based song iteration CLI command
+    // 4. Prompt-based song iteration CLI command with ParameterTweaks
     if let Some(instructions) = &args.iterate {
         let song_id = args.song_id.as_deref().unwrap_or("roots_reggae_anthem");
         let version = args.version.unwrap_or(1);
         println!("🔄 Iterating song {} (v{}) with instructions: '{}'", song_id, version, instructions);
-        let result = runner.iterate_song(song_id, version, Some(instructions)).await?;
-        println!("✨ Completed Iteration: song_id={}, new version={}", result.song_id, result.version);
+
+        let tweaks = music_fusion::iteration_panel::ParameterTweaks {
+            bpm: args.bpm,
+            key_signature: args.key.clone(),
+            ..Default::default()
+        };
+
+        let result = runner.iterate_song_with_tweaks(song_id, version, Some(instructions), Some(tweaks)).await?;
+        println!(
+            "✨ Completed Iteration: song_id={}, new version={} (BPM: {}, Key: {})",
+            result.song_id, result.version, result.bpm, result.key_signature
+        );
         if let Some(master) = result.stem_paths.get("final_master") {
             println!("🔊 Final Master: {}", master.display());
         }
-        if args.open_ui && !args.no_browser {
+        if args.open_ui && !browser::should_suppress_browser(args.no_browser, args.mcp) {
             let url = format!("http://{}:{}/?song_id={}", args.host, args.port, result.song_id);
             browser::open_browser_raw(&url)?;
         }
@@ -82,10 +98,17 @@ async fn main() -> anyhow::Result<()> {
         let state = runner.checkpointer().load_checkpoint(song_id, version).await?;
         println!("📊 Telemetry: peak={} dBFS, RMS={} dBFS, clipping={}",
             state.telemetry.peak_dbfs, state.telemetry.rms_dbfs, state.telemetry.clipping);
-        println!("💡 Suggested Next Iterations:");
-        println!("   1. 🔥 Boost guitar solo wah envelope and sustain in [Guitar Solo]");
-        println!("   2. 🥁 Add syncopated Nyabinghi percussion fills in [Verse 2]");
-        println!("   3. 🎤 Elevate gospel choir call-and-response harmonies in [Chorus]");
+
+        let mem = music_fusion::memory::SystemMemory::detect_live();
+        let panel = music_fusion::iteration_panel::IterationFusionPanel::new_auto_configured(&mem).await;
+        let resp = panel.assist_song_iteration(&state, None).await
+            .unwrap_or_else(|_| panel.offline_fallback_assist(&state));
+
+        println!("🧐 Critique: {}", resp.critique);
+        println!("💡 Suggested Next Iterations (Model: {}):", resp.copilot_model);
+        for (i, sug) in resp.suggested_next_iterations.iter().enumerate() {
+            println!("   {}. {}", i + 1, sug);
+        }
         return Ok(());
     }
 
@@ -122,7 +145,8 @@ async fn main() -> anyhow::Result<()> {
     println!("🌐 Web Studio server running at {}", url);
     println!("🎵 Press Ctrl+C to terminate server.");
 
-    browser::spawn_browser_delayed(url, 500, args.no_browser);
+    let suppress_browser = browser::should_suppress_browser(args.no_browser, args.mcp);
+    browser::spawn_browser_delayed(url, 500, suppress_browser);
 
     tokio::signal::ctrl_c().await?;
     println!("\n👋 Web Studio server shutting down gracefully.");
