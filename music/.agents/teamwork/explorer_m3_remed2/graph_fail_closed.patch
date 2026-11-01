@@ -1,0 +1,120 @@
+diff --git a/crates/music_pipeline/src/error.rs b/crates/music_pipeline/src/error.rs
+--- a/crates/music_pipeline/src/error.rs
++++ b/crates/music_pipeline/src/error.rs
+@@ -35,6 +35,9 @@ pub enum PipelineError {
+     #[error("Duplicate node error: node '{0}' is already registered in graph")]
+     DuplicateNode(String),
+ 
++    #[error("Dead-end node '{0}' in graph: non-terminal node has no outgoing edges (must route to another node or END)")]
++    DeadEndNode(String),
++
+     #[error("Missing entry point: graph has no entry node defined (call set_entry_point or add_edge(START, ...))")]
+     MissingEntryPoint,
+ 
+diff --git a/crates/music_pipeline/src/graph.rs b/crates/music_pipeline/src/graph.rs
+--- a/crates/music_pipeline/src/graph.rs
++++ b/crates/music_pipeline/src/graph.rs
+@@ -43,12 +43,21 @@ impl StateGraph {
+         }
+     }
+ 
+-    /// Registers a node in the graph.
+-    pub fn add_node<N>(&mut self, name: &str, node: N) -> &mut Self
++    /// Registers a node in the graph. Returns an error if a node with that name already exists.
++    pub fn add_node<N>(&mut self, name: &str, node: N) -> Result<&mut Self>
+     where
+         N: GraphNode + 'static,
+     {
++        if name == START || name == END {
++            return Err(PipelineError::General(format!(
++                "Cannot register node with reserved pseudo-node identifier '{}'",
++                name
++            )));
++        }
++        if self.nodes.contains_key(name) {
++            return Err(PipelineError::DuplicateNode(name.to_string()));
++        }
+         self.nodes.insert(name.to_string(), Arc::new(node));
+-        self
++        Ok(self)
+     }
+ 
+     /// Explicitly designates the graph's entry node.
+@@ -122,6 +131,17 @@ impl StateGraph {
+             }
+         }
+ 
++        // Validate all registered non-terminal nodes have at least one outgoing edge or route to END
++        for node_name in self.nodes.keys() {
++            match self.edges.get(node_name) {
++                Some(Edge::Direct(_)) => {}
++                Some(Edge::Conditional { branches, .. }) if !branches.is_empty() => {}
++                _ => {
++                    return Err(PipelineError::DeadEndNode(node_name.clone()));
++                }
++            }
++        }
++
+         Ok(CompiledGraph {
+             nodes: self.nodes,
+             edges: self.edges,
+@@ -247,9 +267,17 @@ impl CompiledGraph {
+                         obs.on_node_complete(&current_node, state, duration_ms).await;
+                     }
+ 
+-                    // Save checkpoint if enabled
++                    // Save checkpoint if enabled - fail closed on security errors
+                     if let Some(cp) = checkpointer {
+                         if let Err(e) = cp.save_checkpoint(state, &current_node).await {
++                            match e {
++                                PipelineError::SecurityError(_) => {
++                                    if let Some(obs) = observer {
++                                        obs.on_node_error(&current_node, &e).await;
++                                    }
++                                    return Err(e);
++                                }
++                                other => {
++                                    log::warn!("Checkpointer warning at node {}: {}", current_node, other);
++                                }
++                            }
+-                            log::warn!("Checkpointer warning at node {}: {}", current_node, e);
+                         }
+                     }
+ 
+@@ -282,7 +310,14 @@ impl CompiledGraph {
+                             }
+                         }
+                         None => {
+-                            current_node = END.to_string();
++                            let err = PipelineError::RoutingError {
++                                node: current_node.clone(),
++                                reason: "No outgoing edge registered for node".to_string(),
++                            };
++                            if let Some(obs) = observer {
++                                obs.on_node_error(&current_node, &err).await;
++                            }
++                            return Err(err);
+                         }
+                     }
+                 }
+diff --git a/crates/music_pipeline/src/runner.rs b/crates/music_pipeline/src/runner.rs
+--- a/crates/music_pipeline/src/runner.rs
++++ b/crates/music_pipeline/src/runner.rs
+@@ -90,12 +90,12 @@ pub fn build_production_pipeline(config: &PipelineConfig) -> Result<(CompiledGra
+ 
+     let mut graph = StateGraph::new();
+ 
+-    graph.add_node("ollama_producer_panel_node", node1);
+-    graph.add_node("groove_and_yue_synthesis_node", node2);
+-    graph.add_node("vocal_timbre_fusion_node", node3);
+-    graph.add_node("virtuoso_stem_inpainting_node", node4);
+-    graph.add_node("dsp_and_judge_gate_node", node5);
+-    graph.add_node("analog_mastering_node", node6);
++    graph.add_node("ollama_producer_panel_node", node1)?;
++    graph.add_node("groove_and_yue_synthesis_node", node2)?;
++    graph.add_node("vocal_timbre_fusion_node", node3)?;
++    graph.add_node("virtuoso_stem_inpainting_node", node4)?;
++    graph.add_node("dsp_and_judge_gate_node", node5)?;
++    graph.add_node("analog_mastering_node", node6)?;
+ 
+     graph.set_entry_point("ollama_producer_panel_node");

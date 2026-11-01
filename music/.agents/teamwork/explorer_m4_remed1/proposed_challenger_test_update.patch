@@ -1,0 +1,19 @@
+--- crates/music_cli/tests/challenger_m4_adversarial_tests.rs
++++ crates/music_cli/tests/challenger_m4_adversarial_tests.rs
+@@ -152,6 +152,16 @@ async fn test_rest_endpoints_regenerate_stem_and_mastering() {
+     let guitar_v2_res = client.get(format!("{}/api/songs/{}/versions/2/audio/guitar", base_url, song_id))
+         .send().await.unwrap();
+     assert_eq!(guitar_v2_res.status(), 200, "Regenerated stem must be streamable at /versions/2/audio/guitar");
+ 
++    // The un-regenerated vocal stem in v2 is also streamable via checkpoint state.stem_paths resolution
++    let vocal_v2_res = client.get(format!("{}/api/songs/{}/versions/2/audio/raspy_tenor_vocals", base_url, song_id))
++        .send().await.unwrap();
++    assert_eq!(vocal_v2_res.status(), 200, "Un-regenerated vocal stem must be streamable at /versions/2/audio/raspy_tenor_vocals");
++
++    // Also verify URL Pattern 2 format: /api/songs/:id/:version/audio/:file
++    let vocal_v2_p2_res = client.get(format!("{}/api/songs/{}/2/audio/raspy_tenor_vocals.wav", base_url, song_id))
++        .send().await.unwrap();
++    assert_eq!(vocal_v2_p2_res.status(), 200, "Pattern 2 audio streaming must return 200");
++
+     // The state correctly tracks that un-regenerated vocal stems point to v1
+     let stem_paths = &regen_json["state"]["stem_paths"];

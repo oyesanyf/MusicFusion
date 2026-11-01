@@ -50,3 +50,66 @@ CRITICAL REQUIREMENT UPDATE:
 The user has updated requirements to emphasize a Universal Multi-Genre AI Music Production Engine supporting ALL genres of music known to humanity (Roots Reggae, Afrobeats, Highlife, Amapiano, Soul/R&B, Gospel, Hip-Hop/Trap, Blues, Rock, Metal, Jazz/Fusion, Classical/Cinematic, Pop, EDM/House, Country/Folk, Latin, Ambient, etc.), not hardcoded only to reggae.
 
 Please review the appended follow-up in `d:\harfile\music\.agents\teamwork\ORIGINAL_REQUEST.md` and ensure all StateGraph nodes, DSP generators, Ollama panels, CLI flags (`--genre`, `--create-hit`), REST endpoints, and MCP tools support universal genre taxonomy and dynamic adaptation while preserving `--create-reggae-anthem` as a flagship preset.
+
+## 2026-11-01T03:45:45Z
+CRITICAL REQUIREMENT UPDATE FOR MILESTONE 4:
+The user has specifically instructed:
+> "this should have a web uI that loads ths browser on startup"
+
+Please ensure that Milestone 4 (`crates/music_cli` and `webui/`) implements:
+1. **Auto-Launch Browser on Startup**:
+   - The binary must default to starting the Tokio HTTP server on `http://127.0.0.1:5050` (port fallback `5050..5060`) AND automatically launch the default browser to `http://127.0.0.1:5050/` on Windows via `cmd /C start "" "http://127.0.0.1:5050"` (with `CREATE_NO_WINDOW`).
+   - Include a `--no-browser` flag for headless runs/tests, and never launch browser in `--mcp` stdio mode.
+   - When running CLI generators (`--create-reggae-anthem`, `--create-hit`), support opening the Web UI (`--open-ui` or default prompt) so the user immediately listens to and iterates on the generated stems in the browser.
+2. **Complete Interactive DAW & Song Iteration Web Studio UI (`GET /` and `GET /index.html`)**:
+   - Multi-genre style studio (dropdowns/pills for all 20+ genres, editable style prompt, BPM slider, mode/scale).
+   - One-click hit presets (Flagship 76 BPM "One Love" Reggae Anthem, "Rise Up Together", world hit presets).
+   - Structured lyrics editor (`[Intro]`, `[Verse 1]`, `[Chorus]`, etc.) with YuE live format preview.
+   - Live 6-Node StateGraph visualizer with node progress and audio telemetry.
+   - Multi-track stem mixer & audio player streaming `final_master.wav` and isolated stems with HTML5 `<audio>` players.
+   - Interactive iteration bar (`POST /api/songs/iterate`) and version tree browser (`GET /api/songs/:id/versions`).
+   - Live hardware VRAM/RAM and Ollama model status header.
+
+## 2026-11-01T03:50:00Z
+CRITICAL REQUIREMENT UPDATE:
+The user has specifically instructed:
+> "if a user does not like a sone he must be able to itegrate and adjust it. create a test sone when you are complete"
+("if a user does not like a song, he must be able to iterate and adjust it. Create a test song when you are complete.")
+
+Please ensure that:
+1. **Song Iteration & Granular Adjustment**:
+   - Both prompt-based iteration (`POST /api/songs/iterate` and CLI `--iterate "<changes>"`) and granular Web UI parameter sliders/controls (BPM, key, mode, vocal rasp, guitar wah, drum complexity, sub-bass warmth, section lyrics) allow creating new versions (`vN -> v(N+1)`) in the version tree without overwriting previous versions.
+   - Support single-stem regeneration (`POST /api/songs/regenerate-stem`) and re-mastering (`POST /api/songs/master`), plus an A/B version switcher in the Web UI.
+2. **Generate Complete Test Song (`v1` and iterated `v2`) on Disk Before Completion**:
+   - Run the compiled binary to generate a complete, playable 48 kHz song on disk in `d:\harfile\music` (the 76 BPM 1977 Roots Reggae "One Love" Anthem `v1` AND an iterated `v2` reflecting adjustments) so that all `.wav` stems, `final_master.wav`, and version history are already populated and immediately playable when the Web Studio UI launches.
+
+## 2026-11-01T03:51:30Z
+CRITICAL UI DESIGN REQUIREMENT FOR MILESTONE 4:
+The user has specifically instructed:
+> "the uI must be chatgpt like the onde used in the broser under code fusion simple and functional"
+("The UI must be ChatGPT-like, like the one used in the browser under ModelFusion (`d:\harfile\ModelFusion\browser\ui\index.html` and `styles.css`) — simple and functional.")
+
+Please ensure that `crates/music_cli` Web UI adopts that clean, simple, functional ChatGPT 2-column architecture:
+1. Left Sidebar (`.chatgpt-sidebar`): Brand header, `+ New Song / Chat`, Clickable Songs & Version History List (pre-populated with test song `v1` and `v2`), Genre Presets Accordion, Live Hardware status.
+2. Main Chat Canvas (`.chatgpt-main`): Header, conversation stream with Interactive Song Cards (`<audio controls>` player for `final_master.wav`, telemetry pills, collapsible stems drawer with isolated audio players + stem regen buttons, collapsible lyrics, 6-node LangGraph trace).
+3. Pinned Bottom Floating Input Capsule (`.floating-input-capsule`): Rounded capsule with `<textarea>`, genre pill, iteration toggle, circular `↑` Send button.
+
+
+## 2026-11-01T04:08:20Z
+CRITICAL REQUIREMENT UPDATE:
+The user has specifically instructed:
+> "ADD ANOTHER llm THAT CAN ASSIST WITH ITERATION USING FUSION"
+
+Integrate an additional dedicated **Iteration Assistant / Co-Pilot LLM** into the ModelFusion panel and workflow (`crates/music_fusion`, `crates/music_pipeline`, and `crates/music_cli` + ChatGPT Web UI):
+1. **Dedicated Iteration Specialist LLM in ModelFusion Panel (`crates/music_fusion`)**:
+   - Leverage local Ollama models (`deepseek-r1`, `glm-4.7-flash:latest`, `glm4:9b`, `flint:latest`, `gemma2:9b`, `mistral:latest`, `qwen2.5`).
+   - Add `IterationAssistant` / `IterationCoPilot` persona.
+   - Implement `Multi-LLM Iteration Fusion Pipeline` (`run_iteration_fusion` / `assist_song_iteration`):
+     - Model 1: Lyric & Hook Refiner LLM
+     - Model 2: Arrangement & Groove Producer LLM
+     - Model 3: Dedicated Iteration Co-Pilot & Diff Architect LLM (newly added LLM)
+     - Judge / Synthesizer LLM: Fuses panel outputs into upgraded `v(N+1)` state + structured `iteration_summary` and `suggested_next_iterations: Vec<String>`.
+2. **Expose in REST, CLI, MCP & ChatGPT Web UI**:
+   - `POST /api/songs/iterate`: Run Multi-LLM Iteration Fusion Panel returning diff summary + `suggested_next_iterations`.
+   - `POST /api/songs/assist-iteration` (or `GET /api/songs/:id/assist`): Returns 3-5 concrete clickable iteration suggestions.
+   - Web UI: Show active panel models, add "✨ Ask Fusion LLM to Assist / Critique & Suggest Iterations" button and clickable suggestion chips.

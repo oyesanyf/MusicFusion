@@ -1,0 +1,18 @@
+# crates/music_pipeline/Cargo.toml
+[package]
+name = "music_pipeline"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+music_core = { path = "../music_core" }
+music_fusion = { path = "../music_fusion" }
+music_dsp = { path = "../music_dsp" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+log = { workspace = true }
+chrono = { workspace = true }

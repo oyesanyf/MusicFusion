@@ -1,4 +1,4 @@
-# BRIEFING — 2026-11-01T01:12:00Z
+# BRIEFING — 2026-11-01T01:28:45Z
 
 ## Mission
 Implement crates/music_core, crates/music_fusion, and minimal workspace stubs with 100% test pass rate for Milestone 1.
@@ -25,28 +25,55 @@ Implement crates/music_core, crates/music_fusion, and minimal workspace stubs wi
 - Updated: 2026-11-01T01:11:36Z
 
 ## Task Summary
-- **What to build**: Implement `music_core` (production state, telemetry, genre taxonomy/presets, blueprint, error handling) and `music_fusion` (system memory detection, dynamic model sizing, stage routing, resilient Ollama client, producer panel, judge evaluator) plus minimal workspace stubs for downstream crates.
-- **Success criteria**: Root workspace compiles, `cargo test -p music_core -p music_fusion` passes 100% cleanly.
+- **What to build**: Implemented `music_core` (production state, telemetry, genre taxonomy/presets, blueprint, error handling) and `music_fusion` (system memory detection, dynamic model sizing, stage routing, resilient Ollama client, producer panel, judge evaluator) plus minimal workspace stubs for downstream crates.
+- **Success criteria**: Root workspace compiles cleanly, all 19 unit tests across `music_core` (7) and `music_fusion` (12) pass 100%.
 - **Interface contracts**: `PROJECT.md`, `ORIGINAL_REQUEST.md`, `explorer_m1_1/handoff.md`, `explorer_m1_2/handoff.md`, `explorer_m1_3/handoff.md`.
 - **Code layout**: Per `PROJECT.md`.
 
 ## Key Decisions Made
-- [Initial turn: reading authoritative documents and explorer handoffs]
+- Prioritized electronic/synth/cyber genre heuristics in `GenreTaxonomy::find_or_create` before rock/punk so "Glitch Cyberpunk Synth" classifies as `PopElectronic` at 126 BPM.
+- Refined jazz matching to "jazz fusion" so generic fusion queries fall through to `ExperimentalHybrid`.
+- Implemented `tokio::time::timeout(Duration::from_millis(400), ...)` in `OllamaClient::probe_health()` for strict enforcement of the fast probe protocol.
+- Supported both live Ollama discovery and resilient zero-crash fallback to genre presets in `OllamaProducerPanel::run_panel()`.
+- Created minimal valid stubs for `music_dsp`, `music_pipeline`, and `music_cli` to ensure root workspace compilation succeeds without manifest errors.
 
 ## Artifact Index
 - `d:\harfile\music\.agents\teamwork\worker_m1\DISPATCH.md` — Inbound dispatch instructions
 - `d:\harfile\music\.agents\teamwork\worker_m1\BRIEFING.md` — Situational awareness
 - `d:\harfile\music\.agents\teamwork\worker_m1\progress.md` — Heartbeat and step tracking
+- `d:\harfile\music\.agents\teamwork\worker_m1\handoff.md` — Completion handoff report
+- `d:\harfile\music\crates\music_core\` — Core domain crate
+- `d:\harfile\music\crates\music_fusion\` — Hardware and model fusion crate
 
 ## Change Tracker
-- **Files modified**: None yet
-- **Build status**: Pending
+- **Files modified**:
+  - `crates/music_core/Cargo.toml`: Streamlined dependencies
+  - `crates/music_core/src/lib.rs`: Public API re-exports
+  - `crates/music_core/src/error.rs`: Typed `MusicCoreError`
+  - `crates/music_core/src/telemetry.rs`: `StemTelemetry` and digital health validation
+  - `crates/music_core/src/genre.rs`: Universal `GenreTaxonomy`, 20+ presets, dynamic fallback
+  - `crates/music_core/src/state.rs`: `MusicProductionState` (21 fields, stem registry, versioning)
+  - `crates/music_core/src/blueprint.rs`: Schema re-exports
+  - `crates/music_core/tests/core_tests.rs`: 7 comprehensive unit tests
+  - `crates/music_fusion/Cargo.toml`: Package manifest
+  - `crates/music_fusion/src/lib.rs`: Public API re-exports
+  - `crates/music_fusion/src/error.rs`: Typed `FusionError`
+  - `crates/music_fusion/src/memory.rs`: `SystemMemory::detect_live()`, Dynamic Available Memory Law
+  - `crates/music_fusion/src/ollama_client.rs`: `OllamaClient` with 400ms timeout
+  - `crates/music_fusion/src/prompt_templates.rs`: Lyricist, Arranger, Engineer, Judge personas
+  - `crates/music_fusion/src/judge.rs`: `<think>` tag stripping, `EvaluatedSongBlueprint`, `JudgeEvaluator`
+  - `crates/music_fusion/src/panel.rs`: Parallel `OllamaProducerPanel` with offline/online routing
+  - `crates/music_fusion/tests/fusion_tests.rs`: 12 comprehensive unit tests
+  - `crates/music_dsp/Cargo.toml` & `src/lib.rs`: Minimal workspace stub
+  - `crates/music_pipeline/Cargo.toml` & `src/lib.rs`: Minimal workspace stub
+  - `crates/music_cli/Cargo.toml` & `src/main.rs`: Minimal workspace stub
+- **Build status**: `cargo check --workspace` PASS (0 errors, 0 warnings); `cargo test --workspace` PASS (19 tests passed, 0 failed)
 - **Pending issues**: None
 
 ## Quality Status
-- **Build/test result**: Pending
-- **Lint status**: Pending
-- **Tests added/modified**: Pending
+- **Build/test result**: 100% PASS (19/19 tests)
+- **Lint status**: 0 warnings, clean workspace
+- **Tests added/modified**: 7 tests in `core_tests.rs`, 12 tests in `fusion_tests.rs`
 
 ## Loaded Skills
-- None requested specifically in prompt
+- None requested specifically
