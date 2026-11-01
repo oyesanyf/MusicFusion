@@ -183,8 +183,9 @@ impl Default for OsoosiMeshSettings {
     }
 }
 
-/// ChatGPT-style Personal & Application Settings persisted in `settings.json`.
+/// Personal & Application Settings persisted in `settings.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChatGptUiSettings {
     // General
     pub theme: String,
@@ -230,6 +231,9 @@ pub struct ChatGptUiSettings {
     pub retain_chat_history: bool,
     pub anonymize_mesh_queries: bool,
     pub archived_chats: Vec<ArchivedChatEntry>,
+    // Dynamic key-value settings for all interactive controls (Appearance, Personalization, Family, Contacts, Voice, etc.)
+    #[serde(flatten)]
+    pub extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,6 +280,7 @@ impl Default for ChatGptUiSettings {
             retain_chat_history: true,
             anonymize_mesh_queries: true,
             archived_chats: Vec::new(),
+            extra: std::collections::HashMap::new(),
         }
     }
 }

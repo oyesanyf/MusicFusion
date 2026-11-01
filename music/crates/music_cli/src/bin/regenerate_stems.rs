@@ -218,14 +218,31 @@ fn main() -> anyhow::Result<()> {
         normalize_stem(&mut raspy_buf, 0.85);
         raspy_buf.to_wav_file_with_format(&stems_dir.join("raspy_tenor_vocals.wav"), WavBitDepth::Pcm16)?;
 
-        // 8. Mix Balanced Full-Band Premaster from 00:00 to end
+        // 8. Mix Balanced Full-Band Premaster from 00:00 to end with Upfront Lead Vocals & Sidechain Ducking
         let mut premaster = AudioBuffer::new_stereo(duration_secs);
         enforce_exact_frames(&mut premaster, t.expected_frames);
-        mix_buffers(&mut premaster, &inpainted_drums, 0.22);
-        mix_buffers(&mut premaster, &bass_buf, 0.22);
-        mix_buffers(&mut premaster, &inpainted_guitar, 0.18);
-        mix_buffers(&mut premaster, &other_buf, 0.18);
-        mix_buffers(&mut premaster, &raspy_buf, 0.20);
+        mix_buffers(&mut premaster, &inpainted_drums, 0.155);
+        mix_buffers(&mut premaster, &bass_buf, 0.145);
+        mix_buffers(&mut premaster, &inpainted_guitar, 0.145);
+        mix_buffers(&mut premaster, &other_buf, 0.135);
+
+        // Apply Vocal-Priority Sidechain Ducking (-2.5 dB on instruments when vocalist sings)
+        let mut env = 0.0f32;
+        let attack = 0.008f32;
+        let release = 0.0004f32;
+        let common_frames = premaster.frame_count().min(raspy_buf.frame_count());
+        for f in 0..common_frames {
+            let v_abs = raspy_buf.samples[f * 2].abs();
+            if v_abs > env {
+                env += attack * (v_abs - env);
+            } else {
+                env += release * (v_abs - env);
+            }
+            let duck_gain = (1.0 - (env * 1.4).clamp(0.0, 0.26)).clamp(0.74, 1.0);
+            premaster.samples[f * 2] *= duck_gain;
+            premaster.samples[f * 2 + 1] *= duck_gain;
+        }
+        mix_buffers(&mut premaster, &raspy_buf, 0.42);
 
         // Apply 12 kHz 2nd-order Butterworth low-pass anti-aliasing filter
         let mut lpf = ButterworthLowpass12kHz::new(premaster.channels as usize, premaster.sample_rate as f32);

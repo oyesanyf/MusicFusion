@@ -35,11 +35,39 @@ pub fn get_index_html() -> String {
         .unwrap_or_else(|| "<html><body><h3>QuorumRAG Web UI</h3></body></html>".to_string())
 }
 
-/// Static asset handler with SPA fallback to index.html.
+/// Static asset handler with live disk hot-reload and SPA fallback to index.html.
 pub async fn static_handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let stripped = path.strip_prefix("assets/").unwrap_or(path);
     let target_path = if stripped.is_empty() { "index.html" } else { stripped };
+
+    // Try reading live asset from disk first so UI edits apply immediately without re-linking
+    if !target_path.contains("..") {
+        for base in [
+            std::path::Path::new("crates/quorum-ui/assets"),
+            std::path::Path::new(r"d:\harfile\QuorumRAG\crates\quorum-ui\assets"),
+        ] {
+            let candidate = base.join(target_path);
+            if let Ok(bytes) = std::fs::read(&candidate) {
+                let mime = mime_guess::from_path(target_path)
+                    .first_raw()
+                    .unwrap_or("application/octet-stream");
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header(
+                        header::CONTENT_TYPE,
+                        HeaderValue::from_str(mime)
+                            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+                    )
+                    .header(header::CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+                    .body(Body::from(bytes))
+                    .unwrap_or_else(|_| {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "Response building failed")
+                            .into_response()
+                    });
+            }
+        }
+    }
 
     match WebAssets::get(target_path) {
         Some(content) => {
@@ -52,7 +80,7 @@ pub async fn static_handler(uri: Uri) -> Response {
                     header::CONTENT_TYPE,
                     HeaderValue::from_str(mime).unwrap_or(HeaderValue::from_static("application/octet-stream")),
                 )
-                .header(header::CACHE_CONTROL, "public, max-age=3600")
+                .header(header::CACHE_CONTROL, "no-cache, no-store, must-revalidate")
                 .body(Body::from(content.data))
                 .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Response building failed").into_response())
         }
@@ -60,6 +88,7 @@ pub async fn static_handler(uri: Uri) -> Response {
             Some(content) => Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                .header(header::CACHE_CONTROL, "no-cache, no-store, must-revalidate")
                 .body(Body::from(content.data))
                 .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Response building failed").into_response()),
             None => Response::builder()

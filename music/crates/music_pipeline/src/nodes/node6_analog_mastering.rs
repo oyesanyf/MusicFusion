@@ -65,41 +65,76 @@ impl AnalogMasteringNode {
         }
     }
 
-    /// Sums all stems into a 48 kHz stereo premaster buffer.
-    /// Processes internal stems in normalized f32, scaling each individual stem
-    /// by 0.20 (-14 dBFS RMS headroom) before summing stems together.
+    /// Sums all stems into a 48 kHz stereo premaster buffer with vocal-priority
+    /// sidechain ducking and per-stem dB gain staging from `blueprint.stem_mix`.
     pub fn mix_stems_to_premaster(&self, state: &MusicProductionState) -> AudioBuffer {
         let mut premaster = AudioBuffer::new_stereo(0.1);
-        let stem_scale = 0.20f32;
+        let default_mix = music_core::schema::StemMixConfig::default();
+        let mix_cfg = state
+            .blueprint
+            .as_ref()
+            .map(|b| b.stem_mix.clone())
+            .unwrap_or_else(|| default_mix.clone());
 
-        // 1. Sum Instrumental Stems into `premaster` scaled by 0.20
+        let db_mult = |val_db: f32, def_db: f32| -> f32 {
+            let delta = (val_db - def_db).clamp(-18.0, 12.0);
+            10.0f32.powf(delta / 20.0)
+        };
+
+        let guitar_scale = 0.145f32 * db_mult(mix_cfg.guitar_db, default_mix.guitar_db);
+        let drums_scale = 0.155f32 * db_mult(mix_cfg.drums_db, default_mix.drums_db);
+        let bass_scale = 0.145f32 * db_mult(mix_cfg.dub_bass_db, default_mix.dub_bass_db);
+        let other_scale = 0.135f32 * db_mult(mix_cfg.organ_brass_db, default_mix.organ_brass_db);
+        let vocal_scale = 0.420f32 * db_mult(mix_cfg.lead_vocal_db, default_mix.lead_vocal_db);
+
+        // 1. Sum Instrumental Stems into `premaster`
         if let Some(p) = state.get_stem(STEM_INPAINTED_GUITAR) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, stem_scale);
+                mix_buffers(&mut premaster, &buf, guitar_scale);
             }
         }
         if let Some(p) = state.get_stem(STEM_INPAINTED_DRUMS) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, stem_scale);
+                mix_buffers(&mut premaster, &buf, drums_scale);
             }
         }
         if let Some(p) = state.get_stem(STEM_BASS) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, stem_scale);
+                mix_buffers(&mut premaster, &buf, bass_scale);
             }
         }
         if let Some(p) = state.get_stem(STEM_OTHER) {
             if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, stem_scale);
+                mix_buffers(&mut premaster, &buf, other_scale);
             }
         }
 
-        // 2. Sum Lead Vocal Stem scaled by 0.20
+        // 2. Apply Vocal-Priority Sidechain Ducking (-2.5 dB on instruments when vocalist sings)
+        //    and sum Lead Vocal Stem upfront at `vocal_scale`
         let vocal_path = state.get_stem(STEM_RASPY_TENOR_VOCALS)
             .or_else(|| state.get_stem(STEM_YUE_VOCALS));
         if let Some(p) = vocal_path {
-            if let Ok(buf) = AudioBuffer::from_wav_file(p) {
-                mix_buffers(&mut premaster, &buf, stem_scale);
+            if let Ok(vocal_buf) = AudioBuffer::from_wav_file(p) {
+                let ch = premaster.channels.max(1) as usize;
+                let v_ch = vocal_buf.channels.max(1) as usize;
+                let common_frames = premaster.frame_count().min(vocal_buf.frame_count());
+                let mut env = 0.0f32;
+                let attack = 0.008f32;
+                let release = 0.0004f32;
+                for f in 0..common_frames {
+                    let v_abs = vocal_buf.samples[f * v_ch].abs();
+                    if v_abs > env {
+                        env += attack * (v_abs - env);
+                    } else {
+                        env += release * (v_abs - env);
+                    }
+                    // Up to 26% (-2.6 dB) smooth sidechain ducking on the instrumental bed when vocal is active
+                    let duck_gain = (1.0 - (env * 1.4).clamp(0.0, 0.26)).clamp(0.74, 1.0);
+                    for c in 0..ch {
+                        premaster.samples[f * ch + c] *= duck_gain;
+                    }
+                }
+                mix_buffers(&mut premaster, &vocal_buf, vocal_scale);
             }
         }
 

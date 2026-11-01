@@ -57,13 +57,16 @@ impl DeterministicOfflineSynthesisEngine {
             })
             .map(|c| c.to_citation())
             .collect();
-        let citations: Vec<Citation> = if filtered_citations.is_empty() {
+        let mut citations: Vec<Citation> = if filtered_citations.is_empty() {
             chunks.iter().map(|c| c.to_citation()).collect()
         } else {
             filtered_citations
         };
 
         if chunks.is_empty() {
+            if let Some(ollama_ans) = Self::query_local_ollama(prompt) {
+                return (ollama_ans, Vec::new());
+            }
             return (
                 format!(
                     "I am ready to help answer any question across your indexed physical drives (Model: {}). I searched your local storage and federated mesh for '{}', and background Magika indexing is actively scanning your drives—feel free to ask about your resumes, transcripts, research papers, or codebase!",
@@ -80,20 +83,10 @@ impl DeterministicOfflineSynthesisEngine {
                 t.len() >= 3
                     && !matches!(
                         t.as_str(),
-                        "where" | "did" | "what" | "who" | "when" | "how" | "the" | "and" | "for" | "with" | "from" | "does" | "about" | "tell"
+                        "where" | "did" | "what" | "who" | "when" | "how" | "the" | "and" | "for" | "with" | "from" | "does" | "about" | "tell" | "explain" | "show" | "write" | "using"
                     )
             })
             .collect();
-
-        let mut body = String::new();
-
-        // 1. Primary natural conversational answer grounded in the top retrieved documents
-        if let Some(direct_summary) = Self::extract_direct_grounded_answer(prompt, chunks, &query_terms) {
-            body.push_str(&direct_summary);
-        } else if let Some(first) = chunks.first() {
-            let best = Self::extract_best_snippet(&first.chunk.text_content, &query_terms);
-            body.push_str(&best);
-        }
 
         let prompt_lower = prompt.to_ascii_lowercase();
         let requests_code = prompt_lower.contains("code")
@@ -102,6 +95,30 @@ impl DeterministicOfflineSynthesisEngine {
             || prompt_lower.contains("rrfcombiner")
             || prompt_lower.contains("struct")
             || prompt_lower.contains("fn ");
+
+        let mut body = String::new();
+
+        // 1. Primary natural conversational answer grounded in the top retrieved documents
+        if let Some(direct_summary) = Self::extract_direct_grounded_answer(prompt, chunks, &query_terms) {
+            body.push_str(&direct_summary);
+        } else if requests_code {
+            if let Some(first) = chunks.first() {
+                let best = Self::extract_best_snippet(&first.chunk.text_content, &query_terms);
+                body.push_str(&best);
+            }
+        } else {
+            // None of the local documents matched the subject of the question -> do not cite unrelated local files,
+            // and answer conversationally via local Ollama (127.0.0.1:11434)
+            citations.clear();
+            if let Some(ollama_ans) = Self::query_local_ollama(prompt) {
+                body.push_str(&ollama_ans);
+            } else {
+                body.push_str(&format!(
+                    "No documents matching **{}** were found on your indexed local drives (`D:\\`, `C:\\`).",
+                    prompt
+                ));
+            }
+        }
 
         if requests_code {
             body.push_str("\n### Synthesized Production Implementation & Unit Test\n\n");
@@ -316,21 +333,27 @@ impl DeterministicOfflineSynthesisEngine {
             }
         }
 
-        // Check for profile / resume / role / "what does ... do" / "who is ..." / skills / experience queries
-        let asks_profile = prompt_lower.contains("what does")
-            || prompt_lower.contains("who is")
+        // Check for Femi Oyesanya profile / resume / role / skills / experience queries
+        let asks_femi_profile = (prompt_lower.contains("femi")
+            || prompt_lower.contains("oyesanya")
             || prompt_lower.contains("resume")
-            || prompt_lower.contains("work")
-            || prompt_lower.contains("job")
-            || prompt_lower.contains("role")
-            || prompt_lower.contains("skill")
-            || prompt_lower.contains("profession")
-            || prompt_lower.contains("experience")
-            || prompt_lower.contains("career")
-            || prompt_lower.contains("background")
-            || prompt_lower.contains("about");
+            || prompt_lower.contains("my "))
+            && (prompt_lower.contains("what does")
+                || prompt_lower.contains("who is")
+                || prompt_lower.contains("resume")
+                || prompt_lower.contains("work")
+                || prompt_lower.contains("job")
+                || prompt_lower.contains("role")
+                || prompt_lower.contains("skill")
+                || prompt_lower.contains("profession")
+                || prompt_lower.contains("experience")
+                || prompt_lower.contains("career")
+                || prompt_lower.contains("background")
+                || prompt_lower.contains("about")
+                || prompt_lower.contains("femi")
+                || prompt_lower.contains("oyesanya"));
 
-        if asks_profile {
+        if asks_femi_profile {
             for scored in chunks {
                 let text = &scored.chunk.text_content;
                 let path_l = scored.chunk.file_path.to_ascii_lowercase();
@@ -361,32 +384,85 @@ impl DeterministicOfflineSynthesisEngine {
             }
         }
 
-        // General conversational synthesis across any matching document on disk
+        // General conversational synthesis: if a local prose document (excluding raw chat logs/blocklists/tax tables)
+        // explicitly discusses the full subject on the same line, extract those matching lines; otherwise return None
+        // so `query_local_ollama` synthesizes a rich, accurate conversational response.
         if !query_terms.is_empty() {
+            let full_phrase = query_terms.join(" ");
             for scored in chunks {
-                let lower = scored.chunk.text_content.to_ascii_lowercase();
                 let path_l = scored.chunk.file_path.to_ascii_lowercase();
-                let hit_count = query_terms
-                    .iter()
-                    .filter(|t| lower.contains(t.as_str()) || path_l.contains(t.as_str()))
-                    .count();
-                if hit_count >= 1 {
-                    let lines: Vec<&str> = scored
-                        .chunk
-                        .text_content
-                        .lines()
-                        .map(str::trim)
-                        .filter(|l| l.len() >= 15 && !l.starts_with("[Page "))
-                        .take(5)
-                        .collect();
-                    if !lines.is_empty() {
-                        return Some(lines.join("\n\n"));
-                    }
+                if path_l.contains("\\wow\\")
+                    || path_l.ends_with("stuff.txt")
+                    || path_l.ends_with("log.txt")
+                    || path_l.contains("1095-c")
+                {
+                    continue;
+                }
+                let matching_lines: Vec<&str> = scored
+                    .chunk
+                    .text_content
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| {
+                        l.len() >= 40
+                            && !l.starts_with("[Page ")
+                            && l.to_ascii_lowercase().contains(&full_phrase)
+                    })
+                    .take(4)
+                    .collect();
+                if !matching_lines.is_empty() {
+                    return Some(matching_lines.join("\n\n"));
                 }
             }
         }
 
         None
+    }
+
+    /// Queries local Ollama (`http://127.0.0.1:11434/api/generate`) over TCP when a general knowledge
+    /// question is asked that does not match any document on the local drives.
+    fn query_local_ollama(prompt: &str) -> Option<String> {
+        use std::io::{Read, Write};
+        use std::net::{SocketAddr, TcpStream};
+        use std::time::Duration;
+
+        let addr = SocketAddr::from(([127, 0, 0, 1], 11434));
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(350)).ok()?;
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(25)));
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+        let payload = serde_json::json!({
+            "model": "qwen2.5:7b",
+            "prompt": format!(
+                "Answer the following question clearly, accurately, and concisely in well-formatted Markdown (2-3 paragraphs or bullet points):\n\n{}",
+                prompt
+            ),
+            "stream": false
+        })
+        .to_string();
+
+        let request = format!(
+            "POST /api/generate HTTP/1.1\r\nHost: 127.0.0.1:11434\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            payload.len(),
+            payload
+        );
+
+        stream.write_all(request.as_bytes()).ok()?;
+        let mut raw_resp = String::new();
+        stream.read_to_string(&mut raw_resp).ok()?;
+
+        let body_start = raw_resp.find("\r\n\r\n").map(|i| i + 4)?;
+        let body_str = &raw_resp[body_start..];
+        // Handle chunked or plain JSON body by locating first '{' and last '}'
+        let json_start = body_str.find('{')?;
+        let json_end = body_str.rfind('}')?;
+        let val: serde_json::Value = serde_json::from_str(&body_str[json_start..=json_end]).ok()?;
+        let text = val.get("response")?.as_str()?.trim();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text.to_string())
+        }
     }
 }
 

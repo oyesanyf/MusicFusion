@@ -6,6 +6,7 @@ description = "Hardware memory sizing, dynamic Ollama model selection, and multi
 
 [dependencies]
 music_core = { path = "../music_core" }
+music_dsp = { path = "../music_dsp" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
