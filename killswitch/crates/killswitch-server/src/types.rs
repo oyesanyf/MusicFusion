@@ -589,6 +589,28 @@ pub struct ResearchCandidateDto {
     pub approved_at: Option<String>,
     #[serde(default)]
     pub approval_seal_blake3: Option<String>,
+    #[serde(default)]
+    pub relevance_score: f64,
+    #[serde(default)]
+    pub accuracy_score: f64,
+    #[serde(default)]
+    pub priority_score: f64,
+    #[serde(default)]
+    pub arxiv_url: String,
+    #[serde(default)]
+    pub has_code_repo: bool,
+    #[serde(default)]
+    pub code_repo_url: String,
+    #[serde(default)]
+    pub indicator_pattern: String,
+    #[serde(default)]
+    pub cedar_forbid_policy: String,
+    #[serde(default)]
+    pub generated_code_snippet: String,
+    #[serde(default)]
+    pub rejection_code: Option<String>,
+    #[serde(default)]
+    pub rejection_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -601,6 +623,14 @@ pub struct ResearchMenuResponse {
     pub calibrated_sources_total: usize,
     pub user_approval_required: bool,
     pub timestamp: String,
+    #[serde(default)]
+    pub active_enforced_research_rules_count: usize,
+    #[serde(default)]
+    pub active_enforced_research_rules: Vec<killswitch_telemetry::IngestedResearchDefenseRule>,
+    #[serde(default)]
+    pub paper2agent_accuracy_pct: f64,
+    #[serde(default)]
+    pub llm_fusion_confidence_bp: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -619,6 +649,10 @@ pub struct ResearchDiscoverRequest {
     pub source_quote: Option<String>,
     #[serde(default)]
     pub target_crate_enhancement: Option<String>,
+    #[serde(default)]
+    pub code_repo_url: Option<String>,
+    #[serde(default)]
+    pub indicator_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -640,6 +674,10 @@ pub struct ResearchApproveRequest {
     pub source_quote: Option<String>,
     #[serde(default)]
     pub target_crate_enhancement: Option<String>,
+    #[serde(default)]
+    pub code_repo_url: Option<String>,
+    #[serde(default)]
+    pub indicator_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -650,6 +688,69 @@ pub struct ResearchApproveResponse {
     pub calibrated_sources_total: usize,
     pub live_probe_verified: bool,
     pub message: String,
+    pub timestamp: String,
+    #[serde(default)]
+    pub active_enforced_research_rules_count: usize,
+    #[serde(default)]
+    pub acceptance_verdict: Option<killswitch_telemetry::ResearchAcceptanceVerdict>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchValidateRequest {
+    pub rule: killswitch_telemetry::IngestedResearchDefenseRule,
+    #[serde(default)]
+    pub novelty_delta_score: Option<f64>,
+    #[serde(default)]
+    pub allow_in_place_update: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchNoveltyCheckRequest {
+    #[serde(default)]
+    pub arxiv_ids: Vec<String>,
+    #[serde(default)]
+    pub extractions: Vec<ResearchBreakoutExtraction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoveltyEvaluationItem {
+    pub arxiv_id: String,
+    pub is_novel_to_codebase: bool,
+    pub status: String,
+    pub target_crate_enhancement: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchNoveltyCheckResponse {
+    pub success: bool,
+    pub evaluations: Vec<NoveltyEvaluationItem>,
+    pub total_checked: usize,
+    pub novel_count: usize,
+    pub already_implemented_count: usize,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchClearRequest {
+    #[serde(default)]
+    pub rule_id: Option<String>,
+    #[serde(default)]
+    pub arxiv_id: Option<String>,
+    #[serde(default)]
+    pub clear_all: Option<bool>,
+    #[serde(default)]
+    pub restore_defaults: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchClearResponse {
+    pub success: bool,
+    pub message: String,
+    pub active_rules_count: usize,
+    pub pending_count: usize,
+    pub conformal_sources_k: usize,
+    pub active_enforced_research_rules: Vec<killswitch_telemetry::IngestedResearchDefenseRule>,
     pub timestamp: String,
 }
 
@@ -673,4 +774,61 @@ pub struct EdrBehavioralIngestResponse {
     pub narratives_emitted: Vec<killswitch_telemetry::EdrThreatNarrative>,
     pub status: killswitch_telemetry::EdrBehavioralStatusReport,
     pub timestamp: String,
+}
+
+
+// =============================================================================
+// 16. OshoosiClaw Migrated Modules: Oso/AWS R1-R5, APC, Tamper Guard & HITL
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OsoAwsWatchdogVerifyRequest {
+    #[serde(default)]
+    pub simulate_policy_swap: Option<bool>,
+    #[serde(default)]
+    pub snapshot: Option<killswitch_telemetry::ContainmentEnvironmentSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OsoAwsIntersectionEvalRequest {
+    pub user_id: String,
+    pub tenant_id: String,
+    pub user_permissions: Vec<String>,
+    pub agent_id: String,
+    pub agent_role: String,
+    pub task_id: String,
+    pub action: String,
+    pub resource_id: String,
+    pub resource_tenant_id: String,
+    #[serde(default)]
+    pub requested_rows: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApcEvaluateRequest {
+    pub principal_id: String,
+    pub actor_id: String,
+    pub action: String,
+    pub resource: String,
+    pub data_classification: String,
+    pub task_session_id: String,
+    #[serde(default)]
+    pub is_irreversible: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlApproveRequestDto {
+    pub request_id: String,
+    pub operator_id: String,
+    pub selected_option_index: usize,
+    pub challenge_nonce: String,
+    #[serde(default)]
+    pub confirmation_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlRejectRequestDto {
+    pub request_id: String,
+    pub operator_id: String,
+    pub reason: String,
 }

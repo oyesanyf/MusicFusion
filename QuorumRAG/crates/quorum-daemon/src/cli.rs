@@ -11,7 +11,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// Port to bind the web server and UI on
+    /// Port to bind the web server and UI on (automatically advances to next open port if busy)
     #[arg(short, long, default_value_t = 3030)]
     pub port: u16,
 
@@ -23,7 +23,7 @@ pub struct Cli {
     #[arg(long, default_value = "./data")]
     pub data_dir: PathBuf,
 
-    /// Directory to index and watch for changes
+    /// Directory to index and watch for changes (defaults to all fixed physical drives when omitted)
     #[arg(long)]
     pub watch_dir: Option<PathBuf>,
 
@@ -31,7 +31,7 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     pub no_browser: bool,
 
-    /// Port for libp2p P2P swarm (TCP & QUIC)
+    /// Port for libp2p P2P swarm (TCP & QUIC; automatically advances to next open port if busy)
     #[arg(long, default_value_t = 3031)]
     pub p2p_port: u16,
 

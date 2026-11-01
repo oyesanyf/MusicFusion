@@ -71,7 +71,7 @@ def synthesize_rust_guard_snippet(
     formatted_indicators = "\n".join(f'        "{tok}",' for tok in raw_tokens)
     return (
         f"// [TIGHTEN-ONLY DEFENSE GUARD] - Synthesized from arXiv:{clean_arxiv}\n"
-        f"// Enforced in: osoosi-agent-anomaly::breakout_defense (Zero-Execution AST)\n"
+        f"// Enforced in: killswitch-telemetry::continuous_defense (Zero-Execution AST)\n"
         f"// Threat Vector: {clean_vector}\n"
         f"const INDICATORS: &[&str] = &[\n"
         f"{formatted_indicators}\n"

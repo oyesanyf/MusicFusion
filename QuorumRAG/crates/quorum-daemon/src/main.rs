@@ -73,10 +73,17 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
     );
     let dedup = Arc::new(quorum_ingest::TwoLevelDedupEngine::new());
 
-    // 2. Ingest Config & Workers
+    // 2. Ingest Config & Workers (defaults to all physical fixed drives when --watch-dir is omitted)
     let mut ingest_config = quorum_ingest::IngestConfig::default();
     if let Some(ref watch_path) = cli.watch_dir {
         ingest_config.watch_paths.push(watch_path.clone());
+    } else {
+        let physical_drives = quorum_ingest::IngestConfig::discover_physical_drives();
+        info!(
+            drives = ?physical_drives,
+            "No --watch-dir specified; defaulting to all fixed physical drives"
+        );
+        ingest_config.watch_paths = physical_drives;
     }
 
     let reindex_worker = Arc::new(quorum_ingest::ReindexWorker::new(
@@ -110,14 +117,18 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         }
     }
 
-    // 3. Network Swarm & Query Coordinator
+    // 3. Dynamically bind HTTP Listener on `cli.port` (or next open port)
+    let (listener, bound_http_port) = bind_next_open_http_port(&cli.host, cli.port).await?;
+    let chosen_p2p_port = find_next_open_p2p_port(&cli.host, cli.p2p_port, bound_http_port);
+
+    // 4. Network Swarm & Query Coordinator
     let (mesh_dispatcher, swarm_handle): (Arc<dyn quorum_coordinator::MeshQueryDispatcher>, Option<quorum_network::NetworkSwarmHandle>) = if cli.local_only {
         info!("Running in local-only mode (P2P swarm networking disabled).");
         (Arc::new(quorum_coordinator::LocalOnlyDispatcher), None)
     } else {
         let net_config = quorum_network::NetworkConfig {
-            tcp_listen_addrs: vec![format!("/ip4/{}/tcp/{}", cli.host, cli.p2p_port).parse()?],
-            quic_listen_addrs: vec![format!("/ip4/{}/udp/{}/quic-v1", cli.host, cli.p2p_port).parse()?],
+            tcp_listen_addrs: vec![format!("/ip4/{}/tcp/{}", cli.host, chosen_p2p_port).parse()?],
+            quic_listen_addrs: vec![format!("/ip4/{}/udp/{}/quic-v1", cli.host, chosen_p2p_port).parse()?],
             ..Default::default()
         };
         match quorum_network::start_network_node(net_config, None).await {
@@ -169,7 +180,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         swarm_handle,
         ingest_config,
         default_model_family,
-        port: cli.port,
+        port: bound_http_port,
         host: cli.host.clone(),
         data_dir: cli.data_dir.clone(),
         shutdown_notify: Arc::clone(&shutdown_notify),
@@ -177,13 +188,12 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
 
     let app = server::build_router(Arc::clone(&app_state));
 
-    let bind_addr = format!("{}:{}", cli.host, cli.port);
-    let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+    let bind_addr = format!("{}:{}", cli.host, bound_http_port);
     info!("QuorumRAG Web UI listening on http://{}", bind_addr);
 
-    // 4. Auto-launch browser if not disabled
+    // 5. Auto-launch browser if not disabled
     if !cli.no_browser {
-        let url = format!("http://{}:{}", cli.host, cli.port);
+        let url = format!("http://{}:{}", cli.host, bound_http_port);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             browser::launch_browser(&url);
@@ -199,6 +209,62 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
     shutdown::execute_graceful_shutdown(app_state).await;
 
     Ok(())
+}
+
+/// Dynamically binds the HTTP server to `start_port`, advancing to the next open TCP port if in use.
+async fn bind_next_open_http_port(
+    host: &str,
+    start_port: u16,
+) -> std::io::Result<(tokio::net::TcpListener, u16)> {
+    let mut last_err = None;
+    for offset in 0..=200u16 {
+        let candidate = start_port.saturating_add(offset);
+        let addr = format!("{}:{}", host, candidate);
+        match tokio::net::TcpListener::bind(&addr).await {
+            Ok(listener) => {
+                if candidate != start_port {
+                    info!(
+                        requested_port = start_port,
+                        bound_port = candidate,
+                        "Port {} was busy; dynamically bound HTTP server to next open port {}",
+                        start_port,
+                        candidate
+                    );
+                }
+                return Ok((listener, candidate));
+            }
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| std::io::Error::other("No open HTTP port found")))
+}
+
+/// Dynamically finds the next open P2P port (both TCP & UDP free, avoiding `exclude_port`).
+fn find_next_open_p2p_port(host: &str, start_port: u16, exclude_port: u16) -> u16 {
+    for offset in 0..=200u16 {
+        let candidate = start_port.saturating_add(offset);
+        if candidate == exclude_port {
+            continue;
+        }
+        let addr = format!("{}:{}", host, candidate);
+        let tcp_free = std::net::TcpListener::bind(&addr).is_ok();
+        let udp_free = std::net::UdpSocket::bind(&addr).is_ok();
+        if tcp_free && udp_free {
+            if candidate != start_port {
+                info!(
+                    requested_p2p_port = start_port,
+                    chosen_p2p_port = candidate,
+                    "P2P port {} was busy; dynamically selected next open P2P port {}",
+                    start_port,
+                    candidate
+                );
+            }
+            return candidate;
+        }
+    }
+    start_port
 }
 
 /// Executes standalone reindex CLI command.
@@ -221,7 +287,7 @@ pub async fn run_standalone_reindex(
     let target_paths = path.map(|p| vec![p]).unwrap_or_else(|| {
         cli.watch_dir
             .map(|w| vec![w])
-            .unwrap_or_else(|| vec![std::env::current_dir().unwrap_or_default()])
+            .unwrap_or_else(quorum_ingest::IngestConfig::discover_physical_drives)
     });
 
     let options = quorum_ingest::ReindexOptions {
@@ -285,8 +351,15 @@ pub async fn run_standalone_fix_drift(
     );
     let dedup = Arc::new(quorum_ingest::TwoLevelDedupEngine::new());
 
+    let mut ingest_cfg = quorum_ingest::IngestConfig::default();
+    if let Some(ref w) = cli.watch_dir {
+        ingest_cfg.watch_paths = vec![w.clone()];
+    } else {
+        ingest_cfg.watch_paths = quorum_ingest::IngestConfig::discover_physical_drives();
+    }
+
     let healer = quorum_ingest::DriftHealer::new(
-        quorum_ingest::IngestConfig::default(),
+        ingest_cfg,
         storage,
         classifier,
         embedder,
