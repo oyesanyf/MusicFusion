@@ -68,7 +68,7 @@ impl AudioBuffer {
         if sample_rate == 0 {
             return Err(DspError::ParameterError("Sample rate must be > 0".to_string()));
         }
-        if samples.len() % channels as usize != 0 {
+        if !samples.len().is_multiple_of(channels as usize) {
             return Err(DspError::ParameterError(format!(
                 "Sample count {} is not aligned with channel count {}",
                 samples.len(),
@@ -377,7 +377,7 @@ impl AudioBuffer {
             }
             WavBitDepth::Pcm24 => {
                 for &sample in &self.samples {
-                    let clamped = sample.clamp(-1.0, 0.99999988);
+                    let clamped = sample.clamp(-1.0, 0.999_999_9);
                     let val = (clamped * 8_388_607.0).round() as i32;
                     let le = val.to_le_bytes();
                     bytes.push(le[0]);

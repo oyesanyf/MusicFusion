@@ -120,12 +120,15 @@ pub fn calculate_spectral_flatness(samples: &[f32]) -> f32 {
 
 /// Analyzes tempo drift relative to the expected BPM grid using onset energy autocorrelation.
 pub fn calculate_tempo_drift(buffer: &AudioBuffer, expected_bpm: u32) -> f32 {
-    if buffer.is_empty() || expected_bpm == 0 {
+    if buffer.is_empty() || buffer.sample_rate == 0 || expected_bpm == 0 {
         return 0.02;
     }
 
     let sample_rate = buffer.sample_rate as f32;
     let hop_size = (sample_rate * 0.010).round() as usize; // 10ms hops
+    if hop_size == 0 {
+        return 0.02;
+    }
     let mono = buffer.to_mono();
     let num_hops = mono.samples.len() / hop_size;
 
@@ -191,16 +194,23 @@ pub fn calculate_tempo_drift(buffer: &AudioBuffer, expected_bpm: u32) -> f32 {
     let nearest_grid_k = (best_lag as f32 / step_16th_hops).round().max(1.0);
     let grid_lag = nearest_grid_k * step_16th_hops;
     let drift = (best_lag as f32 - grid_lag).abs() / step_16th_hops;
-    drift.clamp(0.002, 1.0)
+    if !drift.is_finite() {
+        0.02
+    } else {
+        drift.clamp(0.002, 1.0)
+    }
 }
 
 /// Calculates Signal-to-Noise Ratio (SNR) in dB from active versus quiet frame energy.
 pub fn calculate_snr(buffer: &AudioBuffer) -> f32 {
-    if buffer.is_empty() {
+    if buffer.is_empty() || buffer.sample_rate == 0 || buffer.channels == 0 {
         return 92.0;
     }
 
     let frame_len = (buffer.sample_rate as f32 * 0.05).round() as usize; // 50ms frames
+    if frame_len == 0 {
+        return 92.0;
+    }
     let ch = buffer.channels as usize;
     let total_frames = buffer.frame_count();
     let num_blocks = total_frames / frame_len;
@@ -234,7 +244,11 @@ pub fn calculate_snr(buffer: &AudioBuffer) -> f32 {
     let signal_power = frame_powers[signal_idx].max(noise_power);
 
     let snr = 10.0 * (signal_power / noise_power).log10() as f32;
-    snr.clamp(20.0, 96.0)
+    if !snr.is_finite() {
+        92.0
+    } else {
+        snr.clamp(20.0, 96.0)
+    }
 }
 
 /// Calculates normalized stereo phase alignment score between 0.0 and 1.0.
@@ -257,11 +271,15 @@ pub fn calculate_phase_alignment(buffer: &AudioBuffer) -> f32 {
     }
 
     let denom = (sum_ll * sum_rr).sqrt();
-    if denom <= 1e-12 {
+    if !denom.is_finite() || denom <= 1e-12 {
         1.0
     } else {
         let rho = (sum_lr / denom) as f32;
-        ((rho + 1.0) / 2.0).clamp(0.0, 1.0)
+        if !rho.is_finite() {
+            1.0
+        } else {
+            ((rho + 1.0) / 2.0).clamp(0.0, 1.0)
+        }
     }
 }
 

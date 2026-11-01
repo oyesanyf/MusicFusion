@@ -236,6 +236,7 @@ impl PitchLockVocoder {
 }
 
 /// Primary public contract function satisfying PROJECT.md §Interface Contracts line 67.
+#[allow(clippy::needless_range_loop)]
 pub fn apply_vocal_timbre(
     buffer: &AudioBuffer,
     rasp: f32,

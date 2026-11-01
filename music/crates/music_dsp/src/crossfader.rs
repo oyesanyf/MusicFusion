@@ -105,10 +105,13 @@ impl StemCrossfader {
         crossfade_ms: f32,
         curve: CrossfadeCurve,
     ) -> AudioBuffer {
-        let samples_per_beat = (60.0 / bpm as f32 * SAMPLE_RATE as f32).round() as usize;
-        let samples_per_bar = samples_per_beat * beats_per_bar as usize;
-        let start_frame = start_bar as usize * samples_per_bar;
-        let xfade_frames = (crossfade_ms / 1000.0 * SAMPLE_RATE as f32).round() as usize;
+        let active_bpm = bpm.clamp(40, 220);
+        let active_beats = beats_per_bar.max(1);
+        let samples_per_beat = (60.0 / active_bpm as f32 * SAMPLE_RATE as f32).round() as usize;
+        let samples_per_bar = samples_per_beat.saturating_mul(active_beats as usize);
+        let start_frame = (start_bar as usize).saturating_mul(samples_per_bar);
+        let valid_ms = if crossfade_ms.is_nan() || crossfade_ms < 0.0 { 15.0 } else { crossfade_ms };
+        let xfade_frames = (valid_ms / 1000.0 * SAMPLE_RATE as f32).round() as usize;
 
         Self::inpaint_splice(base, splice, start_frame, xfade_frames, curve)
     }

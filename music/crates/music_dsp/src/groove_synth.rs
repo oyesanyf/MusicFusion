@@ -237,7 +237,7 @@ impl UniversalDrumSynthesizer {
                         let t = bar_start + step as f32 * (beat_sec / 4.0);
                         if t < duration_secs {
                             let vel = if step % 4 == 0 { 0.75 } else if step % 2 == 0 { 0.55 } else { 0.40 };
-                            let voice = if step >= 12 && step <= 14 { DrumVoice::HiHatTriplet } else { DrumVoice::HiHatClosed };
+                            let voice = if (12..=14).contains(&step) { DrumVoice::HiHatTriplet } else { DrumVoice::HiHatClosed };
                             hits.push(DrumHit { time_secs: t, voice, velocity: vel, pan: -0.2 });
                         }
                     }
@@ -387,9 +387,13 @@ impl UniversalDrumSynthesizer {
         hits
     }
 
-    /// Renders drum hits into the stereo PCM AudioBuffer.
+    /// Renders drum hits into the PCM AudioBuffer (supports mono and stereo).
     pub fn render_hits(hits: &[DrumHit], buffer: &mut AudioBuffer) {
         let frames = buffer.frame_count();
+        let channels = buffer.channels as usize;
+        if channels == 0 || frames == 0 || buffer.samples.is_empty() {
+            return;
+        }
         let mut rng = DspRng::new(0xABCD_1234);
 
         for hit in hits {
@@ -409,8 +413,13 @@ impl UniversalDrumSynthesizer {
                 let t = (f - start_frame) as f32 / SAMPLE_RATE as f32;
                 let sample_val = Self::synthesize_sample(hit.voice, t, hit.velocity, &mut rng);
 
-                buffer.samples[f * 2] = (buffer.samples[f * 2] + sample_val * pan_l * hit.velocity).clamp(-0.95, 0.95);
-                buffer.samples[f * 2 + 1] = (buffer.samples[f * 2 + 1] + sample_val * pan_r * hit.velocity).clamp(-0.95, 0.95);
+                if channels == 1 {
+                    let pan_mono = (pan_l + pan_r) * 0.5;
+                    buffer.samples[f] = (buffer.samples[f] + sample_val * pan_mono * hit.velocity).clamp(-0.95, 0.95);
+                } else {
+                    buffer.samples[f * channels] = (buffer.samples[f * channels] + sample_val * pan_l * hit.velocity).clamp(-0.95, 0.95);
+                    buffer.samples[f * channels + 1] = (buffer.samples[f * channels + 1] + sample_val * pan_r * hit.velocity).clamp(-0.95, 0.95);
+                }
             }
         }
     }
@@ -474,7 +483,7 @@ impl UniversalDrumSynthesizer {
 
             // Handclap: 3 pre-bursts (0, 11, 22 ms) + main tail (33 ms)
             DrumVoice::Clap => {
-                let is_preburst = (t < 0.008) || (t >= 0.011 && t < 0.019) || (t >= 0.022 && t < 0.030);
+                let is_preburst = (t < 0.008) || (0.011..0.019).contains(&t) || (0.022..0.030).contains(&t);
                 let is_main = t >= 0.033;
                 let env = if is_preburst {
                     0.6

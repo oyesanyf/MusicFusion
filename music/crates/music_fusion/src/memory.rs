@@ -179,6 +179,7 @@ impl SystemMemory {
     /// - Free RAM >= 12 GB OR Free VRAM >= 4.5 GB -> `qwen2.5:7b`
     /// - Free RAM >= 6 GB OR Free VRAM >= 2 GB -> `qwen2.5:3b`
     /// - Free RAM < 6 GB -> `qwen2.5:1.5b`
+    ///
     /// Never appends `-coder` suffixes that trigger silent 404 aborts.
     pub fn recommend_ollama_model(&self, installed_tags: &[String]) -> String {
         let preferred_tier = if self.free_ram_gb >= 48.0 || self.gpu_vram_free_gb >= 24.0 {

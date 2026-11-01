@@ -7,18 +7,13 @@ use crate::schema::SongBlueprint;
 use crate::telemetry::StemTelemetry;
 
 /// Engine execution mode for song generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EngineMode {
+    #[default]
     Auto,
     PureRust,
     HfHybrid,
-}
-
-impl Default for EngineMode {
-    fn default() -> Self {
-        EngineMode::Auto
-    }
 }
 
 impl EngineMode {

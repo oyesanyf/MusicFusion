@@ -2,6 +2,7 @@
 //! 55–85 Hz Sub-Bass Warmth, Reference Spectral EQ Matchering, Mid-Side Stereo
 //! Width Expansion, and Lookahead Brickwall Peak Limiter (-0.3 dBFS ceiling).
 
+use std::f32::consts::FRAC_1_SQRT_2;
 use crate::wav::AudioBuffer;
 use crate::vocal_formant::BiquadFilter;
 
@@ -164,11 +165,11 @@ pub struct StereoSpatialProcessor;
 
 impl StereoSpatialProcessor {
     pub fn process_frame(left: f32, right: f32, width: f32) -> (f32, f32) {
-        let mid = (left + right) * 0.70710678;
-        let side = (left - right) * 0.70710678;
+        let mid = (left + right) * FRAC_1_SQRT_2;
+        let side = (left - right) * FRAC_1_SQRT_2;
         let wide_side = side * width;
-        let out_left = (mid + wide_side) * 0.70710678;
-        let out_right = (mid - wide_side) * 0.70710678;
+        let out_left = (mid + wide_side) * FRAC_1_SQRT_2;
+        let out_right = (mid - wide_side) * FRAC_1_SQRT_2;
         (out_left, out_right)
     }
 }
