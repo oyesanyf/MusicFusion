@@ -79,6 +79,7 @@ async fn setup_test_app() -> axum::Router {
         port: 3030,
         host: "127.0.0.1".to_string(),
         data_dir,
+        shutdown_notify: Arc::new(tokio::sync::Notify::new()),
     });
 
     build_router(state)

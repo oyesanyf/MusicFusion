@@ -25,4 +25,5 @@ pub struct DaemonState {
     pub port: u16,
     pub host: String,
     pub data_dir: PathBuf,
+    pub shutdown_notify: Arc<tokio::sync::Notify>,
 }

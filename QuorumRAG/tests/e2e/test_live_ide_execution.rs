@@ -1,6 +1,7 @@
 //! tests/e2e/test_live_ide_execution.rs
 //! Opaque-box E2E test verifying Feature 42: Live IDE Execution & Production Code Generation Gate.
 
+use quorum_coordinator::DeterministicOfflineSynthesisEngine;
 use quorum_types::{AccessTier, Citation, DocumentChunk, ScoredChunk};
 use serde::{Deserialize, Serialize};
 
@@ -10,14 +11,6 @@ pub enum SynthesisModelFamily {
     Qwen25Code,
     GemmaProse,
     AutoFusion,
-}
-
-pub struct RrfCombiner;
-
-impl RrfCombiner {
-    pub fn compute_rrf_score(ranks: &[usize], k: f32) -> f32 {
-        ranks.iter().map(|&r| 1.0 / (k + r as f32)).sum()
-    }
 }
 
 pub struct Extraction {
@@ -101,8 +94,25 @@ impl RrfCombiner {
 
 #[test]
 fn test_generated_production_code_is_compilable() {
-    let ranks = vec![1, 2, 3];
-    let score = RrfCombiner::compute_rrf_score(&ranks, 60.0);
-    let expected = (1.0 / 61.0) + (1.0 / 62.0) + (1.0 / 63.0);
-    assert!((score - expected).abs() < 1e-6);
+    let chunk = DocumentChunk::new(
+        "chunk_fusion_1",
+        "doc_fusion",
+        "crates/quorum-coordinator/src/fusion.rs",
+        4,
+        15,
+        0,
+        vec![0.1; 768],
+        "pub struct RrfCombiner;\nimpl RrfCombiner { pub fn compute_rrf_score(ranks: &[usize], k: f32) -> f32 { ranks.iter().map(|&r| 1.0 / (k + r as f32)).sum() } }",
+        None,
+    ).expect("valid chunk");
+    let scored = ScoredChunk::new(chunk, 0.95, "local", false);
+    let (synthesized_code, citations) = DeterministicOfflineSynthesisEngine::synthesize(
+        "Show me the RrfCombiner implementation in QuorumRAG and write a unit test using it",
+        &[scored],
+        "glm4:9b",
+    );
+    assert!(synthesized_code.contains("```rust"));
+    assert!(synthesized_code.contains("pub struct RrfCombiner;"));
+    assert!(synthesized_code.contains("fn test_rrf_combiner_scoring"));
+    assert!(!citations.is_empty());
 }

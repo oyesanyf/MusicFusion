@@ -151,7 +151,7 @@ impl Default for ReindexOptions {
             target_paths: Vec::new(),
             full_rebuild: false,
             force_reembed: false,
-            batch_size: 64,
+            batch_size: 128,
             num_threads: 0,
             dry_run: false,
         }

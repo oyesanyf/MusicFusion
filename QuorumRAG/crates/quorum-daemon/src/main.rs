@@ -137,6 +137,8 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         _ => quorum_coordinator::SynthesisModelFamily::AutoFusion,
     };
 
+    let shutdown_notify = Arc::new(tokio::sync::Notify::new());
+
     let app_state = Arc::new(DaemonState {
         start_time: Instant::now(),
         storage,
@@ -152,6 +154,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         port: cli.port,
         host: cli.host.clone(),
         data_dir: cli.data_dir.clone(),
+        shutdown_notify: Arc::clone(&shutdown_notify),
     });
 
     let app = server::build_router(Arc::clone(&app_state));
@@ -171,7 +174,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
 
     // 5. Axum 0.7 server with graceful shutdown
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown::shutdown_signal())
+        .with_graceful_shutdown(shutdown::shutdown_signal(shutdown_notify))
         .await?;
 
     // 6. Execute graceful shutdown cleanup

@@ -8,20 +8,23 @@ param(
     [int]$TimeoutSecs = 30
 )
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "QuorumRAG Feature 42: Live IDE Execution & Code Gen Gate" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. Compile Binary
 Write-Host "`n[Step 1/5] Compiling quorumrag.exe..." -ForegroundColor Yellow
+$oldEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 $buildOutput = & cargo build -p quorum-daemon 2>&1
+$ErrorActionPreference = $oldEap
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to compile quorum-daemon:`n$buildOutput"
+    throw "Failed to compile quorum-daemon:`n$buildOutput"
 }
 $exePath = Join-Path $WorkspaceDir "target\debug\quorumrag.exe"
 if (-not (Test-Path $exePath)) {
-    Write-Error "Compiled executable not found at: $exePath"
+    throw "Compiled executable not found at: $exePath"
 }
 Unblock-File -Path $exePath -ErrorAction SilentlyContinue
 Write-Host "Binary ready: $exePath" -ForegroundColor Green
@@ -103,13 +106,13 @@ try {
             Write-Host "Reindex completed! Files indexed: $($status.files_indexed), Chunks: $($status.chunks_newly_embedded + $status.chunks_reused_from_cache)" -ForegroundColor Green
             break
         } elseif ($status.phase -eq "failed") {
-            Write-Error "Reindexing failed: $($status.error_message)"
+            throw "Reindexing failed: $($status.error_message)"
         }
         Start-Sleep -Milliseconds 500
     }
 
     if (-not $completed) {
-        Write-Error "Reindexing timed out."
+        throw "Reindexing timed out."
     }
 
     # 5. Live Production Code Generation Query
@@ -120,6 +123,7 @@ try {
         prompt = $prompt
         model_family = "AutoFusion"
         search_mode = "Hybrid"
+        top_k = 16
     } | ConvertTo-Json
 
     # Perform SSE request
@@ -173,7 +177,7 @@ try {
         Write-Host "  -> $tr" -ForegroundColor Gray
     }
     if ($agenticTransitions.Count -eq 0) {
-        Write-Error "Assertion Failed: Zero Agentic State Transitions received via SSE stream!"
+        throw "Assertion Failed: Zero Agentic State Transitions received via SSE stream!"
     }
 
     # Assert Citations
@@ -186,7 +190,7 @@ try {
         }
     }
     if (-not $foundFusionCitation) {
-        Write-Error "Assertion Failed: Did not receive citation pointing to fusion.rs!"
+        throw "Assertion Failed: Did not receive citation pointing to fusion.rs!"
     }
     Write-Host "Citation Verification PASSED: fusion.rs cited with exact line numbers!" -ForegroundColor Green
 
@@ -221,15 +225,18 @@ fn main() {
 "@
         Set-Content -Path (Join-Path $verifyHarnessDir "src\main.rs") -Value $harnessMain
 
+        $oldEap = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         $checkOutput = & cargo check --manifest-path (Join-Path $verifyHarnessDir "Cargo.toml") 2>&1
+        $ErrorActionPreference = $oldEap
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "Code Generation Gate FAILED: Generated code did not compile cleanly!`n$checkOutput"
+            throw "Code Generation Gate FAILED: Generated code did not compile cleanly!`n$checkOutput"
         } else {
             Write-Host "Code Generation Gate PASSED: Generated code compiles cleanly with zero errors!" -ForegroundColor Green
         }
         Remove-Item -Path $verifyHarnessDir -Recurse -Force -ErrorAction SilentlyContinue
     } else {
-        Write-Host "Note: Response contained direct synthesis text without separate code block: $responseTokens" -ForegroundColor Yellow
+        throw "Code Generation Gate FAILED: No compilable ````rust ... ```` code block found in response! Response:`n$responseTokens"
     }
 
     # 6. Test LangExtract Live Grounding
@@ -243,7 +250,7 @@ fn main() {
 
     $lxResp = Invoke-RestMethod -Uri $lxUrl -Method Post -Body $lxBody -ContentType "application/json"
     if (-not $lxResp.consensus_passed) {
-        Write-Error "LangExtract 4-arm consensus failed!"
+        throw "LangExtract 4-arm consensus failed!"
     }
     Write-Host "LangExtract Consensus Passed! Confidence BP: $($lxResp.fused_confidence_bp)" -ForegroundColor Green
 
@@ -253,7 +260,7 @@ fn main() {
         $end = $ext.char_interval[1]
         $span = $sampleCode.Substring($start, $end - $start)
         if ($span -ne $ext.extraction_text) {
-            Write-Error "LangExtract Grounding Mismatch: expected '$($ext.extraction_text)' but got '$span' at $start..$end"
+            throw "LangExtract Grounding Mismatch: expected '$($ext.extraction_text)' but got '$span' at $start..$end"
         }
         Write-Host "  - Grounded '$($ext.extraction_text)' at byte range [$start..$end]" -ForegroundColor Gray
     }
@@ -264,7 +271,7 @@ fn main() {
     $lxVizUrl = "http://127.0.0.1:$Port/api/langextract/visualize"
     $vizResp = Invoke-WebRequest -Uri $lxVizUrl -Method Post -Body $lxBody -ContentType "application/json" -UseBasicParsing
     if ($vizResp.StatusCode -ne 200 -or -not ($vizResp.Content -like "*Google LangExtract*")) {
-        Write-Error "LangExtract visualize failed to return interactive HTML document!"
+        throw "LangExtract visualize failed to return interactive HTML document!"
     }
     Write-Host "LangExtract Visualize PASSED: Interactive HTML document generated!" -ForegroundColor Green
 
@@ -273,8 +280,29 @@ fn main() {
     Write-Host "==========================================================" -ForegroundColor Green
 
 } finally {
-    Write-Host "`nStopping daemon process (PID: $($proc.Id))..." -ForegroundColor Yellow
-    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    if ($proc) {
+        Write-Host "`n[Cleanup & Graceful Shutdown] Sending POST /api/shutdown to daemon..." -ForegroundColor Yellow
+        try {
+            $null = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/shutdown" -Method Post -TimeoutSec 5 -ErrorAction SilentlyContinue
+        } catch {}
+
+        $proc.WaitForExit(10000)
+        if (-not $proc.HasExited) {
+            Write-Host "Daemon did not exit cooperatively within 10s; stopping process..." -ForegroundColor Yellow
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Host "Daemon exited cleanly with exit code $($proc.ExitCode)!" -ForegroundColor Green
+        }
+    }
+
+    # Verify storage compaction integrity: assert zero orphaned lockfiles
+    $tantivyLock = Join-Path $DataDir "tantivy\.tantivy-indexer.lock"
+    $tantivyWriterLock = Join-Path $DataDir "tantivy\.tantivy-writer.lock"
+    if ((Test-Path $tantivyLock) -or (Test-Path $tantivyWriterLock)) {
+        throw "Storage Compaction Verification Failed: Orphaned Tantivy lockfiles detected in $DataDir!"
+    }
+    Write-Host "Compaction & Clean Shutdown Verified: Zero orphaned lockfiles!" -ForegroundColor Green
+
     if (Test-Path $DataDir) {
         Remove-Item -Path $DataDir -Recurse -Force -ErrorAction SilentlyContinue
     }

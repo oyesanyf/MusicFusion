@@ -15,6 +15,7 @@ path = "src/lib.rs"
 quorum-types = { path = "../../crates/quorum-types" }
 quorum-classifier = { path = "../../crates/quorum-classifier" }
 quorum-contract = { path = "../../crates/quorum-contract" }
+quorum-coordinator = { path = "../../crates/quorum-coordinator" }
 blake3 = "1.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

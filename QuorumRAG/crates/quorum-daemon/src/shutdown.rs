@@ -2,8 +2,9 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use crate::state::DaemonState;
 
-/// Installs OS signal listeners (Ctrl+C / SIGINT on all platforms, SIGTERM on unix).
-pub async fn shutdown_signal() {
+/// Installs OS signal listeners (Ctrl+C / SIGINT on all platforms, SIGTERM on unix)
+/// and listens for internal shutdown notification.
+pub async fn shutdown_signal(notify: Arc<tokio::sync::Notify>) {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
@@ -27,6 +28,9 @@ pub async fn shutdown_signal() {
         },
         _ = terminate => {
             info!("Received SIGTERM. Initiating graceful shutdown...");
+        },
+        _ = notify.notified() => {
+            info!("Received internal shutdown notification (/api/shutdown). Initiating graceful shutdown...");
         },
     }
 }

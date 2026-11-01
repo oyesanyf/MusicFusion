@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 use quorum_types::{DocumentChunk, ScoredChunk};
 use tantivy::collector::{Count, TopDocs};
+use tantivy::merge_policy::NoMergePolicy;
 use tantivy::query::{BooleanQuery, QueryParser, RangeQuery, TermQuery};
 use tantivy::schema::*;
 use tantivy::{Index, IndexReader, IndexWriter, TantivyDocument, Term};
@@ -35,6 +36,15 @@ pub(crate) struct TantivyFtsIndex {
 }
 
 impl TantivyFtsIndex {
+    /// Helper to instantiate a new IndexWriter configured with NoMergePolicy.
+    fn create_writer_inner(index: &Index) -> Result<IndexWriter<TantivyDocument>, StorageError> {
+        let writer = index
+            .writer_with_num_threads::<TantivyDocument>(1, 50_000_000)
+            .map_err(|e| StorageError::Tantivy(format!("Failed to create Tantivy writer: {}", e)))?;
+        writer.set_merge_policy(Box::new(NoMergePolicy));
+        Ok(writer)
+    }
+
     /// Opens or creates the Tantivy index at `path`.
     pub(crate) fn open(path: &Path) -> Result<Self, StorageError> {
         create_dir_all(path).map_err(|e| StorageError::Io {
@@ -60,9 +70,7 @@ impl TantivyFtsIndex {
             .or_else(|_| Index::create_in_dir(path, schema))
             .map_err(|e| StorageError::Tantivy(e.to_string()))?;
 
-        let writer = index
-            .writer_with_num_threads::<TantivyDocument>(1, 50_000_000)
-            .map_err(|e| StorageError::Tantivy(format!("Failed to create Tantivy writer: {}", e)))?;
+        let writer = Self::create_writer_inner(&index)?;
 
         let reader = index
             .reader_builder()
@@ -119,13 +127,29 @@ impl TantivyFtsIndex {
             }
             doc.add_bytes(self.field_vector_bytes, &vec_bytes);
 
-            writer
-                .add_document(doc)
-                .map_err(|e| StorageError::Tantivy(format!("Add document error: {}", e)))?;
+            let mut add_res = writer.add_document(doc.clone());
+            if let Err(ref e) = add_res {
+                let msg = e.to_string();
+                if msg.contains("index writer was killed") || msg.contains("panicked") {
+                    tracing::warn!("Tantivy writer was killed; recovering by re-instantiating index writer: {}", msg);
+                    *writer = Self::create_writer_inner(&self.index)?;
+                    add_res = writer.add_document(doc);
+                }
+            }
+            add_res.map_err(|e| StorageError::Tantivy(format!("Add document error: {}", e)))?;
             count += 1;
         }
 
-        commit_with_retry(&mut writer)?;
+        if let Err(e) = commit_with_retry(&mut writer) {
+            let msg = e.to_string();
+            if msg.contains("index writer was killed") || msg.contains("panicked") {
+                tracing::warn!("Tantivy writer killed during commit; recreating: {}", msg);
+                *writer = Self::create_writer_inner(&self.index)?;
+                commit_with_retry(&mut writer)?;
+            } else {
+                return Err(e);
+            }
+        }
 
         self.reader
             .reload()
@@ -236,8 +260,18 @@ impl TantivyFtsIndex {
             .lock()
             .map_err(|_| StorageError::Tantivy("Tantivy writer mutex poisoned".into()))?;
 
-        let _ = writer.delete_term(term);
-        commit_with_retry(&mut writer)?;
+        let _ = writer.delete_term(term.clone());
+        if let Err(e) = commit_with_retry(&mut writer) {
+            let msg = e.to_string();
+            if msg.contains("index writer was killed") || msg.contains("panicked") {
+                tracing::warn!("Tantivy writer killed during delete; recreating: {}", msg);
+                *writer = Self::create_writer_inner(&self.index)?;
+                let _ = writer.delete_term(term);
+                commit_with_retry(&mut writer)?;
+            } else {
+                return Err(e);
+            }
+        }
 
         self.reader
             .reload()
@@ -253,7 +287,16 @@ impl TantivyFtsIndex {
             .lock()
             .map_err(|_| StorageError::Tantivy("Tantivy writer mutex poisoned".into()))?;
 
-        commit_with_retry(&mut writer)?;
+        if let Err(e) = commit_with_retry(&mut writer) {
+            let msg = e.to_string();
+            if msg.contains("index writer was killed") || msg.contains("panicked") {
+                tracing::warn!("Tantivy writer killed during compact; recreating: {}", msg);
+                *writer = Self::create_writer_inner(&self.index)?;
+                commit_with_retry(&mut writer)?;
+            } else {
+                return Err(e);
+            }
+        }
 
         self.reader
             .reload()
@@ -372,14 +415,58 @@ impl TantivyFtsIndex {
             .lock()
             .map_err(|_| StorageError::Tantivy("Tantivy writer mutex poisoned".into()))?;
 
-        let _ = writer.delete_term(term);
-        commit_with_retry(&mut writer)?;
+        let _ = writer.delete_term(term.clone());
+        if let Err(e) = commit_with_retry(&mut writer) {
+            let msg = e.to_string();
+            if msg.contains("index writer was killed") || msg.contains("panicked") {
+                tracing::warn!("Tantivy writer killed during delete; recreating: {}", msg);
+                *writer = Self::create_writer_inner(&self.index)?;
+                let _ = writer.delete_term(term);
+                commit_with_retry(&mut writer)?;
+            } else {
+                return Err(e);
+            }
+        }
 
         self.reader
             .reload()
             .map_err(|e| StorageError::Tantivy(format!("Reload failed: {}", e)))?;
 
         Ok(count)
+    }
+
+    /// Clears all indexed documents from the Tantivy index.
+    #[allow(dead_code)]
+    pub(crate) fn clear(&self) -> Result<(), StorageError> {
+        let mut writer = self
+            .writer
+            .lock()
+            .map_err(|_| StorageError::Tantivy("Tantivy writer mutex poisoned".into()))?;
+
+        if let Err(e) = writer.delete_all_documents() {
+            let msg = e.to_string();
+            if msg.contains("index writer was killed") || msg.contains("panicked") {
+                tracing::warn!("Tantivy writer killed during clear; recreating: {}", msg);
+                *writer = Self::create_writer_inner(&self.index)?;
+                let _ = writer.delete_all_documents();
+            }
+        }
+        if let Err(e) = commit_with_retry(&mut writer) {
+            let msg = e.to_string();
+            if msg.contains("index writer was killed") || msg.contains("panicked") {
+                tracing::warn!("Tantivy writer killed during commit in clear; recreating: {}", msg);
+                *writer = Self::create_writer_inner(&self.index)?;
+                commit_with_retry(&mut writer)?;
+            } else {
+                return Err(e);
+            }
+        }
+
+        self.reader
+            .reload()
+            .map_err(|e| StorageError::Tantivy(format!("Reload failed: {}", e)))?;
+
+        Ok(())
     }
 }
 
@@ -394,7 +481,7 @@ fn commit_with_retry(writer: &mut IndexWriter<TantivyDocument>) -> Result<(), St
                 if attempts >= 10 {
                     return Err(StorageError::Tantivy(format!("Tantivy commit error: {}", e)));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(15 * attempts));
+                std::thread::sleep(std::time::Duration::from_millis(20 * attempts));
             }
         }
     }

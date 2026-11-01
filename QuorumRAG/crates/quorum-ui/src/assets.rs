@@ -13,10 +13,11 @@ pub struct WebAssets;
 /// Retrieves embedded static asset bytes and its MIME content-type.
 pub fn get_asset(path: &str) -> Option<(Cow<'static, [u8]>, &'static str)> {
     let clean_path = path.trim_start_matches('/');
-    let target = if clean_path.is_empty() {
+    let stripped = clean_path.strip_prefix("assets/").unwrap_or(clean_path);
+    let target = if stripped.is_empty() {
         "index.html"
     } else {
-        clean_path
+        stripped
     };
 
     WebAssets::get(target).map(|file| {
@@ -37,7 +38,8 @@ pub fn get_index_html() -> String {
 /// Static asset handler with SPA fallback to index.html.
 pub async fn static_handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
-    let target_path = if path.is_empty() { "index.html" } else { path };
+    let stripped = path.strip_prefix("assets/").unwrap_or(path);
+    let target_path = if stripped.is_empty() { "index.html" } else { stripped };
 
     match WebAssets::get(target_path) {
         Some(content) => {

@@ -38,6 +38,9 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         .route("/api/health", get(health::health_handler))
         .route("/api/models", get(health::models_handler))
 
+        // Graceful Shutdown Endpoint
+        .route("/api/shutdown", post(shutdown_handler))
+
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -80,4 +83,11 @@ async fn chat_stream_compat_handler(
         access_tier: Some(0),
     };
     chat::chat_sse_handler(State(state), axum::Json(req)).await
+}
+
+/// POST /api/shutdown - Triggers graceful daemon shutdown.
+async fn shutdown_handler(State(state): State<Arc<DaemonState>>) -> impl IntoResponse {
+    tracing::info!("Received /api/shutdown request; notifying shutdown listener");
+    state.shutdown_notify.notify_one();
+    (StatusCode::OK, "Shutdown initiated").into_response()
 }

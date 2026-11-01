@@ -98,6 +98,7 @@ async fn test_daemon_server_routes_and_health() {
         port: 3030,
         host: "127.0.0.1".to_string(),
         data_dir,
+        shutdown_notify: Arc::new(tokio::sync::Notify::new()),
     });
 
     let app = build_router(state);
@@ -165,4 +166,18 @@ async fn test_daemon_server_routes_and_health() {
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
     let lx_json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(lx_json["consensus_passed"], true);
+
+    // Test POST /api/shutdown
+    let response = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/shutdown")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }

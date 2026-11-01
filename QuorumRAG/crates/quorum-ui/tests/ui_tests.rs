@@ -71,6 +71,15 @@ async fn test_static_handler_routes() {
     let resp = static_handler(Uri::from_static("/styles.css")).await;
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
 
+    // Asset with /assets/ prefix
+    let resp = static_handler(Uri::from_static("/assets/styles.css")).await;
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    assert_eq!(resp.headers().get("content-type").unwrap(), "text/css");
+
+    let (css_bytes, css_mime) = get_asset("assets/styles.css").expect("assets/styles.css must resolve");
+    assert_eq!(css_mime, "text/css");
+    assert!(!css_bytes.is_empty());
+
     // SPA fallback
     let resp = static_handler(Uri::from_static("/chat/conversation/123")).await;
     assert_eq!(resp.status(), axum::http::StatusCode::OK);

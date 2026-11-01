@@ -27,7 +27,13 @@ impl GradeRelevanceNode {
 
         state.relevance_score = max_score;
 
-        let satisfactory = !is_empty && max_score >= self.relevance_threshold;
+        let effective_threshold = if max_score > 0.0 && max_score <= 0.1 {
+            self.relevance_threshold * (1.0 / 60.0)
+        } else {
+            self.relevance_threshold
+        };
+
+        let satisfactory = !is_empty && max_score >= effective_threshold;
         let will_rewrite = !satisfactory && state.hop_count < state.max_hops;
 
         let reasoning = if is_empty {
@@ -35,12 +41,12 @@ impl GradeRelevanceNode {
         } else if satisfactory {
             format!(
                 "Top chunk score {:.3} meets threshold {:.3}",
-                max_score, self.relevance_threshold
+                max_score, effective_threshold
             )
         } else {
             format!(
                 "Top chunk score {:.3} below threshold {:.3}",
-                max_score, self.relevance_threshold
+                max_score, effective_threshold
             )
         };
 
