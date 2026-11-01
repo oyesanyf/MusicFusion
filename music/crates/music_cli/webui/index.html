@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="MusicFusion AI Web Studio - Universal 2-Column DAW Music Producer & Multi-LLM Iteration Studio">
+  <title>MusicFusion AI Studio | Universal AI Music Producer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-dark">
+  <div class="chatgpt-app" id="chatgpt-app">
+
+    <!-- ============================================================ -->
+    <!-- LEFT SIDEBAR: History, Presets, Hardware Telemetry          -->
+    <!-- ============================================================ -->
+    <aside class="chatgpt-sidebar" id="chatgpt-sidebar" aria-label="Studio Sidebar">
+      <!-- Sidebar Header -->
+      <div class="sidebar-top">
+        <div class="sidebar-brand-box" id="sidebar-brand-home" title="MusicFusion AI Studio">
+          <div class="sidebar-brand-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 18V5l12-2v13"></path>
+              <circle cx="6" cy="18" r="3"></circle>
+              <circle cx="18" cy="16" r="3"></circle>
+            </svg>
+          </div>
+          <div class="sidebar-brand-text">
+            <span class="sidebar-brand-title">MusicFusion</span>
+            <span class="sidebar-brand-sub">Universal AI Producer</span>
+          </div>
+        </div>
+        <div class="sidebar-top-actions">
+          <button type="button" class="sidebar-toggle-btn" id="sidebar-toggle-btn" title="Collapse sidebar (Ctrl+[)">◫</button>
+        </div>
+      </div>
+
+      <!-- + New Song Button -->
+      <div class="sidebar-action-wrap">
+        <button type="button" class="sidebar-new-btn" id="sidebar-new-song" title="Start a brand-new song project (Ctrl+N)">
+          <span class="btn-icon">➕</span>
+          <span class="btn-text">New Song</span>
+          <span class="btn-kbd">Ctrl+N</span>
+        </button>
+      </div>
+
+      <!-- Scrollable Navigation and History -->
+      <nav class="sidebar-nav-list" id="sidebar-nav-list">
+        <!-- Section: Song & Version History -->
+        <div class="sidebar-section-header">
+          <span class="section-title">SONG &amp; VERSION HISTORY</span>
+          <span class="section-count" id="history-count">2</span>
+        </div>
+
+        <div class="sidebar-history-container" id="sidebar-song-history">
+          <!-- Item 1: Flagship Reggae Anthem (Active) -->
+          <div class="history-item active" data-song-id="song_reggae_anthem_001" data-version="1" tabindex="0">
+            <div class="history-item-top">
+              <span class="history-genre-badge reggae">Roots Reggae</span>
+              <span class="history-time">Just now</span>
+            </div>
+            <div class="history-item-title">One Love Compassion Anthem</div>
+            <div class="history-item-meta">76 BPM • A Major • 48 kHz</div>
+            <div class="history-version-chips">
+              <button type="button" class="version-chip active" data-version="1" title="Version 1: Original Master">v1</button>
+              <button type="button" class="version-chip" data-version="2" title="Version 2: Wah Lead &amp; Sub-Bass Boost">v2 (Adjusted)</button>
+            </div>
+          </div>
+
+          <!-- Item 2: Afrobeats Demo -->
+          <div class="history-item" data-song-id="song_afrobeats_002" data-version="1" tabindex="0">
+            <div class="history-item-top">
+              <span class="history-genre-badge afro">Afrobeats</span>
+              <span class="history-time">2h ago</span>
+            </div>
+            <div class="history-item-title">Lagos Sunrise Groove</div>
+            <div class="history-item-meta">104 BPM • C Major • 48 kHz</div>
+            <div class="history-version-chips">
+              <button type="button" class="version-chip active" data-version="1">v1</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <!-- Section: Genre Presets Accordion -->
+        <div class="sidebar-section-header accordion-toggle" id="presets-accordion-toggle" tabindex="0">
+          <span class="section-title">GENRE HIT TEMPLATES</span>
+          <span class="accordion-chevron" id="presets-chevron">▾</span>
+        </div>
+
+        <div class="sidebar-presets-list" id="sidebar-presets-list">
+          <button type="button" class="preset-btn active" data-genre="Roots Reggae" data-bpm="76" data-key="A Major" title="Flagship 76 BPM 1977 Roots Reggae 'One Love' Anthem">
+            <span class="preset-icon">🇯🇲</span>
+            <span class="preset-name">Roots Reggae ("One Love")</span>
+            <span class="preset-bpm">76 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="Afrobeats" data-bpm="104" data-key="C Major" title="Syncopated Tresillo log-drum, energetic brass">
+            <span class="preset-icon">🌍</span>
+            <span class="preset-name">Afrobeats Hit</span>
+            <span class="preset-bpm">104 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="Amapiano" data-bpm="113" data-key="F Minor" title="Deep South African log-drum bassline, warm Rhodes">
+            <span class="preset-icon">🎹</span>
+            <span class="preset-name">Amapiano Groove</span>
+            <span class="preset-bpm">113 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="Soul / Gospel" data-bpm="72" data-key="G Major" title="Lush backing gospel choir, Hammond B3 organ">
+            <span class="preset-icon">🎤</span>
+            <span class="preset-name">Soul &amp; Gospel Choir</span>
+            <span class="preset-bpm">72 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="Hip-Hop / Trap" data-bpm="140" data-key="C# Minor" title="Punchy 808 sub-bass, rolling hi-hats">
+            <span class="preset-icon">🥁</span>
+            <span class="preset-name">Hip-Hop &amp; 808 Trap</span>
+            <span class="preset-bpm">140 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="Blues Rock" data-bpm="120" data-key="E Minor" title="Soaring psychedelic overdrive and wah-wah guitar solos">
+            <span class="preset-icon">🎸</span>
+            <span class="preset-name">Stadium Blues-Rock</span>
+            <span class="preset-bpm">120 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="Jazz Fusion" data-bpm="128" data-key="D Dorian" title="Modal improvisation, swing ride cymbal, acoustic upright bass">
+            <span class="preset-icon">🎷</span>
+            <span class="preset-name">Modern Jazz Fusion</span>
+            <span class="preset-bpm">128 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="Cinematic Orchestral" data-bpm="65" data-key="D Minor" title="Dramatic strings, timpani swells, epic French horns">
+            <span class="preset-icon">🎻</span>
+            <span class="preset-name">Cinematic Orchestral</span>
+            <span class="preset-bpm">65 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="EDM / House" data-bpm="126" data-key="A Minor" title="Four-on-the-floor kick, pumping sidechain, synth leads">
+            <span class="preset-icon">⚡</span>
+            <span class="preset-name">EDM / Club House</span>
+            <span class="preset-bpm">126 BPM</span>
+          </button>
+          <button type="button" class="preset-btn" data-genre="Latin / Bossa" data-bpm="118" data-key="D Major" title="Nylon classical guitar, syncopated surdo, montuno piano">
+            <span class="preset-icon">🌴</span>
+            <span class="preset-name">Latin Bossa Nova</span>
+            <span class="preset-bpm">118 BPM</span>
+          </button>
+        </div>
+      </nav>
+
+      <!-- Sidebar Footer: Live Hardware & Ollama Status -->
+      <div class="sidebar-footer">
+        <div class="hw-status-card">
+          <div class="hw-card-header">
+            <span class="hw-title">LIVE HARDWARE (M1)</span>
+            <span class="status-indicator-pill online">
+              <span class="pulse-dot"></span> Online
+            </span>
+          </div>
+          <div class="hw-metrics-row">
+            <div class="hw-metric">
+              <span class="metric-label">GPU VRAM</span>
+              <span class="metric-val" id="hw-vram-text">21.2 / 24 GB</span>
+            </div>
+            <div class="hw-metric">
+              <span class="metric-label">SYS RAM</span>
+              <span class="metric-val" id="hw-ram-text">18.5 / 32 GB</span>
+            </div>
+          </div>
+          <div class="hw-gpu-name" id="hw-gpu-text">NVIDIA RTX 4090 (24GB)</div>
+          <div class="hw-ollama-tags" id="hw-ollama-models" title="Active ModelFusion Panel Models">
+            <span class="ollama-tag">qwen2.5:32b</span>
+            <span class="ollama-tag">deepseek-r1</span>
+            <span class="ollama-tag">glm4</span>
+            <span class="ollama-tag">flint</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Sidebar Resize Handle -->
+    <div class="sidebar-resizer" id="sidebar-resizer" title="Drag to resize sidebar"></div>
+
+    <!-- ============================================================ -->
+    <!-- MAIN CHAT CANVAS & DAW STUDIO                                -->
+    <!-- ============================================================ -->
+    <main class="chatgpt-main-content" id="chatgpt-main-content">
+      <!-- Minimal Top Header Bar -->
+      <header class="chatgpt-top-header">
+        <div class="top-nav-left">
+          <button type="button" class="sidebar-open-btn" id="sidebar-open-btn" title="Open sidebar">☰</button>
+          <div class="active-track-info">
+            <h1 class="header-track-title" id="header-track-title">One Love Compassion Anthem</h1>
+            <span class="header-genre-badge" id="header-genre-pill">🇯🇲 Roots Reggae</span>
+          </div>
+          <!-- A/B Version Switcher -->
+          <div class="version-switcher-wrapper">
+            <label for="header-version-select" class="sr-only">Switch Version</label>
+            <select id="header-version-select" class="version-select" title="Compare versions (v1 vs v2)">
+              <option value="1" selected>Version 1 (76 BPM Original Master)</option>
+              <option value="2">Version 2 (80 BPM Wah Lead &amp; Sub-Bass Boost)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="top-nav-right">
+          <!-- Multi-LLM Deliberation Panel Badge -->
+          <div class="panel-models-badge" title="Active Multi-LLM Iteration Specialist Panel">
+            <span class="panel-icon">✨</span>
+            <span class="panel-text">Multi-LLM Panel:</span>
+            <span class="panel-chip lyricist" title="Lyric &amp; Hook Refiner">Lyricist: flint</span>
+            <span class="panel-chip arranger" title="Arrangement &amp; Groove">Arranger: glm4</span>
+            <span class="panel-chip engineer" title="Sound Engineer">Eng: qwen2.5</span>
+            <span class="panel-chip copilot" title="Iteration Co-Pilot &amp; Diff Architect">Co-Pilot: deepseek-r1</span>
+            <span class="panel-chip judge" title="Judge Gate">Judge: qwen2.5</span>
+          </div>
+
+          <!-- Theme Toggle -->
+          <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle Theme (Dark / Obsidian / Slate)">🌙</button>
+        </div>
+      </header>
+
+      <!-- Viewport / Conversation Stream -->
+      <div class="chatgpt-viewport" id="chatgpt-viewport">
+        <div class="chat-messages" id="chat-messages">
+
+          <!-- User Message Bubble -->
+          <div class="message-bubble user-bubble">
+            <div class="bubble-header">
+              <span class="bubble-avatar user-avatar">👤</span>
+              <span class="bubble-author">You</span>
+              <span class="bubble-timestamp">10:45 AM</span>
+            </div>
+            <div class="bubble-content" id="active-user-prompt">
+              Create a 1977 roots reggae anthem with soulful raspy Jamaican male tenor vocals, spiritual and uplifting, 76 BPM, hypnotic one drop master drumming with complex polyrhythmic snare rolls and deep sub bass, virtuosic soaring psychedelic blues rock electric guitar solos, warm analog tape production, and lush gospel backing choir.
+            </div>
+          </div>
+
+          <!-- Assistant Message Bubble: Interactive Song Card -->
+          <div class="message-bubble assistant-bubble" id="assistant-bubble-active">
+            <div class="bubble-header">
+              <span class="bubble-avatar assistant-avatar">🎵</span>
+              <span class="bubble-author">Universal Music Producer</span>
+              <span class="bubble-timestamp">10:46 AM</span>
+              <span class="bubble-quality-badge success">✓ Quality Passed (Score 9.4/10)</span>
+            </div>
+
+            <!-- THE INTERACTIVE SONG CARD -->
+            <div class="song-card" id="active-song-card">
+              <!-- Card Header -->
+              <div class="song-card-header">
+                <div class="song-card-title-group">
+                  <div class="song-card-title" id="card-song-title">One Love Compassion Anthem</div>
+                  <div class="song-card-subtitle" id="card-song-meta">1977 Roots Reggae • 76 BPM • A Major • 48 kHz 24-bit WAV</div>
+                </div>
+                <div class="song-card-actions">
+                  <span class="version-tag" id="card-version-tag">v1 Master</span>
+                  <a href="/api/songs/song_reggae_anthem_001/versions/1/audio/final_master" download="One_Love_Anthem_v1_Master.wav" class="card-download-btn" id="card-download-btn" title="Download Master 48 kHz WAV">
+                    ⬇ Download WAV
+                  </a>
+                </div>
+              </div>
+
+              <!-- Master Audio Player & Waveform Deck -->
+              <div class="master-deck-container">
+                <div class="deck-top-row">
+                  <span class="deck-label">FINAL MASTER (48 kHz 24-Bit Stereo)</span>
+                  <span class="deck-time" id="master-time-display">00:00 / 03:24</span>
+                </div>
+
+                <!-- Custom Styled Canvas Waveform -->
+                <div class="waveform-canvas-wrap" id="waveform-wrap">
+                  <canvas id="master-waveform-canvas" width="760" height="64" title="Click anywhere to scrub playback"></canvas>
+                  <div class="waveform-progress-bar" id="waveform-progress"></div>
+                </div>
+
+                <!-- Native HTML5 Audio Element (Driven by Custom Deck) -->
+                <audio id="master-audio-player" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/final_master">
+                  Your browser does not support the audio element.
+                </audio>
+
+                <!-- Deck Controls Bar -->
+                <div class="deck-controls-bar">
+                  <button type="button" class="deck-play-btn" id="btn-master-play" title="Play / Pause (Spacebar)">▶</button>
+                  <button type="button" class="deck-stop-btn" id="btn-master-stop" title="Stop &amp; Rewind">⏹</button>
+                  <div class="deck-volume-wrap">
+                    <span class="volume-icon">🔊</span>
+                    <input type="range" id="master-volume-slider" min="0" max="1" step="0.01" value="0.9" title="Master Volume" class="volume-slider">
+                  </div>
+                  <div class="deck-rate-wrap">
+                    <button type="button" class="rate-btn" id="btn-toggle-loop" title="Toggle Loop Mode">🔁 Loop</button>
+                  </div>
+                  <div class="deck-status-msg" id="deck-status-msg">Ready for 48 kHz playback</div>
+                </div>
+              </div>
+
+              <!-- Audio Spectral & Waveform Telemetry Pills -->
+              <div class="telemetry-dashboard">
+                <div class="telemetry-pill" title="Peak Amplitude (Target: -0.5 to -0.1 dBFS)">
+                  <span class="telemetry-label">Peak:</span>
+                  <span class="telemetry-val" id="telem-peak">-0.1 dBFS</span>
+                </div>
+                <div class="telemetry-pill" title="Root-Mean-Square Loudness (Target: -14.0 to -11.0 dBFS)">
+                  <span class="telemetry-label">RMS:</span>
+                  <span class="telemetry-val" id="telem-rms">-12.4 dBFS</span>
+                </div>
+                <div class="telemetry-pill" title="Dynamic Range Ratio (Target: > 10.0 dB)">
+                  <span class="telemetry-label">Dynamic Range:</span>
+                  <span class="telemetry-val" id="telem-dr">11.8 dB</span>
+                </div>
+                <div class="telemetry-pill" title="Clock Phase Tempo Drift (Target: < 0.05%)">
+                  <span class="telemetry-label">Tempo Drift:</span>
+                  <span class="telemetry-val" id="telem-drift">0.02%</span>
+                </div>
+                <div class="telemetry-pill zero-clip" title="Zero Digital Clipping Verified">
+                  <span class="telemetry-icon">✓</span>
+                  <span class="telemetry-val" id="telem-clipping">0 Over-Clipping</span>
+                </div>
+                <div class="telemetry-pill score" title="Ollama Multi-LLM Judge Composite Score">
+                  <span class="telemetry-label">Judge:</span>
+                  <span class="telemetry-val" id="telem-judge">9.4 / 10.0</span>
+                </div>
+              </div>
+
+              <!-- Action Callout: Ask Iteration Co-Pilot LLM -->
+              <div class="copilot-action-banner">
+                <div class="copilot-banner-left">
+                  <span class="copilot-sparkle">✨</span>
+                  <div class="copilot-banner-text">
+                    <span class="copilot-heading">Ask Fusion LLM to Assist &amp; Suggest Iterations</span>
+                    <span class="copilot-desc">Our dedicated Iteration Co-Pilot LLM (deepseek-r1 + qwen2.5) evaluates telemetry and generates targeted musical iterations.</span>
+                  </div>
+                </div>
+                <button type="button" class="btn-ask-copilot" id="btn-ask-copilot">
+                  ✨ Ask Iteration Co-Pilot
+                </button>
+              </div>
+
+              <!-- Dynamic Iteration Suggestions Drawer -->
+              <div class="copilot-suggestions-drawer hidden" id="copilot-suggestions-drawer">
+                <div class="suggestions-header">
+                  <span class="sugg-icon">💡</span>
+                  <span class="sugg-title">Recommended Next Iterations (Click to Apply):</span>
+                </div>
+                <div class="chips-flex-row" id="card-suggestion-chips">
+                  <!-- Populated dynamically via REST API -->
+                  <button type="button" class="sugg-chip" data-prompt="Boost guitar solo wah resonance and sustain in [Guitar Solo]">
+                    🔥 Boost guitar solo wah &amp; sustain in [Guitar Solo]
+                  </button>
+                  <button type="button" class="sugg-chip" data-prompt="Add syncopated Nyabinghi percussion fills in [Verse 2]">
+                    🥁 Add syncopated Nyabinghi percussion fills in [Verse 2]
+                  </button>
+                  <button type="button" class="sugg-chip" data-prompt="Elevate gospel choir call-and-response harmonies in [Chorus]">
+                    🎤 Elevate gospel choir call-and-response in [Chorus]
+                  </button>
+                  <button type="button" class="sugg-chip" data-prompt="Increase sub-bass warmth (+3dB @ 65Hz) for heavier roots weight">
+                    🔊 Increase sub-bass warmth (+3dB @ 65Hz)
+                  </button>
+                  <button type="button" class="sugg-chip" data-prompt="Speed up tempo from 76 to 80 BPM for a more driving groove">
+                    ⚡ Speed up tempo from 76 to 80 BPM
+                  </button>
+                </div>
+              </div>
+
+              <!-- Collapsible Drawer 1: Stems & Multi-Track Studio -->
+              <div class="card-collapsible-section">
+                <button type="button" class="section-toggle-btn" id="toggle-stems-btn" aria-expanded="false">
+                  <span class="toggle-icon">▸</span>
+                  <span class="toggle-title">🎛️ Stems &amp; Multi-Track Studio (8 Isolated Tracks)</span>
+                  <span class="toggle-badge">8 Stems Available</span>
+                </button>
+
+                <div class="section-collapsible-body collapsed" id="stems-drawer-body">
+                  <div class="stems-global-actions">
+                    <button type="button" class="stem-global-btn" id="btn-play-all-stems">▶ Play All Active Stems</button>
+                    <button type="button" class="stem-global-btn" id="btn-stop-all-stems">⏹ Stop All Stems</button>
+                    <button type="button" class="stem-global-btn" id="btn-unmute-all">Reset Mute/Solo</button>
+                    <div class="remaster-inline-wrap">
+                      <select id="mastering-profile-select" class="profile-select">
+                        <option value="WarmAnalogTape" selected>Profile: 1970s Warm Analog Tape</option>
+                        <option value="ModernPunchy">Profile: Modern Punchy Hit</option>
+                        <option value="ClubSubHeavy">Profile: Club Sub-Heavy Bass</option>
+                        <option value="WideOrchestral">Profile: Wide Cinematic Orchestral</option>
+                        <option value="IntimateJazz">Profile: Intimate Acoustic / Jazz</option>
+                      </select>
+                      <button type="button" class="stem-remaster-btn" id="btn-remaster-track">🎚️ Re-Master Track</button>
+                    </div>
+                  </div>
+
+                  <!-- 8 Isolated Stem Strips -->
+                  <div class="stem-tracks-grid" id="stem-tracks-grid">
+                    <!-- Stem 1: Vocals -->
+                    <div class="stem-strip" data-stem="vocals">
+                      <div class="stem-info">
+                        <span class="stem-icon">🎤</span>
+                        <div class="stem-meta">
+                          <span class="stem-name">Raspy Tenor Vocals</span>
+                          <span class="stem-type">Formant Filter + Pitch Vocoder</span>
+                        </div>
+                      </div>
+                      <div class="stem-controls">
+                        <button type="button" class="stem-btn solo" data-stem="vocals" title="Solo">S</button>
+                        <button type="button" class="stem-btn mute" data-stem="vocals" title="Mute">M</button>
+                        <input type="range" class="stem-vol" data-stem="vocals" min="0" max="1" step="0.05" value="0.85" title="Stem Volume">
+                        <audio class="stem-audio-element" data-stem="vocals" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/raspy_tenor_vocals"></audio>
+                        <button type="button" class="stem-regen-btn" data-stem="vocals" title="Regenerate only this vocal stem">🔄 Regen</button>
+                      </div>
+                    </div>
+
+                    <!-- Stem 2: Drums -->
+                    <div class="stem-strip" data-stem="drums">
+                      <div class="stem-info">
+                        <span class="stem-icon">🥁</span>
+                        <div class="stem-meta">
+                          <span class="stem-name">One-Drop Drums</span>
+                          <span class="stem-type">Pure-Rust 48kHz Drum Synth</span>
+                        </div>
+                      </div>
+                      <div class="stem-controls">
+                        <button type="button" class="stem-btn solo" data-stem="drums" title="Solo">S</button>
+                        <button type="button" class="stem-btn mute" data-stem="drums" title="Mute">M</button>
+                        <input type="range" class="stem-vol" data-stem="drums" min="0" max="1" step="0.05" value="0.9" title="Stem Volume">
+                        <audio class="stem-audio-element" data-stem="drums" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/drums"></audio>
+                        <button type="button" class="stem-regen-btn" data-stem="drums" title="Regenerate drum pattern">🔄 Regen</button>
+                      </div>
+                    </div>
+
+                    <!-- Stem 3: Bass -->
+                    <div class="stem-strip" data-stem="bass">
+                      <div class="stem-info">
+                        <span class="stem-icon">🔊</span>
+                        <div class="stem-meta">
+                          <span class="stem-name">Deep Sub-Bass</span>
+                          <span class="stem-type">55-85Hz Warmth Saturation</span>
+                        </div>
+                      </div>
+                      <div class="stem-controls">
+                        <button type="button" class="stem-btn solo" data-stem="bass" title="Solo">S</button>
+                        <button type="button" class="stem-btn mute" data-stem="bass" title="Mute">M</button>
+                        <input type="range" class="stem-vol" data-stem="bass" min="0" max="1" step="0.05" value="0.95" title="Stem Volume">
+                        <audio class="stem-audio-element" data-stem="bass" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/bass"></audio>
+                        <button type="button" class="stem-regen-btn" data-stem="bass" title="Regenerate sub-bass">🔄 Regen</button>
+                      </div>
+                    </div>
+
+                    <!-- Stem 4: Guitar -->
+                    <div class="stem-strip" data-stem="guitar">
+                      <div class="stem-info">
+                        <span class="stem-icon">🎸</span>
+                        <div class="stem-meta">
+                          <span class="stem-name">Rhythm Guitar Skank</span>
+                          <span class="stem-type">Karplus-Strong Wah &amp; Chop</span>
+                        </div>
+                      </div>
+                      <div class="stem-controls">
+                        <button type="button" class="stem-btn solo" data-stem="guitar" title="Solo">S</button>
+                        <button type="button" class="stem-btn mute" data-stem="guitar" title="Mute">M</button>
+                        <input type="range" class="stem-vol" data-stem="guitar" min="0" max="1" step="0.05" value="0.8" title="Stem Volume">
+                        <audio class="stem-audio-element" data-stem="guitar" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/guitar"></audio>
+                        <button type="button" class="stem-regen-btn" data-stem="guitar" title="Regenerate guitar skank">🔄 Regen</button>
+                      </div>
+                    </div>
+
+                    <!-- Stem 5: Other (Keys / Organ) -->
+                    <div class="stem-strip" data-stem="other">
+                      <div class="stem-info">
+                        <span class="stem-icon">🎹</span>
+                        <div class="stem-meta">
+                          <span class="stem-name">Hammond Organ &amp; Piano</span>
+                          <span class="stem-type">Harmonic Bubble &amp; Chords</span>
+                        </div>
+                      </div>
+                      <div class="stem-controls">
+                        <button type="button" class="stem-btn solo" data-stem="other" title="Solo">S</button>
+                        <button type="button" class="stem-btn mute" data-stem="other" title="Mute">M</button>
+                        <input type="range" class="stem-vol" data-stem="other" min="0" max="1" step="0.05" value="0.75" title="Stem Volume">
+                        <audio class="stem-audio-element" data-stem="other" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/other"></audio>
+                        <button type="button" class="stem-regen-btn" data-stem="other" title="Regenerate organ/keys">🔄 Regen</button>
+                      </div>
+                    </div>
+
+                    <!-- Stem 6: Inpainted Guitar Solo -->
+                    <div class="stem-strip" data-stem="inpainted_guitar">
+                      <div class="stem-info">
+                        <span class="stem-icon">🔥</span>
+                        <div class="stem-meta">
+                          <span class="stem-name">Inpainted 16-Bar Guitar Solo</span>
+                          <span class="stem-type">Virtuoso Overdrive Wah Solo</span>
+                        </div>
+                      </div>
+                      <div class="stem-controls">
+                        <button type="button" class="stem-btn solo" data-stem="inpainted_guitar" title="Solo">S</button>
+                        <button type="button" class="stem-btn mute" data-stem="inpainted_guitar" title="Mute">M</button>
+                        <input type="range" class="stem-vol" data-stem="inpainted_guitar" min="0" max="1" step="0.05" value="0.9" title="Stem Volume">
+                        <audio class="stem-audio-element" data-stem="inpainted_guitar" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/inpainted_guitar"></audio>
+                        <button type="button" class="stem-regen-btn" data-stem="inpainted_guitar" title="Re-synthesize virtuoso solo">🔄 Regen</button>
+                      </div>
+                    </div>
+
+                    <!-- Stem 7: Inpainted Nyabinghi Percussion -->
+                    <div class="stem-strip" data-stem="inpainted_drums">
+                      <div class="stem-info">
+                        <span class="stem-icon">🪘</span>
+                        <div class="stem-meta">
+                          <span class="stem-name">Nyabinghi Rimshot Rolls</span>
+                          <span class="stem-type">Polyrhythmic Spliced Fills</span>
+                        </div>
+                      </div>
+                      <div class="stem-controls">
+                        <button type="button" class="stem-btn solo" data-stem="inpainted_drums" title="Solo">S</button>
+                        <button type="button" class="stem-btn mute" data-stem="inpainted_drums" title="Mute">M</button>
+                        <input type="range" class="stem-vol" data-stem="inpainted_drums" min="0" max="1" step="0.05" value="0.85" title="Stem Volume">
+                        <audio class="stem-audio-element" data-stem="inpainted_drums" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/inpainted_drums"></audio>
+                        <button type="button" class="stem-regen-btn" data-stem="inpainted_drums" title="Re-roll drum fills">🔄 Regen</button>
+                      </div>
+                    </div>
+
+                    <!-- Stem 8: Draft Groove Reference -->
+                    <div class="stem-strip" data-stem="draft_groove">
+                      <div class="stem-info">
+                        <span class="stem-icon">⏱️</span>
+                        <div class="stem-meta">
+                          <span class="stem-name">Stage 1 Draft Groove</span>
+                          <span class="stem-type">BPM Grid Foundation</span>
+                        </div>
+                      </div>
+                      <div class="stem-controls">
+                        <button type="button" class="stem-btn solo" data-stem="draft_groove" title="Solo">S</button>
+                        <button type="button" class="stem-btn mute" data-stem="draft_groove" title="Mute">M</button>
+                        <input type="range" class="stem-vol" data-stem="draft_groove" min="0" max="1" step="0.05" value="0.6" title="Stem Volume">
+                        <audio class="stem-audio-element" data-stem="draft_groove" preload="metadata" src="/api/songs/song_reggae_anthem_001/versions/1/audio/draft_groove"></audio>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Collapsible Drawer 2: Lyrics & Arrangement Sections -->
+              <div class="card-collapsible-section">
+                <button type="button" class="section-toggle-btn" id="toggle-lyrics-btn" aria-expanded="false">
+                  <span class="toggle-icon">▸</span>
+                  <span class="toggle-title">📜 Lyrics &amp; Structural Arrangement Sections</span>
+                  <span class="toggle-badge">8 Bracketed Tags Verified</span>
+                </button>
+
+                <div class="section-collapsible-body collapsed" id="lyrics-drawer-body">
+                  <div class="lyrics-tabs-bar">
+                    <button type="button" class="tab-btn active" data-tab="lyrics-formatted">Formatted Lyrics</button>
+                    <button type="button" class="tab-btn" data-tab="lyrics-yue">YuE genre.txt &amp; lyrics.txt</button>
+                    <button type="button" class="tab-edit-toggle" id="btn-edit-lyrics">✏️ Edit Lyrics Directly</button>
+                  </div>
+
+                  <!-- Formatted Structural Lyrics View -->
+                  <div class="lyrics-pane active" id="pane-lyrics-formatted">
+                    <div class="lyrics-section-card" data-section="intro">
+                      <span class="section-bracket-tag">[Intro]</span>
+                      <p class="section-lines">(Deep bassline walks in, hypnotic one drop kick and rimshot on the three, rhythm guitar chops with light wah, soulful vocal ad-libs)<br>Yeah, man... Hear the calling of the drum... Let love guide your heart...</p>
+                    </div>
+                    <div class="lyrics-section-card" data-section="verse1">
+                      <span class="section-bracket-tag">[Verse 1]</span>
+                      <p class="section-lines">Sun rises over Zion hill, burning through the morning haze<br>Brothers and sisters walking proud through the darkest maze<br>No weapon formed against our spirit shall ever conquer peace<br>When compassion flows like a river, all the wicked wars must cease.</p>
+                    </div>
+                    <div class="lyrics-section-card" data-section="chorus">
+                      <span class="section-bracket-tag">[Chorus]</span>
+                      <p class="section-lines">One love, one heart, one universal destiny!<br>Feel the sacred rhythm calling you and calling me!<br>From the deepest valley to the highest mountain peak,<br>One voice for the humble, one strength for the weak!</p>
+                    </div>
+                    <div class="lyrics-section-card" data-section="interlude">
+                      <span class="section-bracket-tag">[Instrumental Interlude]</span>
+                      <p class="section-lines">(16-bar soaring psychedelic blues-rock electric guitar solo with deep wah-filter sweep and nyabinghi snare rolls)</p>
+                    </div>
+                    <div class="lyrics-section-card" data-section="verse2">
+                      <span class="section-bracket-tag">[Verse 2]</span>
+                      <p class="section-lines">Babylon builds their towers high upon the shifting sand<br>While righteousness and love divine cover all the land<br>Dry your tears, my children, wipe the sorrow from your eyes<br>Underneath the rainbow canopy, the truthful soul shall rise!</p>
+                    </div>
+                    <div class="lyrics-section-card" data-section="bridge">
+                      <span class="section-bracket-tag">[Bridge]</span>
+                      <p class="section-lines">(Drum drops to nyabinghi heartbeat pulse; gospel backing choir harmonizes)<br>Love will conquer sorrow, truth will light tomorrow...<br>Lift up your head and stand strong!</p>
+                    </div>
+                    <div class="lyrics-section-card" data-section="solo">
+                      <span class="section-bracket-tag">[Guitar Solo]</span>
+                      <p class="section-lines">(Virtuosic blues-rock pentatonic solo climaxes with weeping bends, analog tape sustain, and Hammond B3 chord swells)</p>
+                    </div>
+                    <div class="lyrics-section-card" data-section="outro">
+                      <span class="section-bracket-tag">[Outro]</span>
+                      <p class="section-lines">One love... One heart... Forever and ever...<br>(Bass and one-drop groove echoes and fades into warm tape analog saturation)</p>
+                    </div>
+                  </div>
+
+                  <!-- Editable Lyrics Textarea (Toggled by "Edit Lyrics") -->
+                  <div class="lyrics-edit-wrapper hidden" id="lyrics-edit-wrapper">
+                    <textarea id="lyrics-raw-textarea" class="lyrics-textarea" rows="16" spellcheck="false" title="Edit lyrics with structural bracketed tags"></textarea>
+                    <div class="lyrics-edit-actions">
+                      <button type="button" class="btn-save-lyrics" id="btn-save-lyrics">💾 Save &amp; Apply to State</button>
+                      <button type="button" class="btn-cancel-lyrics" id="btn-cancel-lyrics">Cancel</button>
+                    </div>
+                  </div>
+
+                  <!-- YuE Tag & Raw Output Tab -->
+                  <div class="lyrics-pane" id="pane-lyrics-yue">
+                    <div class="yue-box">
+                      <div class="yue-box-title">YuE genre.txt Style Tags:</div>
+                      <pre class="code-preview" id="yue-genre-preview">1977 roots reggae, one-drop drumming, soulful raspy jamaican male tenor, 76 bpm, a major, psychedelic blues-rock electric guitar, nyabinghi percussion, warm analog tape, gospel choir</pre>
+                    </div>
+                    <div class="yue-box">
+                      <div class="yue-box-title">YuE lyrics.txt (Sanitized):</div>
+                      <pre class="code-preview" id="yue-lyrics-preview">[Intro]
+(Deep bassline walks in, hypnotic one drop kick and rimshot on the three)
+Yeah, man... Hear the calling of the drum...
+
+[Verse 1]
+Sun rises over Zion hill, burning through the morning haze
+Brothers and sisters walking proud through the darkest maze
+
+[Chorus]
+One love, one heart, one universal destiny!
+Feel the sacred rhythm calling you and calling me!
+
+[Outro]
+One love... One heart... Forever.</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Collapsible Drawer 3: 6-Node LangGraph Trace Visualizer -->
+              <div class="card-collapsible-section">
+                <button type="button" class="section-toggle-btn" id="toggle-trace-btn" aria-expanded="false">
+                  <span class="toggle-icon">▸</span>
+                  <span class="toggle-title">🕸️ 6-Node LangGraph Pipeline Trace</span>
+                  <span class="toggle-badge">All 6 Nodes Completed (0 Retries)</span>
+                </button>
+
+                <div class="section-collapsible-body collapsed" id="trace-drawer-body">
+                  <div class="langgraph-stepper">
+                    <!-- Node 1 -->
+                    <div class="step-card completed">
+                      <div class="step-number">1</div>
+                      <div class="step-details">
+                        <div class="step-name">Ollama Producer Panel</div>
+                        <div class="step-desc">Refined style prompt &amp; validated 8 structural lyric tags via local Ollama models.</div>
+                        <div class="step-time">0.34s • Models: flint + glm4 + qwen2.5</div>
+                      </div>
+                      <span class="step-check">✓</span>
+                    </div>
+
+                    <!-- Node 2 -->
+                    <div class="step-card completed">
+                      <div class="step-number">2</div>
+                      <div class="step-details">
+                        <div class="step-name">Groove &amp; YuE Synthesis</div>
+                        <div class="step-desc">Stage 1 one-drop groove (`draft_groove.wav`) + Stage 2 vocal/instrumental separation.</div>
+                        <div class="step-time">0.78s • Pure-Rust 48kHz / ACE-Step</div>
+                      </div>
+                      <span class="step-check">✓</span>
+                    </div>
+
+                    <!-- Node 3 -->
+                    <div class="step-card completed">
+                      <div class="step-number">3</div>
+                      <div class="step-details">
+                        <div class="step-name">Vocal Timbre Fusion</div>
+                        <div class="step-desc">Applied pure-Rust Jamaican raspy male tenor formant filter &amp; pitch lock.</div>
+                        <div class="step-time">0.45s • Formant Shift +0.0, Rasp 85%</div>
+                      </div>
+                      <span class="step-check">✓</span>
+                    </div>
+
+                    <!-- Node 4 -->
+                    <div class="step-card completed">
+                      <div class="step-number">4</div>
+                      <div class="step-details">
+                        <div class="step-name">Virtuoso Stem Inpainting</div>
+                        <div class="step-desc">Demucs 4-stem split + 16-bar wah guitar solo &amp; nyabinghi fill sample-accurate crossfading.</div>
+                        <div class="step-time">0.62s • Karplus-Strong Wah + Drum Rolls</div>
+                      </div>
+                      <span class="step-check">✓</span>
+                    </div>
+
+                    <!-- Node 5 -->
+                    <div class="step-card completed">
+                      <div class="step-number">5</div>
+                      <div class="step-details">
+                        <div class="step-name">DSP &amp; Judge Gate</div>
+                        <div class="step-desc">Verified 0 digital clipping, proper vocal headroom (-12.4 dBFS), and Judge score &gt;= 7.0.</div>
+                        <div class="step-time">0.12s • Composite Score: 9.4/10</div>
+                      </div>
+                      <span class="step-check">✓</span>
+                    </div>
+
+                    <!-- Node 6 -->
+                    <div class="step-card completed">
+                      <div class="step-number">6</div>
+                      <div class="step-details">
+                        <div class="step-name">48 kHz Analog Mastering</div>
+                        <div class="step-desc">1970s analog tape saturation (tanh curve), 65Hz sub-bass warmth, Matchering 2.0 EQ profile.</div>
+                        <div class="step-time">0.58s • Output: final_master.wav</div>
+                      </div>
+                      <span class="step-check">✓</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div> <!-- /song-card -->
+          </div> <!-- /assistant-bubble -->
+
+        </div> <!-- /chat-messages -->
+      </div> <!-- /chatgpt-viewport -->
+
+      <!-- ============================================================ -->
+      <!-- PINNED BOTTOM FLOATING INPUT CAPSULE & GRANULAR SLIDERS      -->
+      <!-- ============================================================ -->
+      <div class="floating-input-capsule-wrapper" id="capsule-wrapper">
+
+        <!-- Suggestion Chips Banner (Populated by Iteration Co-Pilot) -->
+        <div class="capsule-chips-bar" id="capsule-chips-bar">
+          <span class="chips-prompt-label">✨ Iteration Co-Pilot Suggestions:</span>
+          <div class="chips-scroll-row" id="capsule-suggestion-chips">
+            <button type="button" class="copilot-chip" data-prompt="Make the guitar solo fiery with deeper wah and sustain">
+              🔥 Deeper wah on guitar solo
+            </button>
+            <button type="button" class="copilot-chip" data-prompt="Boost sub-bass tape warmth by +3dB at 65Hz">
+              🔊 Boost sub-bass warmth (+3dB)
+            </button>
+            <button type="button" class="copilot-chip" data-prompt="Speed up tempo from 76 to 80 BPM">
+              ⚡ Speed up to 80 BPM
+            </button>
+            <button type="button" class="copilot-chip" data-prompt="Add syncopated Nyabinghi percussion fills in Verse 2">
+              🪘 Nyabinghi fills in Verse 2
+            </button>
+          </div>
+        </div>
+
+        <!-- The Capsule Bar -->
+        <div class="floating-input-capsule" id="floating-capsule">
+          <!-- Iteration / New Song Mode Toggle Pill -->
+          <button type="button" class="capsule-mode-pill iterate" id="btn-capsule-mode" title="Toggle between Iterating active song or creating a New Song">
+            <span class="mode-icon" id="mode-pill-icon">✨</span>
+            <span class="mode-text" id="mode-pill-text">Iterate v1</span>
+          </button>
+
+          <!-- Genre Quick Dropdown -->
+          <select id="capsule-genre-select" class="capsule-genre-dropdown" title="Select Genre">
+            <option value="Roots Reggae" selected>Roots Reggae</option>
+            <option value="Afrobeats">Afrobeats</option>
+            <option value="Amapiano">Amapiano</option>
+            <option value="Soul / Gospel">Soul / Gospel</option>
+            <option value="Hip-Hop / Trap">Hip-Hop / Trap</option>
+            <option value="Blues Rock">Blues Rock</option>
+            <option value="Jazz Fusion">Jazz Fusion</option>
+            <option value="Cinematic Orchestral">Cinematic</option>
+            <option value="EDM / House">EDM / House</option>
+            <option value="Latin Bossa">Latin Bossa</option>
+          </select>
+
+          <!-- Multi-Line Expandable Textarea -->
+          <textarea id="chat-input-textarea" rows="1" placeholder="Describe a new song, or tell me how to iterate/adjust the current song (e.g. 'boost guitar wah, add nyabinghi rolls, change chorus')..." spellcheck="false"></textarea>
+
+          <!-- Parameters Drawer Toggle Button -->
+          <button type="button" class="capsule-btn params-btn" id="btn-toggle-sliders" title="Toggle manual parameter sliders (BPM, Rasp, Wah, Sub-Bass)">
+            🎛️
+          </button>
+
+          <!-- Circular Send Action Button -->
+          <button type="button" class="capsule-send-btn" id="btn-send-prompt" title="Send (Enter)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5"></line>
+              <polyline points="5 12 12 5 19 12"></polyline>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Collapsible Granular Parameter Sliders Accordion -->
+        <div class="parameter-sliders-drawer collapsed" id="parameter-sliders-drawer">
+          <div class="sliders-drawer-header">
+            <span class="drawer-header-title">🎛️ Granular Synthesis &amp; Mix Controls</span>
+            <span class="drawer-header-hint">Adjust sliders for precise manual control over next generation or iteration</span>
+          </div>
+
+          <div class="sliders-grid">
+            <!-- Slider 1: BPM -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Tempo (BPM)</span>
+                <span class="slider-value" id="val-bpm">76 BPM</span>
+              </div>
+              <input type="range" id="slider-bpm" min="40" max="220" step="1" value="76" class="param-slider">
+            </div>
+
+            <!-- Slider 2: Key Signature -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Musical Key Signature</span>
+                <span class="slider-value" id="val-key">A Major</span>
+              </div>
+              <select id="select-key" class="param-select">
+                <option value="A Major" selected>A Major</option>
+                <option value="C Major">C Major</option>
+                <option value="D Major">D Major</option>
+                <option value="G Major">G Major</option>
+                <option value="E Major">E Major</option>
+                <option value="A Minor">A Minor</option>
+                <option value="C Minor">C Minor</option>
+                <option value="D Minor">D Minor</option>
+                <option value="G Minor">G Minor</option>
+                <option value="E Minor">E Minor</option>
+              </select>
+            </div>
+
+            <!-- Slider 3: Vocal Rasp / Grit -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Vocal Rasp &amp; Timbre Grit</span>
+                <span class="slider-value" id="val-rasp">85%</span>
+              </div>
+              <input type="range" id="slider-rasp" min="0" max="100" step="1" value="85" class="param-slider">
+            </div>
+
+            <!-- Slider 4: Guitar Wah Intensity -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Guitar Wah &amp; Solo Intensity</span>
+                <span class="slider-value" id="val-wah">75%</span>
+              </div>
+              <input type="range" id="slider-wah" min="0" max="100" step="1" value="75" class="param-slider">
+            </div>
+
+            <!-- Slider 5: Drum Fill Complexity -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Drum Fill Complexity</span>
+                <span class="slider-value" id="val-drum">70%</span>
+              </div>
+              <input type="range" id="slider-drum" min="0" max="100" step="1" value="70" class="param-slider">
+            </div>
+
+            <!-- Slider 6: Sub-Bass Warmth -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Sub-Bass Warmth (55-85 Hz)</span>
+                <span class="slider-value" id="val-bass">+3.0 dB</span>
+              </div>
+              <input type="range" id="slider-bass" min="0" max="6" step="0.5" value="3.0" class="param-slider">
+            </div>
+
+            <!-- Selector 7: Mastering Tape Profile -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Analog Tape Mastering Profile</span>
+              </div>
+              <select id="select-tape-profile" class="param-select">
+                <option value="WarmAnalogTape" selected>1970s Warm Analog Tape</option>
+                <option value="ModernPunchy">Modern Punchy Master</option>
+                <option value="ClubSubHeavy">Club Sub-Heavy Bass</option>
+                <option value="WideOrchestral">Wide Cinematic Orchestral</option>
+                <option value="IntimateJazz">Intimate Acoustic / Jazz</option>
+              </select>
+            </div>
+
+            <!-- Selector 8: Engine Mode -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <span class="slider-name">Engine Mode</span>
+                <span class="slider-value" id="val-engine">Auto (VRAM Sized)</span>
+              </div>
+              <select id="select-engine-mode" class="param-select">
+                <option value="auto" selected>Auto (Dynamic Memory Law Sizing)</option>
+                <option value="pure_rust">Pure Rust 48kHz DSP (Zero VRAM / Instant)</option>
+                <option value="hf_hybrid">HuggingFace Hybrid (GPU VRAM)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+      </div> <!-- /floating-input-capsule-wrapper -->
+
+    </main> <!-- /chatgpt-main-content -->
+
+  </div> <!-- /chatgpt-app -->
+
+  <!-- Application Script -->
+  <script src="app.js"></script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 //! and multi-model producer panel for the AI Music Producer Agent.
 
 pub mod error;
+pub mod iteration_panel;
 pub mod judge;
 pub mod memory;
 pub mod ollama_client;
@@ -10,6 +11,11 @@ pub mod prompt_templates;
 
 // Re-export primary types
 pub use error::{FusionError, Result};
+pub use iteration_panel::{
+    default_genre_suggestions, parse_bpm_from_critique, parse_key_from_critique, sanitize_llm_json,
+    AssistIterationResponse, IterationFusionPanel, IterationResult, IterationSpecialistOutputs,
+    ParameterTweaks,
+};
 pub use judge::{
     parse_judge_json, EvaluatedSongBlueprint, JudgeAnalysis, JudgeEvaluator, SectionArrangement,
 };

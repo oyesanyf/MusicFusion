@@ -4,4 +4,7 @@ tests/target/
 *.pdb
 *.tmp
 .env
+storage/
+*.wav
+
 

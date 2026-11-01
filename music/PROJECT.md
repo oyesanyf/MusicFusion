@@ -40,17 +40,18 @@ d:\harfile\music\
 | 21 | Tokio HTTP JSON REST API (Port 5050) | Endpoints `/api/songs/create`, `/api/songs/iterate`, `/api/songs/regenerate-stem`, `/api/songs/master`, `/api/songs/:id/versions`, SSE streaming | M4 | ORIGINAL_REQUEST §4 |
 | 22 | MCP JSON-RPC 2.0 Stdio Server | MCP tools `music_create_hit`, `music_iterate_song`, `music_regenerate_stem`, `music_master_track` | M4 | ORIGINAL_REQUEST §4 |
 | 23 | Flagship Preset `--create-reggae-anthem` | Pre-loaded 76 BPM "One Love" human compassion lyrics and 1977 roots reggae style prompt producing 48 kHz master | M4 | ORIGINAL_REQUEST §4 |
-| 24 | Universal CLI Commands | `--create-hit --genre <genre> --prompt <prompt>`, `--serve`, `--mcp`, `--bpm`, `--key` | M4 | ORIGINAL_REQUEST §Follow-up |
+| 24 | Universal CLI Commands | `--create-hit --genre <genre> --prompt <prompt>`, `--serve`, `--mcp`, `--bpm`, `--key`, `--iterate`, `--assist-iteration` | M4 | ORIGINAL_REQUEST §Follow-up |
 | 25 | E2E Testing Suite (Tiers 1-4) & Adversarial Verification (Tier 5) | Opaque-box testing across all features + white-box coverage hardening | M5 | Project Pattern & Dual Track |
+| 26 | Multi-LLM Iteration Fusion Panel & Iteration Co-Pilot LLM | Dedicated Iteration Specialist / Co-Pilot LLM in ModelFusion panel deliberating alongside Lyricist, Arranger & Sound Engineer; version diff architecting; clickable suggestion chips in Web UI | M4 | ORIGINAL_REQUEST §Follow-up |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Core Domain, Taxonomy & Fusion Panel | `crates/music_core` (`schema.rs`, `state.rs`, `telemetry.rs`, `genre.rs`, `lib.rs`) + `crates/music_fusion` (`memory.rs`, `panel.rs`, `judge.rs`, `ollama_client.rs`, `lib.rs`) | None | PLANNED |
-| M2 | Pure-Rust 48 kHz DSP Engine & Telemetry | `crates/music_dsp` (WAV I/O, universal drum synth, vocal formant/rasp, Karplus-Strong guitar/wah, crossfader, telemetry calculator, tape mastering, `lib.rs`) | M1 | PLANNED |
-| M3 | Native Rust StateGraph & 6 Fusion Nodes | `crates/music_pipeline` (StateGraph DAG engine, checkpointer, 6 sequential nodes, process isolation, `lib.rs`) | M1, M2 | PLANNED |
-| M4 | Tokio REST (5050), MCP & CLI Presets | `crates/music_cli` (REST server, MCP server, CLI clap flags, `--create-reggae-anthem`, `--create-hit`, `main.rs`) | M1, M2, M3 | PLANNED |
-| M5 | E2E Test Suite (Tiers 1-4) & Adversarial Verification (Tier 5) | Comprehensive test suite + adversarial hardening + final release build verification | M1, M2, M3, M4 | PLANNED |
+| M1 | Core Domain, Taxonomy & Fusion Panel | `crates/music_core` (`schema.rs`, `state.rs`, `telemetry.rs`, `genre.rs`, `lib.rs`) + `crates/music_fusion` (`memory.rs`, `panel.rs`, `judge.rs`, `ollama_client.rs`, `lib.rs`) | None | **DONE** (commit `ea8fd21`, 54 workspace tests pass) |
+| M2 | Pure-Rust 48 kHz DSP Engine & Telemetry | `crates/music_dsp` (WAV I/O, universal drum synth, vocal formant/rasp, Karplus-Strong guitar/wah, crossfader, telemetry calculator, tape mastering, `lib.rs`) | M1 | **DONE** (commits `23b44f1`, `03daa70`, 94 DSP tests, 150 workspace tests pass) |
+| M3 | Native Rust StateGraph & 6 Fusion Nodes | `crates/music_pipeline` (StateGraph DAG engine, checkpointer, 6 sequential nodes, process isolation, `lib.rs`) | M1, M2 | **DONE** (commit `c73f797`, 60 pipeline tests, 193 workspace tests pass) |
+| M4 | Tokio REST (5050), Web Studio UI, Multi-LLM Iteration Co-Pilot & CLI | `crates/music_cli` + `music_fusion` iteration co-pilot (REST server on 5050, ChatGPT-like 2-column Web Studio UI, auto-launch browser on startup, dedicated Iteration Co-Pilot LLM + suggestion chips, prompt & parameter song iteration, MCP server, `--create-reggae-anthem`, `--create-hit`, `main.rs`) | M1, M2, M3 | **DONE** (7 music_cli integration tests, 33 music_fusion tests, all workspace tests pass) |
+| M5 | E2E Test Suite (Tiers 1-4) & Adversarial Verification (Tier 5) | Comprehensive test suite + adversarial hardening + test song (`v1` and iterated `v2`) on disk + final release build verification | M1, M2, M3, M4 | PLANNED |
 
 ## Interface Contracts
 
