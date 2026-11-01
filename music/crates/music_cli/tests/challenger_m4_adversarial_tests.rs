@@ -197,4 +197,81 @@ async fn test_rest_endpoints_regenerate_stem_and_mastering() {
     let master_v2_res = client.get(format!("{}/api/songs/{}/versions/2/audio/final_master", base_url, song_id))
         .send().await.unwrap();
     assert_eq!(master_v2_res.status(), 200);
+
+    // 4. Test Range header partial content streaming for unregenerated stem across lineages
+    let range_res = client.get(format!("{}/api/songs/{}/versions/2/audio/raspy_tenor_vocals", base_url, song_id))
+        .header("Range", "bytes=0-1023")
+        .send().await.unwrap();
+    assert_eq!(range_res.status(), reqwest::StatusCode::PARTIAL_CONTENT);
+    assert_eq!(range_res.bytes().await.unwrap().len(), 1024);
+
+    // 5. Adversarial security tests: path traversal, Windows reserved device names, and trailing dots/spaces
+    let adversarial_stems = [
+        "..%2f..%2fWindows%2fwin.ini",
+        "..%5c..%5cWindows",
+        "%2e%2e",
+        "CON",
+        "con",
+        "PRN",
+        "prn",
+        "AUX",
+        "aux",
+        "NUL",
+        "nul",
+        "COM1",
+        "com1",
+        "LPT1",
+        "con.wav",
+        "aux.txt",
+        "nul.bin",
+        "trailing_dot.",
+        "trailing_space%20",
+        "C:",
+        "C%3A",
+    ];
+
+    for bad_stem in adversarial_stems {
+        // Test in audio stem position (Pattern 1)
+        let bad_url1 = format!("{}/api/songs/{}/versions/2/audio/{}", base_url, song_id, bad_stem);
+        if let Ok(resp) = client.get(&bad_url1).send().await {
+            let status = resp.status();
+            assert!(
+                status == reqwest::StatusCode::BAD_REQUEST
+                    || status == reqwest::StatusCode::NOT_FOUND
+                    || status == reqwest::StatusCode::FORBIDDEN,
+                "Adversarial stem '{}' on pattern 1 must be rejected, got: {}",
+                bad_stem,
+                status
+            );
+        }
+
+        // Test in audio stem position (Pattern 2)
+        let bad_url2 = format!("{}/api/songs/{}/2/audio/{}", base_url, song_id, bad_stem);
+        if let Ok(resp) = client.get(&bad_url2).send().await {
+            let status = resp.status();
+            assert!(
+                status == reqwest::StatusCode::BAD_REQUEST
+                    || status == reqwest::StatusCode::NOT_FOUND
+                    || status == reqwest::StatusCode::FORBIDDEN,
+                "Adversarial stem '{}' on pattern 2 must be rejected, got: {}",
+                bad_stem,
+                status
+            );
+        }
+
+        // Test in song_id position
+        let bad_url3 = format!("{}/api/songs/{}/versions/2/audio/final_master", base_url, bad_stem);
+        if let Ok(resp) = client.get(&bad_url3).send().await {
+            let status = resp.status();
+            assert!(
+                status == reqwest::StatusCode::BAD_REQUEST
+                    || status == reqwest::StatusCode::NOT_FOUND
+                    || status == reqwest::StatusCode::FORBIDDEN,
+                "Adversarial song_id '{}' must be rejected, got: {}",
+                bad_stem,
+                status
+            );
+        }
+    }
 }
+
