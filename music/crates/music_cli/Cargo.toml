@@ -1,0 +1,9 @@
+[package]
+name = "music_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+music_core = { path = "../music_core" }
+clap = { workspace = true }
+anyhow = { workspace = true }

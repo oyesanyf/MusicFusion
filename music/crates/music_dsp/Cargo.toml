@@ -1,0 +1,11 @@
+[package]
+name = "music_dsp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+music_core = { path = "../music_core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
