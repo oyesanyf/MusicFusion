@@ -115,18 +115,18 @@ Build QuorumRAG: a production-grade local-first peer-to-peer retrieval-augmented
 | reviewer_m6_remediation_3_1 | teamwork_reviewer | Milestone 6 Storage Remediation Reviewer | completed | 95d3447b-61d4-4b7e-ab5d-73197cd9330e |
 | reviewer_m6_remediation_3_2 | teamwork_reviewer | Milestone 6 Coordinator & Regression Reviewer | completed | dd669d93-3a3e-441a-aa57-f6d1691bf142 |
 | auditor_m6_remediation_3 | teamwork_auditor | Milestone 6 Forensic Integrity Auditor | completed | a5df3b74-49af-4edd-8f28-a586875df75b |
-| worker_m6_ship | teamwork_worker | Milestone 6 Sign-Off and Git Ship Worker | in-progress | 430da4e2-5675-4e88-876a-bb5f3257b088 |
+| worker_m6_ship | teamwork_worker | Milestone 6 Sign-Off and Git Ship Worker | completed | 430da4e2-5675-4e88-876a-bb5f3257b088 |
 
 ## Succession Status
-- Succession required: no (Gen 5 active)
+- Succession required: no (All milestones complete)
 - Spawn count: 54 / 128
-- Pending subagents: 430da4e2-5675-4e88-876a-bb5f3257b088
+- Pending subagents: none
 - Predecessor: Gen 4
 - Successor: none
 
 ## Active Timers
-- Heartbeat cron: e13403c5-b0e6-48a4-a1ec-a1f096f9f53e/task-1170
-- Safety timer: e13403c5-b0e6-48a4-a1ec-a1f096f9f53e/task-6882
+- Heartbeat cron: cancelled (all subagents completed)
+- Safety timer: none
 
 ## Artifact Index
 - d:\harfile\QuorumRAG\PROJECT.md — Global architecture, feature inventory, milestones, contracts, layout
