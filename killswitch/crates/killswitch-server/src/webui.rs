@@ -1417,28 +1417,21 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         let msg = '';
-        if (data.error && typeof data.error === 'object') {
-          if (data.error.code === 'INSUFFICIENT_PRIVILEGES' || (data.error.message && (data.error.message.includes('Administrative elevation required') || data.error.message.includes('Insufficient Administrator privileges') || data.error.message.includes('Administrator privileges required') || data.error.message.includes('Privilege')))) {
-            msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
-          } else {
-            msg = data.error.message || data.error.details || data.error.code || JSON.stringify(data.error);
-          }
-        } else if (typeof data.error === 'string') {
-          if (data.error.includes('Administrative elevation required') || data.error.includes('Insufficient Administrator privileges') || data.error.includes('INSUFFICIENT_PRIVILEGES')) {
-            msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
-          } else {
-            msg = data.error;
-          }
-        } else if (data.message && typeof data.message === 'string') {
-          if (data.message.includes('Administrative elevation required') || data.message.includes('Insufficient Administrator privileges') || data.message.includes('INSUFFICIENT_PRIVILEGES')) {
-            msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
-          } else {
-            msg = data.message;
-          }
+        if (typeof data.message === 'string' && data.message.trim().length > 0) {
+          msg = data.message;
+        } else if (data.error && typeof data.error === 'object' && typeof data.error.message === 'string') {
+          msg = data.error.message;
+        } else if (typeof data.error === 'string' && data.error.trim().length > 0) {
+          msg = data.error;
         } else {
           msg = 'HTTP ' + res.status;
         }
-        if (msg.includes('Administrative elevation required') || msg.includes('Insufficient Administrator privileges') || (res.status === 403 && (msg.includes('Privilege') || msg.includes('Administrator')))) {
+        if (
+          res.status === 403 &&
+          (msg.includes('Administrative elevation required') ||
+           msg.includes('INSUFFICIENT_PRIVILEGES') ||
+           (data.error && data.error.code === 'INSUFFICIENT_PRIVILEGES'))
+        ) {
           msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
         }
         throw new Error(msg);

@@ -980,27 +980,32 @@ async fn test_manual_trigger_attribution_webui_reconnect_and_standalone_ui() {
 
 #[tokio::test]
 async fn test_insufficient_privileges_server_error_and_webui_script() {
+    let err = killswitch_server::error::ServerError::Core(
+        killswitch_types::errors::KillSwitchError::InsufficientPrivileges {
+            details: "Administrative elevation required for WFP transaction".to_string(),
+            remediation: "Run terminal as Administrator and re-execute.".to_string(),
+        },
+    );
+
     use axum::response::IntoResponse;
-    use killswitch_server::error::ServerError;
-    use killswitch_types::errors::KillSwitchError;
+    let resp = err.into_response();
+    assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
 
-    // 1. Verify ServerError::Core(InsufficientPrivileges) maps to HTTP 403 Forbidden
-    let core_err = KillSwitchError::InsufficientPrivileges {
-        details: "WFP requires Administrator elevation".to_string(),
-        remediation: "Run terminal as Administrator".to_string(),
-    };
-    let server_err = ServerError::Core(core_err);
-    let resp = server_err.into_response();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-
-    let bytes = body_to_bytes(resp.into_body()).await;
-    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let body_bytes = body_to_bytes(resp.into_body()).await;
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(json["error"]["code"], "INSUFFICIENT_PRIVILEGES");
-    assert!(json["error"]["message"].as_str().unwrap().contains("Administrative elevation required"));
-    assert!(json["message"].as_str().unwrap().contains("Administrative elevation required"));
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Administrative elevation required"));
+    assert_eq!(
+        json["message"].as_str().unwrap(),
+        json["error"]["message"].as_str().unwrap()
+    );
 
-    // 2. Verify WEBUI_HTML contains the clean Administrator guidance and error parsing
-    let html = killswitch_server::webui::WEBUI_HTML;
-    assert!(html.contains("Administrator privileges required to install kernel firewall filters"));
-    assert!(html.contains("INSUFFICIENT_PRIVILEGES"));
+    // Verify WEBUI_HTML contains the actionable remediation string and proper error extraction
+    assert!(killswitch_server::webui::WEBUI_HTML.contains(
+        "⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator."
+    ));
+    assert!(killswitch_server::webui::WEBUI_HTML.contains("data.error.code === 'INSUFFICIENT_PRIVILEGES'"));
 }

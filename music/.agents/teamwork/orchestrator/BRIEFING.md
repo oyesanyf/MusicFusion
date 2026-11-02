@@ -63,17 +63,17 @@ Build, test, and ship the 20-file Reference WAV Importer, Multi-File RVQ Tokeniz
 | challenger_m8_1 | teamwork_challenger | Empirical Challenge: DSP, RVQ & Originality Guard | completed | c3ea442a-5a17-4cc5-90a9-db3e0d94bf61 |
 | challenger_m8_2 | teamwork_challenger | Empirical Challenge: REST, 20-File Cap, SSRF & RL Benchmark | completed | bc2968ff-e4fa-4312-9279-73ecb74e068e |
 | auditor_m8 | teamwork_auditor | Forensic Integrity Audit (Zero Mocks, Bridgeport & ELVIS Safeguards) | completed | 6c28891e-2715-4b4b-a617-f0c8d16f8bab |
-| worker_m8_ship | teamwork_worker | Milestone 8 Shipper & Live Server Deployer | completed | 3d677b92-37cc-4232-a578-ecfa06581432 |
+| worker_m8_ship | teamwork_worker | Milestone 8 Shipper & Live Server Deployer | in-progress | 3d677b92-37cc-4232-a578-ecfa06581432 |
 
 ## Succession Status
 - Succession required: no
 - Spawn count: 10 / 16 (Milestone 8 generation)
-- Pending subagents: none
+- Pending subagents: 3d677b92-37cc-4232-a578-ecfa06581432
 - Predecessor: none
 - Successor: not yet spawned
 
 ## Active Timers
-- Heartbeat cron: none (all tasks complete)
+- Heartbeat cron: f3dc28a2-6906-4296-bad9-049bc88a16ae/task-40
 - Safety timer: none
 
 ## Artifact Index
