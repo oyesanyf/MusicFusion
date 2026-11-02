@@ -3199,6 +3199,31 @@ Grace and love shining forevermore!`
     const btnDpoKeep = document.getElementById('btn-dpo-keep');
     const btnDpoRevert = document.getElementById('btn-dpo-revert');
     const dpoStatusMsg = document.getElementById('dpo-status-msg');
+    const rlBannerAudio = document.getElementById('rl-banner-audio-player');
+    const rlBannerTitle = document.getElementById('rl-banner-song-title');
+    const rlBannerMeta = document.getElementById('rl-banner-song-meta');
+    const rlBannerDownload = document.getElementById('btn-rl-banner-download');
+    const btnRlPlayMaster = document.getElementById('btn-rl-banner-play-master');
+    const btnRlSoloVocals = document.getElementById('btn-rl-banner-solo-vocals');
+
+    if (btnRlPlayMaster && rlBannerAudio) {
+      btnRlPlayMaster.addEventListener('click', () => {
+        const sid = State.activeSongId || 'rl_ensemble_showcase';
+        const ver = State.activeVersion || 1;
+        rlBannerAudio.src = `/api/songs/${sid}/versions/${ver}/audio/final_master?t=${Date.now()}`;
+        rlBannerAudio.load();
+        rlBannerAudio.play().catch(() => {});
+      });
+    }
+    if (btnRlSoloVocals && rlBannerAudio) {
+      btnRlSoloVocals.addEventListener('click', () => {
+        const sid = State.activeSongId || 'rl_ensemble_showcase';
+        const ver = State.activeVersion || 1;
+        rlBannerAudio.src = `/api/songs/${sid}/versions/${ver}/audio/raspy_tenor_vocals?t=${Date.now()}`;
+        rlBannerAudio.load();
+        rlBannerAudio.play().catch(() => {});
+      });
+    }
 
     async function loadReferenceWavs() {
       try {
@@ -3496,6 +3521,20 @@ Grace and love shining forevermore!`
             State.activeSongId = newId;
             State.activeVersion = data.version || 1;
             switchVersion(data.version || 1, true);
+            if (rlBannerTitle) {
+              rlBannerTitle.textContent = `${newTitle} (v${data.version || 1})`;
+            }
+            if (rlBannerMeta) {
+              rlBannerMeta.innerHTML = `${newBpm} BPM • ${newKey} • Originality: ${data.originality_report ? data.originality_report.originality_score_pct.toFixed(1) : '100.0'}% • Saved at: <code>D:\\music\\GENERATED_RL_SAMPLE_SONG.wav</code>`;
+            }
+            if (rlBannerDownload) {
+              rlBannerDownload.href = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?download=1`;
+            }
+            if (rlBannerAudio) {
+              rlBannerAudio.src = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?t=${Date.now()}`;
+              rlBannerAudio.load();
+              rlBannerAudio.play().catch(() => {});
+            }
           }
         } catch (e) {
           btnGenerateRl.disabled = false;
