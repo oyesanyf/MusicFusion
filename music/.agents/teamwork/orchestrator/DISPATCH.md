@@ -420,3 +420,8 @@ The user has added the "Convert URL to WAV & Add to Current Mix" workflow right 
    - **Automatic Stage 1 Feature & RVQ Analysis**: Immediately analyze converted `.wav` (BPM, Krumhansl-Schmuckler key/chroma vector, spectral timbre envelope, 1–4 kHz vocal presence target, and RVQ discrete tokens) and add to ensemble style blend (enforcing 20-file cap).
 3. **Full Legal & Anti-Plagiarism Safeguards**:
    - Apply `LegalOriginalityGuard` (`zero_waveform_sampling: true`, maximum melodic N-gram similarity ceiling, and `synthetic_vocal_timbre_only: true` ELVIS Act compliance).
+
+## 2026-11-02T16:52:37Z
+URGENT DESKTOP ENVIRONMENT INVARIANT:
+The user observed a visible console window when `music_cli.exe` was launched.
+MANDATORY CONSTRAINT: Never launch processes with visible console windows on the user's desktop. Any background server launcher must strictly use `-WindowStyle Hidden` (or PowerShell background job / daemon) so no black terminal window pops up. Ensure `worker_m8_ship` and all deployment scripts respect this invariant.

@@ -13,3 +13,9 @@ Your tasks:
 4. Verify `git status -s` shows a clean working tree.
 5. Write your handoff report to `d:\harfile\music\.agents\teamwork\worker_m8_ship\handoff.md`.
 Update your `progress.md`. When done, use send_message to report your results.
+
+## 2026-11-02T16:52:58Z
+**Context**: URGENT DESKTOP ENVIRONMENT INVARIANT
+**Content**: The user observed a visible console window when `music_cli.exe` was launched.
+MANDATORY CONSTRAINT: Never launch processes with visible console windows on the user's desktop. Any background server launcher must strictly use `-WindowStyle Hidden` (e.g. `Start-Process -FilePath "..." -ArgumentList "..." -WindowStyle Hidden` or background job) so no black terminal window pops up on the user's screen.
+**Action**: Ensure any live server process launched uses `-WindowStyle Hidden`.
