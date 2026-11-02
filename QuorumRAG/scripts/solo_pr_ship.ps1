@@ -72,13 +72,17 @@ $uncommitted = (git status --porcelain)
 $headSha = (git rev-parse HEAD).Trim()
 $originMainSha = (git rev-parse origin/main).Trim()
 
+$gitTopLevel = (git rev-parse --show-toplevel 2>$null)
+if (-not $gitTopLevel) { $gitTopLevel = (Get-Location).Path }
+$gitLockPath = Join-Path $gitTopLevel ".git\index.lock"
+
 function Wait-GitLock {
     for ($w = 0; $w -lt 25; $w++) {
-        if (-not (Test-Path ".git/index.lock")) { break }
+        if (-not (Test-Path $gitLockPath)) { break }
         Start-Sleep -Milliseconds 200
     }
-    if (Test-Path ".git/index.lock") {
-        Remove-Item -Force ".git/index.lock" -ErrorAction SilentlyContinue
+    if (Test-Path $gitLockPath) {
+        Remove-Item -Force $gitLockPath -ErrorAction SilentlyContinue
     }
 }
 

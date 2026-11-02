@@ -168,6 +168,7 @@ impl QueryCoordinator {
         telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
     ) -> Result<QueryResult, CoordinatorError> {
         let start = std::time::Instant::now();
+        tracing::info!(prompt, "Starting query_agentic_with_history");
         let embed_query = AgenticGraphState::expand_followup_query(prompt, &history);
         let embedder = quorum_contract::DeterministicOfflineEngine::new();
         let contract_hash = embedder.contract_hash();

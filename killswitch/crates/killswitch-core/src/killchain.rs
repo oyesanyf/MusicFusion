@@ -199,10 +199,8 @@ impl KillChainHostManager {
         let active_network_rules = Vec::new();
 
         let mut preserved_ports = crate::wfp::discover_active_control_ports();
-        for &p in &[DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547] {
-            if !preserved_ports.contains(&p) {
-                preserved_ports.push(p);
-            }
+        if !preserved_ports.contains(&DEFAULT_CONTROL_PORT) {
+            preserved_ports.push(DEFAULT_CONTROL_PORT);
         }
 
         // Stage 2: Network Quarantine (if level requires network isolation)
@@ -520,7 +518,7 @@ pub fn execute_host_disarm_unauthenticated() -> Result<KillChainStatus> {
         processes_frozen_count: 0,
         processes_tarpitted_count: 0,
         kernel_lockdown_active: false,
-        allowlisted_ports: vec![DEFAULT_CONTROL_PORT, 53, 67, 68, 546, 547],
+        allowlisted_ports: vec![DEFAULT_CONTROL_PORT],
         quarantined_interfaces: Vec::new(),
         frozen_pids: Vec::new(),
         tarpitted_pids: Vec::new(),
@@ -576,7 +574,12 @@ impl KillChainHostManager {
 
         let current_status = self.get_status();
         if !current_status.isolated {
-            info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already disarmed; preserving state.");
+            #[cfg(target_os = "windows")]
+            {
+                let _ = crate::wfp::disarm_windows_network_quarantine(operator, reason);
+            }
+            crate::tarpit::ActiveProcessTarpit::global().release_all();
+            info!("🛡️ [KILLCHAIN-IDEMPOTENCY] Host is already disarmed; purged any residual kernel rules and preserving state.");
             return Ok(current_status);
         }
 
@@ -603,6 +606,11 @@ impl KillChainHostManager {
                 );
             }
         }
+        #[cfg(target_os = "windows")]
+        {
+            let _ = crate::wfp::disarm_windows_network_quarantine(operator, reason);
+        }
+        crate::tarpit::ActiveProcessTarpit::global().release_all();
 
         // 2. Resume Frozen Processes
         let process_records = self.get_process_records();

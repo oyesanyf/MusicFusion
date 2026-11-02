@@ -15,14 +15,18 @@ QuorumRAG adaptation adds Google LangExtract candidate extraction and 4-arm cons
 | 64 | Attestation-Based Access Tier Gating | Dynamically authorize verified TPM 2.0 peers for higher tiers in `PeerAclManager`, software fallbacks to Tier 1, unverified to Tier 0 | M13 | ORIGINAL_REQUEST §4 |
 | 65 | OshoosiClaw Mesh Configuration UI & Daemon Endpoints | Adapt OshoosiClaw Mesh UI into Settings ("Mesh & Shared Folders"): TPM RoT badge, connected peers with attestation badges, Pending Joins HITL approval queue, Quarantined Peers panel, and WAN multiaddr/DuckDNS settings; wire daemon REST endpoints | M13 | ORIGINAL_REQUEST §4 |
 | 66 | Final Workspace Build, Port 3031 Live Server & Solo PR Ship | Verify `$env:CARGO_INCREMENTAL = "0"`, all tests pass, keep `quorumrag.exe` running on `0.0.0.0:3031` accessible at `http://10.0.0.3:3031` and `http://127.0.0.1:3031`, solo PR ship to main | M14 | ORIGINAL_REQUEST §5 |
+| 67 | Action Buttons Bar: Continue, Save File & Clear | Add ▶️ Continue, 💾 Save File (Blob download), and 🗑️ Clear buttons to `.response-actions-bar` in `app.js` and `styles.css` | M13.5 | ORIGINAL_REQUEST §Follow-up 2026-11-02T17:22:00Z |
+| 68 | Q&A Opening Restatement, Typo Map & Grounding Calibration | Enforce Q&A opening topic restatement for all prompts, expand typo map & seed words, apply `file_hits * 160` filename title bonus, calibrate grounding accuracy scores (78%–99%), clean chunk boundary artifacts in `offline_engine.rs` | M13.5 | ORIGINAL_REQUEST §Follow-up 2026-11-02T17:22:00Z |
+| 69 | Port 3031 Live Server Hot-Restart | Stop PID 80036 (quorumrag_live.exe), recompile, and launch live daemon on `0.0.0.0:3031` in M14 | M14 | ORIGINAL_REQUEST §Follow-up 2026-11-02T17:22:00Z |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
 | M11 | Google LangExtract & Question-Restating LLM Orchestration | Features 58, 59: Candidate extraction in `langextract/extraction.rs`, state graph propagation, entity boosting in `retrieve.rs`, question-restating prompts & deterministic synthesis in `offline_engine.rs`, end-of-response sources block with accuracy scores | none | DONE |
-| M12 | WebUI Clean Interface, Dynamic Spellcheck & Action Buttons | Features 60, 61, 62: Clean UI (suppress prompt chips, keep logo), dynamic debounced chat spellcheck, response action buttons (Copy, Regenerate, Read Aloud, Thumbs), `server.rs:115` `bypass_cache: false` | none | PLANNED |
-| M13 | OshoosiClaw Mesh Configuration UI & TPM Hardware Identity | Features 63, 64, 65: TPM 2.0 hardware inspection, attestation-tier gating in `PeerAclManager`, daemon REST endpoints, Mesh UI in Settings modal | M11, M12 | PLANNED |
-| M14 | Final Verification, Port 3031 Live Daemon & Solo PR Ship | Feature 66: Clean build with `$env:CARGO_INCREMENTAL = "0"`, all tests pass, verify live daemon on port 3031, solo PR ship & merge to main | M11, M12, M13 | PLANNED |
+| M12 | WebUI Clean Interface, Dynamic Spellcheck & Action Buttons | Features 60, 61, 62: Clean UI (suppress prompt chips, keep logo), dynamic debounced chat spellcheck, response action buttons (Copy, Regenerate, Read Aloud, Thumbs), `server.rs:115` `bypass_cache: false`, zero line numbers | none | DONE |
+| M13 | OshoosiClaw Mesh Configuration UI & TPM Hardware Identity | Features 63, 64, 65: TPM 2.0 hardware inspection, attestation-tier gating in `PeerAclManager`, daemon REST endpoints, Mesh UI in Settings modal | M11, M12 | DONE |
+| M13.5 | Live Testing Feedback: Action Buttons (Continue, Save File, Clear) & Q&A Grounding Calibration | Features 67, 68: Add Continue, Save File, Clear to `.response-actions-bar`, Q&A opening topic restatement, typo map & seed words, filename title match bonus, calibrated grounding accuracy (78%–99%), chunk boundary cleanup | M13 | DONE |
+| M14 | Final Verification, Port 3031 Hot-Restart Live Daemon & Solo PR Ship | Features 66, 69: Clean build with `$env:CARGO_INCREMENTAL = "0"`, all tests pass, hot-restart PID 80036 on port 3031, solo PR ship & merge to main | M11, M12, M13, M13.5 | IN_PROGRESS |
 
 ## Interface Contracts
 

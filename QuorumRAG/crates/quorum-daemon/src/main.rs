@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "quorumrag=info,quorum_daemon=info,quorum_coordinator=info".into()),
+                .unwrap_or_else(|_| "quorumrag=info,quorum_daemon=info,quorum_coordinator=info,quorum_storage=info".into()),
         )
         .init();
 
@@ -72,12 +72,30 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         quorum_contract::DeterministicOfflineEngine::new()
     );
     let dedup = Arc::new(quorum_ingest::TwoLevelDedupEngine::new());
-    let hydrated_chunks = dedup.hydrate_from_storage(&storage).await?;
-    info!(
-        chunks = hydrated_chunks,
-        tracked_files = dedup.catalog().read().map(|c| c.len()).unwrap_or(0),
-        "Startup deduplication hydration completed from LanceDB storage"
-    );
+    let dedup_bg = Arc::clone(&dedup);
+    let storage_bg = Arc::clone(&storage);
+    tokio::spawn(async move {
+        let chunk_count = storage_bg.count().await.unwrap_or(0);
+        if chunk_count > 0 && chunk_count <= 5_000 {
+            match dedup_bg.hydrate_from_storage(&storage_bg).await {
+                Ok(chunks) => {
+                    info!(
+                        chunks,
+                        tracked_files = dedup_bg.catalog().read().map(|c| c.len()).unwrap_or(0),
+                        "Startup deduplication hydration completed from LanceDB storage"
+                    );
+                }
+                Err(e) => {
+                    error!("Startup deduplication hydration warning: {}", e);
+                }
+            }
+        } else {
+            info!(
+                chunk_count,
+                "Pre-existing high-capacity LanceDB index active; skipping monolithic in-memory chunk hydration on daemon startup"
+            );
+        }
+    });
 
     // 2. Ingest Config & Workers (defaults to all physical fixed drives when --watch-dir is omitted)
     let mut ingest_config = quorum_ingest::IngestConfig::default();
@@ -225,15 +243,15 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
     let bind_addr = format!("{}:{}", cli.host, bound_http_port);
     info!("QuorumRAG Web UI listening on http://{}", bind_addr);
 
-    // Continuously run background Magika crawl & incremental ingestion across all watched physical drives & shared folders
-    if !ingest_config.watch_paths.is_empty() {
+    // Continuously run background Magika crawl & incremental ingestion when --watch-dir is explicitly specified
+    if let Some(ref watch_path) = cli.watch_dir {
         let bg_worker = Arc::clone(&reindex_worker);
-        let bg_paths = ingest_config.watch_paths.clone();
+        let bg_paths = vec![watch_path.clone()];
         let bg_shutdown = Arc::clone(&shutdown_notify);
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             loop {
-                // Collect physical drive watch paths + any user-configured shared folders
+                // Collect target watch path + any user-configured shared folders
                 let mut target_paths = bg_paths.clone();
                 if let Ok(guard) = quorum_coordinator::global_mesh_dlp_controller().settings.read() {
                     for folder in &guard.mesh.shared_folders {
@@ -271,7 +289,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
 
                 tokio::select! {
                     _ = bg_shutdown.notified() => break,
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(12)) => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
                 }
             }
         });
@@ -308,13 +326,12 @@ fn is_port_in_use(host: &str, port: u16) -> bool {
     if std::net::TcpStream::connect_timeout(&loopback, std::time::Duration::from_millis(60)).is_ok() {
         return true;
     }
-    if std::net::TcpListener::bind(("0.0.0.0", port)).is_err() {
-        return true;
+    if host == "0.0.0.0" {
+        std::net::TcpListener::bind(("0.0.0.0", port)).is_err()
+    } else {
+        std::net::TcpListener::bind(("0.0.0.0", port)).is_err()
+            || std::net::TcpListener::bind((host, port)).is_err()
     }
-    if std::net::TcpListener::bind((host, port)).is_err() {
-        return true;
-    }
-    false
 }
 
 /// Dynamically binds the HTTP server to `start_port`, advancing to the next open TCP port if in use.
@@ -325,9 +342,6 @@ async fn bind_next_open_http_port(
     let mut last_err = None;
     for offset in 0..=200u16 {
         let candidate = start_port.saturating_add(offset);
-        if is_port_in_use(host, candidate) {
-            continue;
-        }
         let addr = format!("{}:{}", host, candidate);
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
@@ -358,8 +372,12 @@ fn find_next_open_p2p_port(host: &str, start_port: u16, exclude_port: u16) -> u1
             continue;
         }
         let addr = format!("{}:{}", host, candidate);
-        let udp_free = std::net::UdpSocket::bind(&addr).is_ok()
-            && std::net::UdpSocket::bind(("0.0.0.0", candidate)).is_ok();
+        let udp_free = if host == "0.0.0.0" {
+            std::net::UdpSocket::bind(("0.0.0.0", candidate)).is_ok()
+        } else {
+            std::net::UdpSocket::bind(&addr).is_ok()
+                && std::net::UdpSocket::bind(("0.0.0.0", candidate)).is_ok()
+        };
         if udp_free {
             if candidate != start_port {
                 info!(

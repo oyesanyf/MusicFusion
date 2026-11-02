@@ -17,9 +17,9 @@ use killswitch_core::{
         SimulatedNetworkIsolator,
     },
     pf::{
-        generate_quarantine_rules, DarwinPfTrans, DarwinPfTransElement, DarwinPfiocRule,
-        MacOsPfIsolator, PfAction, PfDirection, PfProtocol, DIOCADDRULE, DIOCSTART, DIOCSTOP,
-        DIOCXBEGIN, DIOCXCOMMIT, DIOCXROLLBACK,
+        generate_quarantine_rules, DarwinPfRuleRaw, DarwinPfTrans, DarwinPfTransElement,
+        DarwinPfiocRule, MacOsPfIsolator, PfAction, PfDirection, PfProtocol, PfRuleSpec,
+        DIOCADDRULE, DIOCSTART, DIOCSTOP, DIOCXBEGIN, DIOCXCOMMIT, DIOCXROLLBACK,
     },
     state_ledger::StateLedger,
     wfp::WindowsWfpIsolator,
@@ -210,7 +210,7 @@ fn test_darwin_pf_quarantine_rules_structure_and_order() {
     let preserved_ports = vec![DEFAULT_CONTROL_PORT, 53, 67, 68];
     let (rules, syntax) = generate_quarantine_rules("test_killswitch_anchor", &preserved_ports);
 
-    assert!(rules.len() >= 8, "Expected at least 8 generated PF rules");
+    assert!(rules.len() >= 7, "Expected at least 7 generated PF rules");
 
     // Invariant: First rule must be quick pass on lo0
     assert_eq!(rules[0].action, PfAction::Pass);
@@ -236,28 +236,27 @@ fn test_darwin_pf_quarantine_rules_structure_and_order() {
         assert!(r.quick);
     }
 
-    // Invariant: DNS 53 (UDP & TCP) and DHCP 67/68 must be preserved
-    assert!(rules.iter().any(|r| r.dst_port == Some(53) && r.protocol == PfProtocol::Udp));
-    assert!(rules.iter().any(|r| r.dst_port == Some(53) && r.protocol == PfProtocol::Tcp));
-    assert!(rules.iter().any(|r| r.dst_port == Some(67) || r.src_port == Some(67)));
-    assert!(rules.iter().any(|r| r.dst_port == Some(68) || r.src_port == Some(68)));
+    // Invariant: DNS 53 (UDP & TCP) and DHCP 67/68 must strictly NOT be preserved
+    assert!(!rules.iter().any(|r| r.dst_port == Some(53)));
+    assert!(!rules.iter().any(|r| r.dst_port == Some(67) || r.src_port == Some(67)));
+    assert!(!rules.iter().any(|r| r.dst_port == Some(68) || r.src_port == Some(68)));
 
-    // Invariant: Last two rules must be hermetic block drop in & out all
+    // Invariant: Last two rules must be hermetic block drop in & out all with quick: true
     let last_rule_in = &rules[rules.len() - 2];
     let last_rule_out = &rules[rules.len() - 1];
 
     assert_eq!(last_rule_in.action, PfAction::Drop);
     assert_eq!(last_rule_in.direction, PfDirection::In);
-    assert!(!last_rule_in.quick); // Non-quick default block
+    assert!(last_rule_in.quick, "Default in block must have quick: true");
 
     assert_eq!(last_rule_out.action, PfAction::Drop);
     assert_eq!(last_rule_out.direction, PfDirection::Out);
-    assert!(!last_rule_out.quick);
+    assert!(last_rule_out.quick, "Default out block must have quick: true");
 
-    // Verify generated syntax string contains anchor and exact block statements
+    // Verify generated syntax string contains anchor and exact quick block statements
     assert!(syntax.contains("Anchor: test_killswitch_anchor"));
-    assert!(syntax.contains("block drop in all"));
-    assert!(syntax.contains("block drop out all"));
+    assert!(syntax.contains("block drop in quick all"));
+    assert!(syntax.contains("block drop out quick all"));
 }
 
 #[test]
@@ -1164,3 +1163,329 @@ async fn test_concurrent_engage_isolation_serialization() {
         "Only 1 state transition must be committed despite 10 concurrent requests"
     );
 }
+
+// =============================================================================
+// 4. ISO-2 macOS PF Empirical Challenger Test Suite
+// =============================================================================
+
+#[test]
+fn test_challenge_task1_loopback_rule_ifname_strictly_bound_to_lo0() {
+    let preserved_ports = vec![DEFAULT_CONTROL_PORT];
+    let (rules, syntax) = generate_quarantine_rules("challenge_task1_anchor", &preserved_ports);
+
+    // Rule 0 is the loopback pass rule
+    let loopback_rule = &rules[0];
+    assert_eq!(loopback_rule.action, PfAction::Pass);
+    assert_eq!(loopback_rule.direction, PfDirection::InOut);
+    assert!(loopback_rule.quick, "Loopback rule must be quick");
+    assert_eq!(
+        loopback_rule.interface.as_deref(),
+        Some("lo0"),
+        "Loopback rule interface must be strictly Some('lo0')"
+    );
+
+    // Verify syntax string binds strictly to lo0
+    let rule_string = loopback_rule.to_rule_string();
+    assert_eq!(rule_string, "pass quick on lo0 all keep state");
+    assert!(syntax.contains("pass quick on lo0 all"));
+
+    // Verify raw DarwinPfiocRule struct population exactly matches pf.rs ioctl logic
+    let mut pr = DarwinPfiocRule::default();
+    let anchor_bytes = b"challenge_task1_anchor";
+    let copy_anchor_len = anchor_bytes.len().min(1024 - 1);
+    pr.anchor[..copy_anchor_len].copy_from_slice(&anchor_bytes[..copy_anchor_len]);
+
+    pr.rule.action = 0; // PF_PASS
+    pr.rule.direction = 0; // PF_INOUT
+    pr.rule.quick = if loopback_rule.quick { 1 } else { 0 };
+
+    if let Some(ref iface) = loopback_rule.interface {
+        let iface_bytes = iface.as_bytes();
+        let copy_len = iface_bytes.len().min(16 - 1);
+        pr.rule.ifname[..copy_len].copy_from_slice(&iface_bytes[..copy_len]);
+    }
+
+    // Verify byte contents of ifname: "lo0\0" followed by all zeros
+    assert_eq!(&pr.rule.ifname[..3], b"lo0");
+    assert_eq!(pr.rule.ifname[3], 0);
+    for i in 4..16 {
+        assert_eq!(pr.rule.ifname[i], 0, "Trailing ifname bytes must be zeroed");
+    }
+
+    // C ABI offset verification: ifname in DarwinPfRuleRaw
+    let rule_raw = DarwinPfRuleRaw::default();
+    let base_raw = &rule_raw as *const _ as usize;
+    let ifname_offset = (&rule_raw.ifname as *const _ as usize) - base_raw;
+    assert_eq!(
+        ifname_offset, 6,
+        "ifname offset must be at byte 6 in DarwinPfRuleRaw (action, direction, quick, log, proto, af)"
+    );
+
+    // Negative control: rules with interface: None must have completely zeroed ifname
+    for r in &rules[1..3] {
+        assert!(r.interface.is_none());
+        let mut pr_none = DarwinPfiocRule::default();
+        if let Some(ref iface) = r.interface {
+            let iface_bytes = iface.as_bytes();
+            let copy_len = iface_bytes.len().min(16 - 1);
+            pr_none.rule.ifname[..copy_len].copy_from_slice(&iface_bytes[..copy_len]);
+        }
+        assert_eq!(
+            pr_none.rule.ifname, [0u8; 16],
+            "Rules without interface must leave ifname all zeros"
+        );
+    }
+}
+
+#[test]
+fn test_challenge_task2_removal_of_dns_and_dhcp_allow_rules() {
+    // Adversarial input: preserved_ports explicitly requested DNS (53), DHCP (67, 68), DHCPv6 (546, 547)
+    let adversarial_ports = vec![
+        DEFAULT_CONTROL_PORT,
+        53,  // DNS
+        67,  // DHCP Server
+        68,  // DHCP Client
+        546, // DHCPv6 Client
+        547, // DHCPv6 Server
+        80,  // HTTP
+        443, // HTTPS
+    ];
+
+    let (rules, syntax) =
+        generate_quarantine_rules("adversarial_ports_test_anchor", &adversarial_ports);
+
+    // Invariant: Exactly 7 canonical isolation rules are generated (zero DNS/DHCP allow rules)
+    assert_eq!(
+        rules.len(),
+        7,
+        "Total rule count must be exactly 7 regardless of adversarial preserved_ports"
+    );
+
+    // Invariant: No rule may reference port 53, 67, 68, 546, or 547
+    for (idx, r) in rules.iter().enumerate() {
+        assert_ne!(
+            r.src_port,
+            Some(53),
+            "Rule {} must not preserve outbound/inbound DNS port 53",
+            idx
+        );
+        assert_ne!(
+            r.dst_port,
+            Some(53),
+            "Rule {} must not preserve outbound/inbound DNS port 53",
+            idx
+        );
+        assert_ne!(
+            r.src_port,
+            Some(67),
+            "Rule {} must not preserve DHCP port 67",
+            idx
+        );
+        assert_ne!(
+            r.dst_port,
+            Some(67),
+            "Rule {} must not preserve DHCP port 67",
+            idx
+        );
+        assert_ne!(
+            r.src_port,
+            Some(68),
+            "Rule {} must not preserve DHCP port 68",
+            idx
+        );
+        assert_ne!(
+            r.dst_port,
+            Some(68),
+            "Rule {} must not preserve DHCP port 68",
+            idx
+        );
+    }
+
+    // Verify syntax string contains zero mentions of DNS or DHCP ports
+    let syntax_lower = syntax.to_lowercase();
+    assert!(!syntax_lower.contains("port 53"), "Syntax must not contain port 53");
+    assert!(!syntax_lower.contains("port 67"), "Syntax must not contain port 67");
+    assert!(!syntax_lower.contains("port 68"), "Syntax must not contain port 68");
+    assert!(!syntax_lower.contains("dns"), "Syntax must not mention DNS");
+    assert!(!syntax_lower.contains("dhcp"), "Syntax must not mention DHCP");
+}
+
+#[test]
+fn test_challenge_task3_webui_control_port_pass_rules_strictly_bound_to_lo0() {
+    let preserved_ports = vec![DEFAULT_CONTROL_PORT];
+    let (rules, syntax) = generate_quarantine_rules("control_port_anchor", &preserved_ports);
+
+    let control_port_rules: Vec<_> = rules
+        .iter()
+        .filter(|r| {
+            r.src_port == Some(DEFAULT_CONTROL_PORT) || r.dst_port == Some(DEFAULT_CONTROL_PORT)
+        })
+        .collect();
+
+    assert_eq!(
+        control_port_rules.len(),
+        2,
+        "Must have exactly 2 rules (inbound and outbound) for control port 3030"
+    );
+
+    // Rule A: Inbound TCP 3030 strictly on lo0
+    let in_rule = control_port_rules
+        .iter()
+        .find(|r| r.direction == PfDirection::In)
+        .expect("Must have inbound control port rule");
+    assert_eq!(in_rule.action, PfAction::Pass);
+    assert!(in_rule.quick, "Inbound control port rule must be quick");
+    assert_eq!(
+        in_rule.interface.as_deref(),
+        Some("lo0"),
+        "Inbound control port rule must be strictly bound to 'lo0'"
+    );
+    assert_eq!(in_rule.protocol, PfProtocol::Tcp);
+    assert_eq!(in_rule.dst_port, Some(DEFAULT_CONTROL_PORT));
+    assert!(in_rule.keep_state);
+    assert_eq!(
+        in_rule.to_rule_string(),
+        "pass in quick on lo0 proto tcp from any to any port 3030 keep state"
+    );
+
+    // Rule B: Outbound TCP 3030 strictly on lo0
+    let out_rule = control_port_rules
+        .iter()
+        .find(|r| r.direction == PfDirection::Out)
+        .expect("Must have outbound control port rule");
+    assert_eq!(out_rule.action, PfAction::Pass);
+    assert!(out_rule.quick, "Outbound control port rule must be quick");
+    assert_eq!(
+        out_rule.interface.as_deref(),
+        Some("lo0"),
+        "Outbound control port rule must be strictly bound to 'lo0'"
+    );
+    assert_eq!(out_rule.protocol, PfProtocol::Tcp);
+    assert_eq!(out_rule.src_port, Some(DEFAULT_CONTROL_PORT));
+    assert!(out_rule.keep_state);
+    assert_eq!(
+        out_rule.to_rule_string(),
+        "pass out quick on lo0 proto tcp from any port 3030 to any keep state"
+    );
+
+    // Verify syntax string assertions
+    assert!(syntax.contains("pass in quick on lo0 proto tcp from any to any port 3030 keep state"));
+    assert!(syntax.contains("pass out quick on lo0 proto tcp from any port 3030 to any keep state"));
+
+    // Verify raw DarwinPfiocRule struct for both rules
+    for r in &control_port_rules {
+        let mut pr = DarwinPfiocRule::default();
+        if let Some(ref iface) = r.interface {
+            let iface_bytes = iface.as_bytes();
+            let copy_len = iface_bytes.len().min(16 - 1);
+            pr.rule.ifname[..copy_len].copy_from_slice(&iface_bytes[..copy_len]);
+        }
+        assert_eq!(&pr.rule.ifname[..3], b"lo0");
+        assert_eq!(pr.rule.ifname[3], 0);
+    }
+}
+
+#[test]
+fn test_challenge_task4_default_drop_rules_have_quick_true() {
+    let preserved_ports = vec![DEFAULT_CONTROL_PORT];
+    let (rules, syntax) = generate_quarantine_rules("default_drop_anchor", &preserved_ports);
+
+    let drop_rules: Vec<_> = rules.iter().filter(|r| r.action == PfAction::Drop).collect();
+
+    assert_eq!(
+        drop_rules.len(),
+        2,
+        "Must have exactly 2 default block rules (inbound and outbound)"
+    );
+
+    let drop_in = drop_rules
+        .iter()
+        .find(|r| r.direction == PfDirection::In)
+        .expect("Must have inbound drop rule");
+    let drop_out = drop_rules
+        .iter()
+        .find(|r| r.direction == PfDirection::Out)
+        .expect("Must have outbound drop rule");
+
+    // Both must have quick: true
+    assert!(
+        drop_in.quick,
+        "Default inbound drop rule MUST have quick: true"
+    );
+    assert!(
+        drop_out.quick,
+        "Default outbound drop rule MUST have quick: true"
+    );
+
+    // Rule strings must include 'quick'
+    assert_eq!(drop_in.to_rule_string(), "block drop in quick all");
+    assert_eq!(drop_out.to_rule_string(), "block drop out quick all");
+
+    assert!(syntax.contains("block drop in quick all"));
+    assert!(syntax.contains("block drop out quick all"));
+
+    // Negative control: Verify PfRuleSpec with quick: false produces 'block drop in all'
+    let slow_drop = PfRuleSpec {
+        action: PfAction::Drop,
+        direction: PfDirection::In,
+        quick: false,
+        interface: None,
+        protocol: PfProtocol::Any,
+        src: "any".to_string(),
+        src_port: None,
+        dst: "any".to_string(),
+        dst_port: None,
+        keep_state: false,
+        comment: "Negative control slow drop".to_string(),
+    };
+    assert_eq!(
+        slow_drop.to_rule_string(),
+        "block drop in all",
+        "quick: false must NOT emit 'quick'"
+    );
+}
+
+#[test]
+fn test_challenge_task5_fail_closed_on_unprivileged_execution_zero_ticket_1001() {
+    // 1. Verify typed error variant InsufficientPrivileges exists and formats remediation correctly
+    let perm_err = KillSwitchError::InsufficientPrivileges {
+        details: "macOS /dev/pf requires root privileges: errno 13".to_string(),
+        remediation: "Restart the application using 'sudo killswitch'.".to_string(),
+    };
+    let err_str = perm_err.to_string();
+    assert!(
+        err_str.contains("macOS /dev/pf requires root privileges"),
+        "Error message must specify root privileges requirement"
+    );
+    assert!(
+        err_str.contains("sudo killswitch"),
+        "Remediation must advise sudo execution"
+    );
+
+    // 2. Verify source code invariant:
+    // In pf.rs, execute_ioctl_transaction must NOT catch errors and fall back to 1001.
+    let pf_source = include_str!("../src/pf.rs");
+
+    // Must NOT contain the old vulnerability: falling back to 1001 on permission denied
+    assert!(
+        !pf_source.contains("Falling back to clean simulated receipt"),
+        "pf.rs must NOT contain warning or fallback to simulated receipt on ioctl error"
+    );
+    assert!(
+        !pf_source.contains("1001\n            }\n        };"),
+        "pf.rs must NOT swallow ioctl failure to return 1001"
+    );
+
+    // Under #[cfg(target_os = "macos")], engage_quarantine must use ? operator
+    assert!(
+        pf_source.contains("let ticket = self.execute_ioctl_transaction(&rules)?;"),
+        "engage_quarantine must propagate execute_ioctl_transaction result with '?'"
+    );
+
+    // Open error handling must explicitly check for EACCES and EPERM
+    assert!(
+        pf_source.contains("if errno == libc::EACCES || errno == libc::EPERM"),
+        "pf.rs must explicitly detect EACCES and EPERM to produce typed InsufficientPrivileges"
+    );
+}
+

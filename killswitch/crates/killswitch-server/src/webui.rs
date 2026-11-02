@@ -91,16 +91,23 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       font: inherit;
       min-block-size: 28px;
       min-inline-size: 28px;
-      border-radius: 0.55rem;
+      border-radius: 0.38rem;
       border: 1px solid var(--border);
       background: var(--surface-alt);
       color: var(--text);
-      padding: 0.6rem 1rem;
+      padding: 0.32rem 0.68rem;
+      font-size: 0.82rem;
     }
 
     button {
       cursor: pointer;
-      font-weight: 700;
+      display: inline-flex;
+      align-items: safe center;
+      justify-content: center;
+      gap: 0.32rem;
+      font-weight: 600;
+      line-height: 1.2;
+      white-space: nowrap;
       transition: transform 0.08s ease, opacity 0.15s ease;
     }
 
@@ -228,11 +235,13 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     .cause-box {
       background: var(--surface-alt);
       border: 2px solid var(--border);
-      border-radius: 0.8rem;
-      padding: 1.1rem 1.25rem;
+      border-radius: 0.7rem;
+      padding: 0.9rem 1.1rem;
       display: flex;
       flex-direction: column;
-      gap: 0.45rem;
+      gap: 0.35rem;
+      min-inline-size: 0;
+      overflow-wrap: anywhere;
     }
 
     .cause-box.isolated {
@@ -240,7 +249,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     }
 
     .cause-title {
-      font-size: 0.85rem;
+      font-size: 0.78rem;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.05em;
@@ -248,37 +257,42 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     }
 
     .cause-main {
-      font-size: 1.15rem;
+      font-size: 1.02rem;
       font-weight: 800;
+      overflow-wrap: anywhere;
     }
 
     .cause-details {
-      font-size: 0.96rem;
+      font-size: 0.88rem;
       color: var(--muted);
+      overflow-wrap: anywhere;
     }
 
-    /* Big 1-Click Action Buttons */
+    /* Compact Professional 1-Click Action Bar */
     .big-actions {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      flex-wrap: balance;
+      align-items: safe center;
+      gap: 0.55rem;
     }
 
     .big-btn {
-      padding: 1.1rem 1.25rem;
-      font-size: 1.08rem;
-      border-radius: 0.8rem;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.3rem;
-      text-align: start;
+      padding: 0.42rem 0.85rem;
+      font-size: 0.84rem;
+      font-weight: 600;
+      border-radius: 0.42rem;
+      display: inline-flex;
+      flex-direction: row;
+      align-items: safe center;
+      justify-content: center;
+      gap: 0.38rem;
+      line-height: 1.2;
+      white-space: nowrap;
     }
 
     .big-btn span.btn-sub {
-      font-size: 0.84rem;
-      font-weight: 500;
-      opacity: 0.9;
+      display: none;
     }
 
     .big-btn.danger {
@@ -477,7 +491,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     <div class="brand-title">
       <h1 id="dashboard-heading" tabindex="-1">🛡️ KillSwitch — Personal &amp; Endpoint Protection</h1>
       <span id="isolation-badge" class="badge ok">🟢 INTERNET CONNECTED</span>
-      <span id="peers-badge" class="badge ok">🌐 Connected Peers: 0</span>
       <span id="tpm-badge" class="badge ok">🔐 TPM 2.0: SEALED &amp; VERIFIED</span>
       <span id="fprime-badge" class="badge ok" title="NASA JPL F' (F Prime) 8 Flight Components &amp; SWE-Bench Two-Gate Supervision">🚀 NASA F´ &amp; SWE-Bench: 8/8 NOMINAL</span>
       <span id="os-badge" class="badge">OS: Detecting...</span>
@@ -485,7 +498,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     </div>
     <div class="btn-row">
       <button type="button" class="primary" onclick="refreshAll(true, this)">🔄 Refresh Status</button>
-      <button id="btn-header-peers" type="button" class="danger" onclick="togglePeers(null, this)">🔌 Disable Peers</button>
       <button id="btn-header-tpm" type="button" class="ok" onclick="reSealTpmAnchor(this)">🔐 Re-Seal TPM 2.0</button>
       <button id="btn-header-fprime" type="button" class="primary" onclick="dispatchFPrimeSweep(this)">🚀 NASA F´ &amp; SWE-Bench Check</button>
       <button id="btn-mode-auto" type="button" aria-pressed="true" onclick="toggleMode('autonomous', this)">🤖 Automatic Protection ON</button>
@@ -516,27 +528,11 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       </div>
       <div id="global-alert-bar" role="alert" aria-live="assertive" style="display:none;" class="toast danger"></div>
 
-      <!-- 3 GIANT ONE-CLICK BUTTONS FOR EVERYDAY USERS -->
+      <!-- COMPACT PROFESSIONAL ACTION BUTTONS -->
       <div class="big-actions">
-        <button id="btn-engage" type="button" class="big-btn danger" onclick="engageKillSwitch(this)">
-          <span>🚨 Disconnect Internet Now (Turn On KillSwitch)</span>
-          <span class="btn-sub">Instantly blocks all outside internet access to stop hackers or data leaks. This control page stays open.</span>
-        </button>
-
-        <button id="btn-disarm" type="button" class="big-btn ok" onclick="disarmKillSwitch(this)">
-          <span>🟢 Reconnect Internet &amp; Restore Normal Use</span>
-          <span class="btn-sub">Turns off the KillSwitch, removes all firewall blocks, and brings your internet back immediately.</span>
-        </button>
-
-        <button id="btn-probe" type="button" class="big-btn primary" onclick="runHealthProbe(false, this)">
-          <span>🩺 Check Computer &amp; App Health</span>
-          <span class="btn-sub">Scans running programs on your computer to verify system apps are safe and healthy.</span>
-        </button>
-
-        <button id="btn-hero-peers" type="button" class="big-btn danger" onclick="togglePeers(null, this)">
-          <span id="btn-hero-peers-title">🔌 Disable Connected Peers (0 Active)</span>
-          <span id="btn-hero-peers-sub" class="btn-sub">Instantly disconnects all external peer connections while keeping your local control dashboard open.</span>
-        </button>
+        <button id="btn-engage" type="button" class="big-btn danger" title="Instantly blocks all outside internet access while keeping this local control page open." onclick="engageKillSwitch(this)">🚨 Disconnect Internet</button>
+        <button id="btn-disarm" type="button" class="big-btn ok" title="Turns off the KillSwitch, removes all firewall blocks, and restores normal internet immediately." onclick="disarmKillSwitch(this)">🟢 Reconnect Internet</button>
+        <button id="btn-probe" type="button" class="big-btn primary" title="Scans running programs on your computer to verify system apps are safe and healthy." onclick="runHealthProbe(false, this)">🩺 Check Computer Health</button>
       </div>
 
       <div id="card1-status" class="toast">Ready. Click any button above to control your internet protection.</div>
@@ -547,10 +543,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
           <div class="kv-label">Internet Status</div>
           <div id="st-net" class="kv-val">Connected (Normal)</div>
         </div>
-        <div class="kv-box">
-          <div class="kv-label">Connected Peers</div>
-          <div id="st-peers" class="kv-val">0 Peers (Enabled)</div>
-        </div>
+
         <div class="kv-box">
           <div class="kv-label">TPM 2.0 Hardware Seal</div>
           <div id="st-tpm" class="kv-val">TPM 2.0 (Sealed &amp; Verified)</div>
@@ -799,7 +792,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             <option value="agent_memory_store">agent_memory_store (Cross-Session Memory)</option>
             <option value="multimodal_ocr_pipeline">multimodal_ocr_pipeline (Visual/OCR Injection)</option>
             <option value="mcp_tool_registry">mcp_tool_registry (MCP Tool Schema Rug-Pull)</option>
-            <option value="multi_agent_mesh">multi_agent_mesh (Sub-Agent Delegation Mesh)</option>
+            <option value="subagent_delegation_boundary">subagent_delegation_boundary (Standalone Sub-Agent Delegation Guard)</option>
             <option value="network_ssrf">network_ssrf (Cloud IMDS / SSRF Egress)</option>
           </select>
         </label>
@@ -858,12 +851,12 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
 
     <!-- COLLAPSIBLE ADVANCED TECHNICAL SECTION FOR ENGINEERS -->
     <details class="advanced-panel">
-      <summary>🔧 Show Advanced Technical Controls (LangGraph Orchestrator, 18-Arm Mesh, Custom Isolation Options &amp; Cryptographic Hashes)</summary>
+      <summary>🔧 Show Advanced Technical Controls (LangGraph Orchestrator, Custom Isolation Options &amp; Cryptographic Hashes)</summary>
       <div class="grid-2" style="margin-top: 1.25rem;">
         <section class="card">
           <h2>
             <span>Advanced Containment &amp; OS Service Options</span>
-            <span id="octopus-count-badge" class="badge ok">18 Arms Active</span>
+            <span id="octopus-count-badge" class="badge ok">Standalone Active</span>
           </h2>
           <div class="form-grid">
             <label for="ctl-operator">Operator Name
@@ -911,7 +904,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
 
         <section class="card">
           <h2>
-            <span>10-Node LangGraph Orchestrator &amp; 18-Arm Mesh</span>
+            <span>10-Node LangGraph Orchestrator</span>
             <span id="graph-valid-badge" class="badge ok">Trace Chain Valid</span>
           </h2>
           <div class="kv-grid">
@@ -960,28 +953,10 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             <button type="button" class="primary" onclick="stepLangGraph(this)">⚡ Step LangGraph Cycle</button>
             <button type="button" onclick="refreshGraph(true, this)">🔄 Refresh Graph</button>
             <button type="button" onclick="resetLangGraph(this)">🔁 Reset Graph</button>
-            <button type="button" onclick="refreshOctopus(true, this)">🔄 Refresh 18-Arm Mesh</button>
           </div>
           <div id="action-toast" class="toast">LangGraph state machine ready.</div>
-          <div tabindex="0" role="region" aria-labelledby="octopus-caption" class="table-wrapper">
-            <table>
-              <caption id="octopus-caption">Octopus 18-Arm Containment Mesh</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Arm</th>
-                  <th scope="col">Name</th>
-                  <th scope="col">Role</th>
-                  <th scope="col">Epoch</th>
-                </tr>
-              </thead>
-              <tbody id="octopus-tbody">
-                <tr><th scope="row" colspan="4">Loading arms...</th></tr>
-              </tbody>
-            </table>
-          </div>
         </section>
       </div>
-    </details>
     </details>
 
     <!-- CONTINUOUS EDR BEHAVIORAL LINEAGE, MITRE ATT&CK IoA & BASELINE MONITOR -->
@@ -1329,6 +1304,64 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
         </div>
       </div>
     </section>
+
+    <!-- 8. Signed Ring-0 Kernel Driver Loader (ELAM / Minifilter / eBPF) & Distributed Raft/Valkey Consensus -->
+    <section id="ring0-consensus-section" class="card" aria-labelledby="card-ring0-title">
+      <div class="card-header">
+        <div>
+          <h2 id="card-ring0-title" class="card-title">8. Signed Ring-0 Kernel Driver Loader (ELAM / Minifilter / eBPF) &amp; Distributed Raft/Valkey Consensus</h2>
+          <p class="card-desc">
+            <strong>Architectural Positioning &amp; Scope:</strong> KillSwitch is an <em>Agentic EDR &amp; Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)</em>: it governs AI agents <strong>before</strong> tool actuation and monitors/contains the host process lineage and network sockets <strong>during</strong> execution. <strong>Do not call it a replacement for a Ring-0 kernel EDR driver (like CrowdStrike or Microsoft Defender) on general corporate laptops</strong>—unless you pair its user-space engine with a real Windows ETW kernel provider subscription / Sysmon feed, a Linux eBPF ring-buffer loader, or the included EV/WHQL-signed Ring-0 minifilter driver. If you are running autonomous AI coding agents, computer-use agents, MCP tool servers, or local LLM workflows on a workstation or server and want a deterministic runtime governor + hardware-anchored emergency circuit breaker that can stop data exfiltration or rogue agent actions in milliseconds, it is a very good, uniquely capable tool.
+          </p>
+        </div>
+        <span id="ring0-posture-badge" class="badge ok">🛡️ Ring-0 Verifier &amp; Raft Quorum Ready</span>
+      </div>
+
+      <div id="ring0-consensus-toast" class="toast ok" role="status" aria-live="polite">
+        Ring-0 PE32+ / eBPF Binary Verifiers &amp; 3-Node Raft + Valkey AOF Consensus Cluster Online.
+      </div>
+
+      <div class="kv-grid">
+        <div class="kv-box">
+          <div class="kv-label">Architectural Classification</div>
+          <div id="r0-trad-edr" class="kv-val">Agentic EDR &amp; Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Windows PE32+ .sys (/INTEGRITYCHECK)</div>
+          <div id="r0-pe-status" class="kv-val">Verified (ObRegisterCallbacks Eligible)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Linux ELF64 EM_BPF (.bpf.o)</div>
+          <div id="r0-ebpf-status" class="kv-val">Verified (lsm/task_kill + tracepoint)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Minifilter Altitude &amp; Port</div>
+          <div id="r0-altitude" class="kv-val">385200 (\KillSwitchRing0Port)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Raft Cluster Role &amp; Term</div>
+          <div id="raft-role-term" class="kv-val">Leader (Term 2)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Raft Commit Index &amp; Quorum</div>
+          <div id="raft-commit-quorum" class="kv-val">Index 0 (2/3 Quorum)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">Valkey AOF Persistence</div>
+          <div id="raft-aof-status" class="kv-val">0 bytes (fsync active)</div>
+        </div>
+        <div class="kv-box">
+          <div class="kv-label">BLAKE3 Log Chain Integrity</div>
+          <div id="raft-chain-valid" class="kv-val">✅ Verified</div>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" class="primary" onclick="refreshRing0AndConsensus(true, this)">🔄 Refresh Ring-0 &amp; Raft/Valkey Status</button>
+        <button type="button" class="ok" onclick="verifyRing0Drivers(this)">🔬 Verify Signed PE32+ .sys &amp; eBPF .bpf.o (/api/ring0/verify-driver)</button>
+        <button type="button" class="warn" onclick="proposeClusterFiscalCas(500000000, this)">⚡ Propose Cluster Fiscal CAS ($500 via Raft + Valkey AOF)</button>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -1383,7 +1416,32 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       }, opts || {}));
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.message || data.error || ('HTTP ' + res.status));
+        let msg = '';
+        if (data.error && typeof data.error === 'object') {
+          if (data.error.code === 'INSUFFICIENT_PRIVILEGES' || (data.error.message && (data.error.message.includes('Administrative elevation required') || data.error.message.includes('Insufficient Administrator privileges') || data.error.message.includes('Administrator privileges required') || data.error.message.includes('Privilege')))) {
+            msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
+          } else {
+            msg = data.error.message || data.error.details || data.error.code || JSON.stringify(data.error);
+          }
+        } else if (typeof data.error === 'string') {
+          if (data.error.includes('Administrative elevation required') || data.error.includes('Insufficient Administrator privileges') || data.error.includes('INSUFFICIENT_PRIVILEGES')) {
+            msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
+          } else {
+            msg = data.error;
+          }
+        } else if (data.message && typeof data.message === 'string') {
+          if (data.message.includes('Administrative elevation required') || data.message.includes('Insufficient Administrator privileges') || data.message.includes('INSUFFICIENT_PRIVILEGES')) {
+            msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
+          } else {
+            msg = data.message;
+          }
+        } else {
+          msg = 'HTTP ' + res.status;
+        }
+        if (msg.includes('Administrative elevation required') || msg.includes('Insufficient Administrator privileges') || (res.status === 403 && (msg.includes('Privilege') || msg.includes('Administrator')))) {
+          msg = '⚠️ Administrator privileges required to install kernel firewall filters. Please accept the UAC prompt or run KillSwitch as Administrator.';
+        }
+        throw new Error(msg);
       }
       return data;
     }
@@ -1447,7 +1505,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       document.getElementById('st-hash').textContent = (s.state_hash_blake3 || '').slice(0, 24) + '…';
       document.getElementById('st-reason').textContent = (s.reason || 'Normal') + (s.isolated_by ? ' (' + s.isolated_by + ')' : '');
 
-      updatePeersUi(s.peers_enabled !== false, Number(s.connected_peers_count || 0), s.connected_peer_endpoints || []);
       updateTpmUi(s);
       return s;
     }
@@ -1513,79 +1570,7 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       });
     }
 
-    function updatePeersUi(peersEnabled, peersCount, endpoints) {
-      window.__peersEnabled = peersEnabled;
-      const peersBadge = document.getElementById('peers-badge');
-      const stPeers = document.getElementById('st-peers');
-      const hdrBtn = document.getElementById('btn-header-peers');
-      const heroBtn = document.getElementById('btn-hero-peers');
-      const heroTitle = document.getElementById('btn-hero-peers-title');
-      const heroSub = document.getElementById('btn-hero-peers-sub');
 
-      if (peersEnabled) {
-        if (peersBadge) {
-          peersBadge.textContent = '🌐 Connected Peers: ' + peersCount;
-          peersBadge.className = 'badge ok';
-        }
-        if (stPeers) {
-          stPeers.textContent = peersCount + ' Connected (Enabled)';
-          stPeers.title = (endpoints || []).join(', ');
-        }
-        if (hdrBtn) {
-          hdrBtn.textContent = '🔌 Disable Peers (' + peersCount + ')';
-          hdrBtn.className = 'danger';
-        }
-        if (heroBtn) {
-          heroBtn.className = 'big-btn danger';
-        }
-        if (heroTitle) {
-          heroTitle.textContent = '🔌 Disable Connected Peers (' + peersCount + ' Active)';
-        }
-        if (heroSub) {
-          heroSub.textContent = 'Click to immediately disconnect all ' + peersCount + ' external peer connection(s) while keeping this dashboard open.';
-        }
-      } else {
-        if (peersBadge) {
-          peersBadge.textContent = '🔌 Peers Disabled (0 Connected)';
-          peersBadge.className = 'badge danger';
-        }
-        if (stPeers) {
-          stPeers.textContent = '0 Connected (Disabled)';
-          stPeers.title = 'External peer connections are disabled';
-        }
-        if (hdrBtn) {
-          hdrBtn.textContent = '🟢 Enable Peers';
-          hdrBtn.className = 'ok';
-        }
-        if (heroBtn) {
-          heroBtn.className = 'big-btn ok';
-        }
-        if (heroTitle) {
-          heroTitle.textContent = '🟢 Enable Connected Peers (Currently Disabled)';
-        }
-        if (heroSub) {
-          heroSub.textContent = 'External peer connections are currently disabled (0 connected). Click to allow peer connections again.';
-        }
-      }
-    }
-
-    async function togglePeers(forceEnabled, btn) {
-      const targetEnabled = typeof forceEnabled === 'boolean' ? forceEnabled : !(window.__peersEnabled !== false);
-      const busyMsg = targetEnabled ? '🟢 Enabling Peers...' : '🔌 Disconnecting Peers...';
-      return withButtonFeedback(btn, busyMsg, async () => {
-        try {
-          const res = await api('/peers/control', {
-            method: 'POST',
-            body: JSON.stringify({ enabled: targetEnabled })
-          });
-          updatePeersUi(res.peers_enabled, Number(res.connected_peers_count || 0), res.connected_peer_endpoints || []);
-          await refreshStatus();
-          setCardStatus('card1-status', res.message, res.peers_enabled ? 'ok' : 'danger');
-        } catch (e) {
-          setCardStatus('card1-status', '❌ Could not update peer connections: ' + e.message, 'danger');
-        }
-      });
-    }
 
     async function refreshGraph(showFeedback, btn) {
       return withButtonFeedback(btn, '⏳ Refreshing...', async () => {
@@ -1643,31 +1628,8 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       });
     }
 
-    async function refreshOctopus(showFeedback, btn) {
-      return withButtonFeedback(btn, '⏳ Refreshing...', async () => {
-        const o = await api('/octopus/arms');
-        document.getElementById('octopus-count-badge').textContent = o.total_arms + ' Arms Active';
-        const tbody = document.getElementById('octopus-tbody');
-        tbody.replaceChildren();
-        for (const arm of (o.arms || [])) {
-          const tr = document.createElement('tr');
-          const th = document.createElement('th');
-          th.scope = 'row';
-          th.textContent = 'Arm #' + arm.arm_id;
-          const tdName = document.createElement('td');
-          tdName.textContent = arm.agent_name;
-          const tdRole = document.createElement('td');
-          tdRole.textContent = arm.role;
-          const tdGen = document.createElement('td');
-          tdGen.textContent = 'Gen ' + arm.generation;
-          tr.append(th, tdName, tdRole, tdGen);
-          tbody.appendChild(tr);
-        }
-        if (showFeedback) {
-          setCardStatus('action-toast', '✅ 18-Arm Containment Mesh Refreshed.', 'ok');
-        }
-        return o;
-      });
+    async function refreshOctopus(_showFeedback, _btn) {
+      return {};
     }
 
     async function refreshServiceAndHistory(showFeedback, btn) {
@@ -1724,7 +1686,6 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
             refreshStatus(),
             refreshGraph(false),
             refreshLineage(false),
-            refreshOctopus(false),
             refreshServiceAndHistory(false),
             refreshEdrBenchTasks(false),
             refreshRlStatus(false),
@@ -1790,14 +1751,15 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
     }
 
     async function disarmKillSwitch(btn) {
-      return withButtonFeedback(btn, '🟢 Reconnecting Internet...', async () => {
+      return withButtonFeedback(btn, '🟢 Reconnecting...', async () => {
         try {
+          const opEl = document.getElementById('ctl-operator');
           await api('/disarm', {
             method: 'POST',
             body: JSON.stringify({
-              operator: document.getElementById('ctl-operator').value || 'user_console',
+              operator: (opEl && opEl.value) ? opEl.value : 'user_console',
               reason: 'User clicked Reconnect Internet in WebUI',
-              token: document.getElementById('ctl-token').value || 'CONFIRM RESTORE'
+              token: 'CONFIRM RESTORE'
             })
           });
           await refreshAll(false);
@@ -3276,12 +3238,138 @@ pub const WEBUI_HTML: &str = r#"<!DOCTYPE html>
       });
     }
 
+    async function refreshRing0AndConsensus(showFeedback, btn) {
+      return withButtonFeedback(btn, '⏳ Refreshing Ring-0 & Raft…', async () => {
+        try {
+          const [r0, raft] = await Promise.all([
+            api('/api/ring0/status'),
+            api('/api/consensus/status')
+          ]);
+
+          const tradEl = document.getElementById('r0-trad-edr');
+          if (tradEl && r0.classification) {
+            tradEl.textContent = r0.classification.is_traditional_full_kernel_edr
+              ? 'Agentic EDR + Active Ring-0 Kernel Driver Enforced'
+              : (r0.classification.primary_classification || 'Agentic EDR & Runtime Governance Kill-Switch (User-Space Behavioral EDR + CAGE/APC Control Plane)');
+          }
+
+          const peEl = document.getElementById('r0-pe-status');
+          if (peEl && r0.windows_pe_sys_verification) {
+            const p = r0.windows_pe_sys_verification;
+            peEl.textContent = p.valid_pe64_driver
+              ? '✅ Verified (' + p.machine_arch + ', FORCE_INTEGRITY=true)'
+              : '🛑 Invalid';
+          }
+
+          const bpfEl = document.getElementById('r0-ebpf-status');
+          if (bpfEl && r0.linux_ebpf_elf_verification) {
+            const b = r0.linux_ebpf_elf_verification;
+            bpfEl.textContent = b.valid_ebpf_elf64
+              ? '✅ Verified (' + b.verified_instruction_count + ' insns, GPL=true)'
+              : '🛑 Invalid';
+          }
+
+          const altEl = document.getElementById('r0-altitude');
+          if (altEl) {
+            altEl.textContent = (r0.minifilter_altitude || '385200') + ' (' + (r0.communication_port || '\\KillSwitchRing0Port') + ')';
+          }
+
+          const roleEl = document.getElementById('raft-role-term');
+          if (roleEl) {
+            roleEl.textContent = (raft.role || 'Leader') + ' (Term ' + (raft.current_term || 1) + ', Node ' + (raft.local_node_id || 'ks-node-1') + ')';
+          }
+
+          const comEl = document.getElementById('raft-commit-quorum');
+          if (comEl) {
+            comEl.textContent = 'Index ' + (raft.commit_index || 0) + ' (Quorum ' + (raft.quorum_size_required || 2) + '/' + ((raft.cluster_nodes || []).length || 3) + ')';
+          }
+
+          const aofEl = document.getElementById('raft-aof-status');
+          if (aofEl) {
+            aofEl.textContent = (raft.aof_bytes_written || 0) + ' bytes (' + (raft.replicated_checkpoints_count || 0) + ' checkpoints)';
+          }
+
+          const chEl = document.getElementById('raft-chain-valid');
+          if (chEl) {
+            chEl.textContent = raft.log_chain_integrity_verified
+              ? '✅ Verified (' + (raft.head_entry_blake3 || '').slice(0, 12) + '…)'
+              : '🛑 Chain Broken';
+          }
+
+          if (showFeedback) {
+            setCardStatus(
+              'ring0-consensus-toast',
+              '✅ Ring-0 Posture: ' + r0.posture + ' | Raft Commit Index: ' + raft.commit_index + ' | AOF Bytes: ' + raft.aof_bytes_written,
+              'ok'
+            );
+          }
+        } catch (e) {
+          if (showFeedback) {
+            setCardStatus('ring0-consensus-toast', '❌ Ring-0 / Consensus status error: ' + e.message, 'danger');
+          }
+        }
+      });
+    }
+
+    async function verifyRing0Drivers(btn) {
+      return withButtonFeedback(btn, '🔬 Verifying Drivers…', async () => {
+        try {
+          const res = await api('/api/ring0/verify-driver', {
+            method: 'POST',
+            body: JSON.stringify({ format: 'both' })
+          });
+          const pe = res.pe_sys_verification || {};
+          const bpf = res.ebpf_elf_verification || {};
+          await refreshRing0AndConsensus(false);
+          setCardStatus(
+            'ring0-consensus-toast',
+            '🔬 Driver Binary Verification Complete: PE32+ .sys valid=' + pe.valid_pe64_driver +
+              ' (ObRegisterCallbacks eligible=' + pe.ob_register_callbacks_eligible + ', SHA-256=' + (pe.sha256_hex || '').slice(0, 16) + '…) | ' +
+              'Linux EM_BPF .bpf.o valid=' + bpf.valid_ebpf_elf64 + ' (' + bpf.verified_instruction_count + ' BPF insns verified)',
+            pe.valid_pe64_driver && bpf.valid_ebpf_elf64 ? 'ok' : 'danger'
+          );
+        } catch (e) {
+          setCardStatus('ring0-consensus-toast', '❌ Driver Verification Error: ' + e.message, 'danger');
+        }
+      });
+    }
+
+    async function proposeClusterFiscalCas(deltaMicroUsd, btn) {
+      return withButtonFeedback(btn, '⚡ Proposing Raft CAS…', async () => {
+        try {
+          const reqId = 'webui-cas-' + Date.now();
+          const res = await api('/api/consensus/propose', {
+            method: 'POST',
+            body: JSON.stringify({
+              cmd_type: 'FiscalReserveCas',
+              scope_id: 'cluster-default-scope',
+              agent_id: 'webui-operator',
+              delta_micro_usd: deltaMicroUsd,
+              cap_micro_usd: 5000000000,
+              request_id: reqId
+            })
+          });
+          await refreshRing0AndConsensus(false);
+          setCardStatus(
+            'ring0-consensus-toast',
+            (res.committed ? '✅ Raft Quorum Committed' : '🛑 Refused (' + res.code + ')') +
+              ' | Index: ' + res.log_index + ' | Quorum: ' + res.quorum_acks + '/' + res.cluster_size +
+              ' | Entry BLAKE3: ' + (res.entry_blake3 || '').slice(0, 16) + '… | ' + res.details,
+            res.committed ? 'ok' : 'danger'
+          );
+        } catch (e) {
+          setCardStatus('ring0-consensus-toast', '❌ Raft Proposal Error: ' + e.message, 'danger');
+        }
+      });
+    }
+
     loadSubstratePreset('NativeCage');
     loadEvaluationScenario('clean_trade');
     loadTracePreset('valid_compliant');
     refreshAll(false);
     refreshEdrBehavioral();
     refreshCageStatus(false);
+    refreshRing0AndConsensus(false);
     setInterval(() => refreshAll(false), 5000);
   </script>
 </body>

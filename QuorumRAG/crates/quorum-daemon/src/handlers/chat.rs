@@ -17,6 +17,7 @@ use quorum_storage::SearchMode;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
     /// User prompt query string.
+    #[serde(alias = "query")]
     pub prompt: String,
 
     /// Optional search mode override: Keyword, Vector, Hybrid (default: Hybrid).
@@ -171,6 +172,7 @@ pub async fn query_handler(
     Json(payload): Json<ChatRequest>,
 ) -> impl IntoResponse {
     let prompt = payload.prompt.trim();
+    info!(prompt, "Received /api/query request");
     if prompt.is_empty() {
         return (
             axum::http::StatusCode::BAD_REQUEST,

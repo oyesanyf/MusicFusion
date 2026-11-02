@@ -106,6 +106,7 @@ impl RetrieveMeshNode {
             vector
         };
 
+        tracing::info!(query = %search_query, "Calling execute_query_with_cached_vector");
         let (mut chunks, volatile, _duration, new_vector_hits) = engine
             .execute_query_with_cached_vector(
                 &search_query,
@@ -115,6 +116,7 @@ impl RetrieveMeshNode {
                 candidate_k,
             )
             .await;
+        tracing::info!(chunks = chunks.len(), volatile = volatile.len(), "Finished execute_query_with_cached_vector");
 
         if !new_vector_hits.is_empty() && state.cached_vector_hits.is_empty() {
             state.cached_vector_hits = new_vector_hits;
