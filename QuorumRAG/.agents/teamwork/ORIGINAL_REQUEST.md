@@ -243,3 +243,162 @@ Specifically, implement first-class **Caching and Re-Cache (`recache`)** across 
      - `GET /api/cache/stats`: Returns live cache metrics (`hits`, `misses`, `hit_rate`, `cached_queries`, `cached_embeddings`, `cache_epoch`).
    - **Automatic Cache Coherence**: Automatically invalidate/re-cache affected entries when `reindex`, `fix-drift`, or the live OS file watcher modifies indexed files.
    - **ChatGPT Web UI Integration**: Add a **"Re-Cache"** button and live Cache Hit / Cache Stats indicator in the ChatGPT Web UI sidebar/header so the user can inspect cache status and trigger a full re-cache with one click!
+
+
+## Follow-up — 2026-11-02T01:37:25Z
+
+Make QuorumRAG add no noticeable I/O, CPU, or memory overhead to host systems or local storage operations while eliminating all indexing blind spots, filesystem race conditions, and exploitable peer-to-peer vulnerabilities across the entire distributed search lifecycle. The system must operate strictly offline with zero external internet search requests, preserving search recall, multimodal document and image retrieval accuracy, and quorum consensus scoring.
+
+Integrity mode: development
+
+## Requirements
+
+### R1. Zero-Overhead Ingestion Pipeline, Deduplication, and Binary Filtering
+Eliminate indexing blind spots, filesystem race conditions, and omitted files across physical drive discovery, selective document and image ingestion, and continuous real-time filesystem monitoring. Ensure deduplication state is hydrated on startup from existing storage chunks (such as LanceDB) and live indexer progress reporting accurately reflects total candidate files without slice undercounting. The ingestion pipeline must strictly index all target documents and image assets across available physical drives while deterministically filtering out compiled binaries, system libraries, and executables (including EXE and DLL files) prior to content parsing or embedding.
+
+### R2. Low-Latency Query Execution, Consensus, and Peer-to-Peer Security Hardening
+Eliminate noticeable CPU, memory, and I/O overhead during multi-hop RAG query execution chains, peer-to-peer mesh search routing, quorum consensus, and data verification handshakes. The system must operate strictly offline with zero external internet search requests. Hardening must eliminate exploitable peer-to-peer vulnerabilities while maintaining or improving distributed search recall, multimodal document and image retrieval accuracy, and quorum consensus scoring. Keep on-disk index storage schemas, physical drive mount interfaces, cryptographic chunk attestation and ACL payloads, lexical and vector ranking semantics, legitimate host disk throughput, and public Rust APIs unchanged.
+
+### R3. User Interface Responsiveness and Indexer Controls
+Provide an active stop button on the chat interface allowing immediate query cancellation and responsive chat interactions. Update live indexer progress display components to accurately reflect real-time chunk and file counts without misleading or stale status states.
+
+### R4. Verification Resources, Benchmarks, and Solo Developer Process
+Use QuorumRAG's existing automated test and benchmark suite, and back each performance optimization, file filtering rule, and mesh security hardening change with a deterministic benchmark or simulated Byzantine peer, spoofing, and drive fault regression test proving isolation and catching regressions. Follow the solo developer process: branch cleanly from main, commit atomic and well-documented changes, run the full local test and benchmark suite to verify zero regressions, open one pull request against main with before and after query latency, disk I/O, CPU, memory footprint, document and image index coverage, binary exclusion efficiency, and mesh consensus metrics in its description, perform a rigorous self-review, and merge it directly into main once all checks pass.
+
+## Acceptance Criteria
+
+### Performance and Host Overhead
+- [ ] Ingestion, continuous filesystem monitoring, and query execution add no noticeable I/O, CPU, or memory overhead to host systems or local storage.
+- [ ] Legitimate host disk throughput, lexical/vector ranking semantics, and public Rust APIs remain unchanged.
+- [ ] Multi-hop RAG query execution chains execute strictly offline with zero external internet search requests.
+
+### Ingestion Accuracy, Deduplication, and Binary Filtering
+- [ ] Ingestion strictly indexes all target documents and image assets across available physical drives without file omission blind spots.
+- [ ] Compiled binaries, system libraries, and executables (including EXE and DLL files) are deterministically filtered out prior to content parsing or embedding.
+- [ ] Startup deduplication engine hydration and file estimation accurately reflect total files across folders without undercounting or race conditions.
+
+### User Interface Controls and Latency
+- [ ] The chat interface provides a working stop button that immediately cancels in-flight queries.
+- [ ] Live indexer status and progress indicators accurately report chunk counts and file totals in real time.
+
+### Mesh Security, Byzantine Resilience, and Consensus
+- [ ] Simulated Byzantine peer, spoofing, and drive fault regression tests confirm peer-to-peer mesh resilience and isolation.
+- [ ] Peer-to-peer mesh search routing, quorum consensus, and data verification handshakes eliminate exploitable vulnerabilities while keeping consensus scoring intact or improved.
+
+### Solo PR Delivery and Verification
+- [ ] All changes are developed on a clean branch from main with atomic, well-documented commits.
+- [ ] The full local test and benchmark suite passes with zero regressions.
+- [ ] A pull request is opened against main containing before and after metrics for query latency, disk I/O, CPU, memory footprint, document and image index coverage, binary exclusion efficiency, and mesh consensus, followed by self-review and clean merge into main.
+
+
+## Follow-up — 2026-11-02T02:58:38Z
+
+New user feedback to incorporate into Milestone M9 (`crates/quorum-ui/assets/app.js`):
+> "This randone words are not enough🤖 QuorumRAG (Agentic State Graph) ✨ Thinking..."
+
+Please ensure that in Milestone M9 (`crates/quorum-ui/assets/app.js`):
+1. Expand `THINKING_PHRASES` from a small 9-item list into a large pool (60+ varied, engaging status words/phrases plus dynamic randomized combinations like "Pondering...", "Sifting through local vectors...", "Connecting the dots...", "Mulling it over...", "Synthesizing insights...", "Traversing local knowledge graph...", "Weighing evidence...", "Distilling key facts...", "Evaluating context...", "Unpacking details...", "Formulating response...", "Drafting sections...", "Checking local citations...", "Refining narrative...", "Piecing together sources...", "Scanning local embeddings...", "Crunching context...", "Deliberating...", "Mapping relationships...", "Structuring paragraphs...", etc.).
+2. Start on a random phrase (not always index 0 `"✨ Thinking..."`) and cycle rapidly (every ~650ms) picking a truly random next phrase (never repeating the same phrase twice in a row) until the first `TokenDelta` arrives.
+3. Ensure `handleTelemetryEvent` (such as `StateTransition`, `HardwareProbed`, `IntentClassified`) never stops or freezes the thinking phrase interval before actual `TokenDelta` text arrives.
+
+
+## Follow-up — 2026-11-02T03:07:34Z
+
+CRITICAL NEW USER REQUIREMENT:
+> "the code must excude source code"
+
+Please immediately update the ingestion & classification pipeline (`crates/quorum-ingest` / `ClassifierRouter` / `FilesystemCrawler`) and `PROJECT.md` / `BRIEFING.md` so that:
+1. The ingestion pipeline strictly indexes **documents, text/data documents, and image assets** (e.g. `.pdf`, `.docx`, `.doc`, `.odt`, `.rtf`, `.epub`, `.xlsx`, `.xls`, `.ods`, `.pptx`, `.ppt`, `.odp`, `.txt`, `.md`, `.csv`, `.tsv`, `.json`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp`, `.svg`, `.tiff`, etc.) and **EXCLUDES source code files** (`FileCategory::Code` / source code extensions such as `.rs`, `.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.c`, `.cpp`, `.h`, `.hpp`, `.cc`, `.cs`, `.java`, `.go`, `.kt`, `.rb`, `.php`, `.swift`, `.scala`, `.sh`, `.bash`, `.ps1`, `.bat`, `.cmd`, `.sql`, `.css`, `.scss`, `.less`, `.vue`, `.svelte`, etc.) in addition to excluding compiled binaries, system libraries, and executables (`EXE`, `DLL`, `SYS`, `PDB`, `OBJ`, `LIB`, etc.).
+2. Preserve any existing unit tests in `quorum-classifier` (so `FileTypeClassifier::classify_bytes` still identifies `FileCategory::Code` for classifier unit tests), while filtering out `FileCategory::Code` / source code extensions in `quorum-ingest` (`ClassifierRouter` / `FilesystemCrawler`) or making source code exclusion the default in `IngestConfig` (`exclude_source_code: true`) unless a test explicitly enables source code indexing.
+3. Also purge/skip any indexed source code chunks during reindexing or retrieval so RAG searches only return user documents and images!
+
+
+## Follow-up — 2026-11-02T03:15:27Z
+
+CRITICAL USER FEEDBACK & REQUIREMENTS (MUST BE INCORPORATED IMMEDIATELY):
+
+1. User query test #1: "what is universal mineral income"
+   - Previously returned 10 unrelated tax/student-loan PDFs (`edfinancial.pdf`, `Statement for 2023.pdf`, `Tax22024 W2.pdf`) solely because they matched the single generic word `income` (0 hits for `universal`, 0 hits for `mineral`), and dumped `Retrieved Grounded Evidence (10 matching chunks)`.
+   - Also in the latest screenshot, a general query matched `Reading_Easter2022_EmbracingTheChristInYou.pdf :17-25` on a single common word and printed poem text!
+   - FIX REQUIRED in `crates/quorum-coordinator/src/offline_engine.rs` (and `retrieve.rs`):
+     a) Expand `GENERIC_ATTRIBUTE_TERMS` to include generic financial/common nouns (`income`, `tax`, `taxes`, `statement`, `plan`, `payment`, `credit`, `account`, `amount`, `rate`, `form`, `section`, `page`, `total`, `year`, `day`, `heart`, `soul`, `life`, `time`, `work`, `world`, `reading`, `book`, `universal`, etc. when not paired).
+     b) Strictly enforce multi-term entity matching: when `entity_terms.len() >= 2`, a document chunk MUST match at least `(entity_terms.len() + 1) / 2` distinct `entity_terms` (for 2 or 3 entity terms like `["universal", "mineral", "income"]`, at least 2 distinct entity terms must appear in the chunk, and at least one non-generic primary subject term must match!). Single-word accidental matches on a multi-word query MUST be rejected (`is_relevant = false`) so the engine answers accurately via the local model without polluting the response with unrelated PDFs!
+     c) Never output `Retrieved Grounded Evidence (N matching chunks)`!
+
+2. User requirement #2: "source must be listed after all response"
+   - Every response MUST list its `Sources` (`citations`) AFTER the full response is completed (at the bottom of the response card).
+   - In `SynthesizeWithCitationsNode` / `offline_engine.rs` / `app.js`:
+     - Stream/emit all `TokenDelta` chunks FIRST, and emit `CitationEmitted` events ONLY AFTER the response text is complete (or render `citationsEl` strictly at the bottom after streaming completes).
+     - Even when a general knowledge question has 0 matching local files on disk (answered by the local Ollama neural model), include a clean bottom source attribution citation (e.g., `Local Neural Model (Air-Gapped Ollama)` or the grounded local document citations when local files matched) so `SOURCES` is always listed after every response!
+
+3. User screenshot #3: "tell me about Femi Oyesanya" stuck on "⚡ Synthesizing comprehensive response..."
+   - Ensure `query_local_ollama_chat` streams tokens immediately via SSE (`TokenDelta`) and uses a fast, compact prompt (`top 4` deduplicated chunks, max 900 chars each, `num_predict: 600`, `num_ctx: 2048`) so responses begin streaming within 1-2 seconds instead of hanging on `Synthesizing comprehensive response...`!
+
+
+## Follow-up — 2026-11-02T03:17:05Z
+
+EXACT ROOT-CAUSE FOUND IN `chat.rs`, `agentic/mod.rs`, AND `agentic/synthesize.rs` — MUST FIX IN M8/M9:
+
+1. Why `"tell me about Femi Oyesanya"` hung on `"⚡ Synthesizing comprehensive response..."` and why `Citations` were emitted before tokens:
+   - Look at `crates/quorum-coordinator/src/agentic/synthesize.rs` line 14:
+     `SynthesizeWithCitationsNode::execute(state)` passes `None` as `telemetry_tx` to `DeterministicOfflineSynthesisEngine::synthesize_with_history(...)`!
+     Because `telemetry_tx` is `None`, `query_local_ollama_chat` sets `use_streaming = false` and blocks synchronously waiting for the ENTIRE 600-token response from Ollama before returning a single token!
+   - Then in `crates/quorum-coordinator/src/agentic/mod.rs` lines 352-374:
+     `mod.rs` emits `CitationEmitted` and `ExecutionFinished` BEFORE returning `Ok(graph_state)`.
+   - And ONLY AFTER `query_agentic_with_history` returns in `crates/quorum-daemon/src/handlers/chat.rs` lines 83-94 does `chat.rs` loop over `result.synthesis_prompt.split_inclusive(' ')` with a 5ms sleep!
+   - That means:
+     a) The UI sits frozen on `"⚡ Synthesizing comprehensive response..."` for 15-30 seconds waiting for full non-streaming generation to finish before the first token ever arrives!
+     b) `CitationEmitted` and `ExecutionFinished` are sent BEFORE `TokenDelta`!
+
+2. REQUIRED FIX across `synthesize.rs`, `agentic/mod.rs`, `chat.rs`, and `offline_engine.rs`:
+   - In `crates/quorum-coordinator/src/agentic/synthesize.rs`:
+     Pass `telemetry_tx: Option<&Sender<AgenticTelemetryEvent>>` into `SynthesizeWithCitationsNode::execute(state, telemetry_tx)` and forward it to `DeterministicOfflineSynthesisEngine::synthesize_with_history(...)`.
+   - In `crates/quorum-coordinator/src/offline_engine.rs`:
+     When `telemetry_tx` is `Some(tx)`:
+     - If `query_local_ollama_chat` streams tokens in real time (`TokenDelta`), those tokens arrive in the browser within ~1 second!
+     - If `synthesize_with_history` takes a non-Ollama branch (e.g. RrfCombiner fast-path or offline fallback when Ollama is unreachable), emit `AgenticTelemetryEvent::TokenDelta { delta: body.clone() }` via `tx.try_send(...)` so every path emits `TokenDelta` before `synthesize_with_history` returns!
+   - In `crates/quorum-coordinator/src/agentic/mod.rs`:
+     - On a `QueryCache` hit (lines 143-179): FIRST emit `TokenDelta` with `cached.synthesized_response`, THEN emit `CitationEmitted` for each citation, THEN emit `ExecutionFinished`!
+     - On normal synthesis (lines 331-375): Call `SynthesizeWithCitationsNode::execute(&mut graph_state, telemetry_tx.as_ref())` (which streams all `TokenDelta` events first), and ONLY AFTER `SynthesizeWithCitationsNode::execute` completes, emit `CitationEmitted` (for every citation in `graph_state.citations`, or if `graph_state.citations.is_empty()`, emit a default `Citation` attributing the local neural model `Local Neural Engine (Ollama)` so `SOURCES` is always listed after every response!), followed by `ExecutionFinished`!
+   - In `crates/quorum-daemon/src/handlers/chat.rs`:
+     - Remove the post-hoc `for word in words` loop in `chat_sse_handler` (lines 84-93) since `TokenDelta` is now streamed live during `query_agentic_with_history` BEFORE `CitationEmitted` and `ExecutionFinished`!
+   - In `crates/quorum-coordinator/src/offline_engine.rs` (Entity Matching):
+     - Check word boundaries (tokenize chunk text into alphanumeric words or check word boundaries rather than raw substring `.contains()` where `"inc"` matches `"including"` or `"min"` matches `"administration"`!), and for multi-term queries (`entity_terms.len() >= 2`), require at least `(entity_terms.len() + 1) / 2` distinct `entity_terms` to match as whole words/prefixes so `"what is universal mineral income"` or general questions NEVER match `Reading_Easter2022_EmbracingTheChristInYou.pdf` or `edfinancial.pdf`!
+
+
+## Follow-up — 2026-11-02T04:08:03Z
+
+Live verification on `http://127.0.0.1:3031/api/query` succeeded across all 3 test queries:
+1. `"what is universal mineral income"` -> 0 false-positive tax PDFs, clean Markdown prose, `Sources Cited (1): Local Neural Model (Air-Gapped Ollama)`.
+2. `"tell me about Femi Oyesanya"` -> Grounded Markdown prose citing `Resume2026.pdf`, `Femi_Oyesanya_Enhanced_Resume_v3.docx`, `Femi_Oyesanya_Enhanced_Resume.docx`.
+3. `"where did he go to school?"` -> Completed in 7.7s with multi-turn coreference resolution citing `appsecurityresumefemioyesanya2023.doc` and `Transcrios_University_ofIL_TW7KCCUL.pdf`.
+
+One small polish for Milestone M8.5 (Source Code & Temp File Exclusion):
+- In `offline_engine.rs`, `retrieve.rs`, and `quorum-ingest` (`ClassifierRouter` / `FilesystemCrawler`), also filter out Office/Word temporary lock & autosave files (`file_name.starts_with('~')` or `file_name.ends_with(".tmp")` or `file_name.ends_with(".bak")`) in addition to excluding source code files (`FileCategory::Code`) and compiled binaries (`EXE`, `DLL`, etc.).
+
+
+## Follow-up — 2026-11-02T04:55:41Z
+
+Update on user requirements applied to the workspace:
+1. **Strict RAG-Only Synthesis (`"I dont think I want responses from the model just from RAG"`)**:
+   - In `crates/quorum-coordinator/src/offline_engine.rs` and `crates/quorum-coordinator/src/agentic/mod.rs`:
+     - Removed `default_model_citation` (`Local Neural Model` / `Local Neural Engine`) and removed ungrounded LLM synthesis (`query_local_ollama_chat`).
+     - Responses are now synthesized 100% deterministically from retrieved RAG chunks (`matched_chunks`) with `### 📄 <filename>` headers and real local file `Sources` at the bottom.
+     - When `chunks.is_empty()` or `matched_chunks.is_empty()`, returns `"No matching documents were found in your local RAG index for **<prompt>**."` with `Vec::new()` citations.
+   - In `crates/quorum-coordinator/src/agentic/retrieve.rs`:
+     - Applied the multi-term precision fix (`content_matched_terms >= required_query_hits && entity_hits >= required_entity_hits`) and daemon-active source-code/dump filtering.
+2. **Source Code & Dump Exclusion (M8.5)**:
+   - Added `exclude_source_code: bool` to `IngestConfig` (`default: false` for unit test compatibility, set to `true` in `quorum-daemon/src/main.rs`).
+   - Updated `ClassifierRouter` and `FilesystemCrawler` to exclude `FileCategory::Code`, source/config/dump extensions, and Office temporary lock files (`~$*`, `.~lock*`, `*.tmp`, `*.bak`, `*.wbk`).
+3. **UI Welcome Banner Removal (`"REMOVE THESE"`)**:
+   - Removed the welcome banner and quick-prompt chips from `crates/quorum-ui/assets/index.html`, `app.js`, and `styles.css`.
+
+Please keep these invariants intact as you complete M8, M8.5, M9, and M10!
+
+
+## Follow-up — 2026-11-02T05:23:04Z
+
+Important UI & Coordinator Invariant Update from User:
+1. Top-Page Logo Preserved: Keep `<div id="welcome-banner" class="welcome-banner"><div class="welcome-logo">🌐</div><h1>QuorumRAG</h1></div>` visible at the top of `crates/quorum-ui/assets/index.html` (and in `styles.css` / `app.js`), while keeping `.quick-prompts` and `.prompt-chip` removed.
+2. LLM Chat-Box Spellcheck Preserved: Keep `correct_query_spelling` / `correct_spelling` in `crates/quorum-coordinator/src/offline_engine.rs`, `POST /api/chat/spellcheck` in `crates/quorum-daemon/src/handlers/chat.rs` & `server.rs`, and `#btn-spellcheck` / `spellcheckChatBox` in `crates/quorum-ui/assets/index.html` & `app.js`.
+3. Please proceed through M8.5, M9, and M10 while preserving these changes!

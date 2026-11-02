@@ -34,6 +34,42 @@ pub struct ChatRequest {
     /// Multi-turn conversation history (`[{ "role": "user" | "assistant", "content": "..." }]`).
     #[serde(default)]
     pub history: Vec<ChatTurnMessage>,
+
+    /// Optional client query ID for in-flight cancellation tracking.
+    pub query_id: Option<String>,
+}
+
+/// Request payload for `/api/chat/cancel`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelChatRequest {
+    pub query_id: Option<String>,
+}
+
+/// In-flight chat query cancellation handler: `POST /api/chat/cancel`.
+pub async fn cancel_chat_handler(
+    State(state): State<Arc<DaemonState>>,
+    Json(payload): Json<CancelChatRequest>,
+) -> impl IntoResponse {
+    let cancelled = if let Some(ref qid) = payload.query_id {
+        state.in_flight_queries.cancel(qid)
+    } else {
+        state.in_flight_queries.cancel_all() > 0
+    };
+
+    info!(
+        query_id = ?payload.query_id,
+        cancelled,
+        "Chat query cancellation requested via /api/chat/cancel"
+    );
+
+    (
+        axum::http::StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "cancelled",
+            "cancelled": cancelled,
+            "query_id": payload.query_id
+        })),
+    )
 }
 
 /// SSE Streaming chat endpoint: `POST /api/chat`.
@@ -42,7 +78,13 @@ pub async fn chat_sse_handler(
     State(state): State<Arc<DaemonState>>,
     Json(payload): Json<ChatRequest>,
 ) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    let query_id = payload
+        .query_id
+        .clone()
+        .unwrap_or_else(|| format!("q-{}", uuid::Uuid::new_v4()));
+
     info!(
+        query_id = %query_id,
         prompt = %payload.prompt,
         history_turns = payload.history.len(),
         "Received /api/chat SSE streaming request"
@@ -63,10 +105,14 @@ pub async fn chat_sse_handler(
 
     let (tx, rx) = tokio::sync::mpsc::channel::<AgenticTelemetryEvent>(256);
     let coordinator = Arc::clone(&state.coordinator);
+    let (in_flight_entry, in_flight_guard) = state.in_flight_queries.register(query_id);
+    let task_token = in_flight_entry.token.clone();
+    let task_tx = tx.clone();
 
-    tokio::spawn(async move {
+    let join_handle = tokio::spawn(async move {
+        let _guard = in_flight_guard;
         if prompt.is_empty() {
-            let _ = tx
+            let _ = task_tx
                 .send(AgenticTelemetryEvent::ExecutionError {
                     failed_state: quorum_coordinator::types::AgenticStateName::ClassifyIntent,
                     error_message: "Prompt query string cannot be empty".to_string(),
@@ -77,33 +123,29 @@ pub async fn chat_sse_handler(
         }
 
         match coordinator
-            .query_agentic_with_history(&prompt, history, family, top_k, Some(tx.clone()))
+            .query_agentic_with_history(&prompt, history, family, top_k, Some(task_tx.clone()))
             .await
         {
-            Ok(result) => {
-                // If synthesis produced text, stream word deltas for smooth typewriter effect
-                let words: Vec<&str> = result.synthesis_prompt.split_inclusive(' ').collect();
-                for word in words {
-                    let _ = tx
-                        .send(AgenticTelemetryEvent::TokenDelta {
-                            delta: word.to_string(),
-                        })
-                        .await;
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
+            Ok(_result) => {
+                // TokenDelta events and trailing CitationEmitted + ExecutionFinished events
+                // have already been streamed in real time by AgenticStateGraphRunner.
             }
             Err(e) => {
-                error!("Error in query_agentic_with_history: {}", e);
-                let _ = tx
-                    .send(AgenticTelemetryEvent::ExecutionError {
-                        failed_state: quorum_coordinator::types::AgenticStateName::SynthesizeWithCitations,
-                        error_message: e.to_string(),
-                        fallback_action: "Returned partial graph state".to_string(),
-                    })
-                    .await;
+                if !task_token.is_cancelled() && !task_tx.is_closed() {
+                    error!("Error in query_agentic_with_history: {}", e);
+                    let _ = task_tx
+                        .send(AgenticTelemetryEvent::ExecutionError {
+                            failed_state: quorum_coordinator::types::AgenticStateName::SynthesizeWithCitations,
+                            error_message: e.to_string(),
+                            fallback_action: "Returned partial graph state".to_string(),
+                        })
+                        .await;
+                }
             }
         }
     });
+
+    in_flight_entry.set_abort_handle(join_handle.abort_handle());
 
     let stream = ReceiverStream::new(rx).map(|event| {
         let json_line = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
@@ -149,4 +191,49 @@ pub async fn query_handler(
         )
             .into_response(),
     }
+}
+
+/// Request payload for `POST /api/chat/spellcheck`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpellcheckRequest {
+    pub text: String,
+    #[serde(default = "default_true")]
+    pub use_llm: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Response payload for `POST /api/chat/spellcheck`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpellcheckResponse {
+    pub original: String,
+    pub corrected: String,
+    pub changed: bool,
+    pub engine: String,
+}
+
+/// Spellchecks chat box text using deterministic typo correction + local Ollama LLM (`qwen2.5:1.5b`).
+/// Never uses the LLM to answer queries—strictly corrects spelling errors in the chat input box.
+pub async fn spellcheck_handler(Json(payload): Json<SpellcheckRequest>) -> impl IntoResponse {
+    let raw = payload.text;
+    let use_llm = payload.use_llm;
+    let raw_clone = raw.clone();
+
+    let (corrected, engine) = tokio::task::spawn_blocking(move || {
+        quorum_coordinator::DeterministicOfflineSynthesisEngine::correct_query_spelling(
+            &raw_clone, use_llm,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| (raw.clone(), "fallback".to_string()));
+
+    let changed = corrected.trim() != raw.trim();
+    Json(SpellcheckResponse {
+        original: raw,
+        corrected,
+        changed,
+        engine,
+    })
 }

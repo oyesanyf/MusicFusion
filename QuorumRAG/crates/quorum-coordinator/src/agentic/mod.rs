@@ -8,11 +8,11 @@ use crate::hardware::HardwareTelemetry;
 use crate::scatter_gather::ScatterGatherEngine;
 use crate::telemetry::AgenticTelemetryEvent;
 use crate::types::*;
-use classify::ClassifyIntentNode;
-use grade::GradeRelevanceNode;
-use retrieve::RetrieveMeshNode;
-use rewrite::RewriteQueryNode;
-use synthesize::SynthesizeWithCitationsNode;
+pub use classify::ClassifyIntentNode;
+pub use grade::GradeRelevanceNode;
+pub use retrieve::RetrieveMeshNode;
+pub use rewrite::RewriteQueryNode;
+pub use synthesize::SynthesizeWithCitationsNode;
 use tokio::sync::mpsc::Sender;
 use std::sync::Arc;
 use crate::cache::CacheManager;
@@ -85,9 +85,12 @@ impl AgenticStateGraphRunner {
         top_k: usize,
         telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
     ) -> Result<AgenticGraphState, String> {
+        let corrected_prompt =
+            crate::offline_engine::DeterministicOfflineSynthesisEngine::correct_spelling(prompt);
         let mut state_name = AgenticStateName::ClassifyIntent;
-        let mut graph_state = AgenticGraphState::new(prompt, requested_family, self.max_hops)
-            .with_conversation_history(history);
+        let mut graph_state =
+            AgenticGraphState::new(&corrected_prompt, requested_family, self.max_hops)
+                .with_conversation_history(history);
         let cache_key_query = graph_state.current_query.clone();
 
         let hw = HardwareTelemetry::probe();
@@ -110,6 +113,13 @@ impl AgenticStateGraphRunner {
         };
 
         loop {
+            if let Some(ref tx) = telemetry_tx {
+                if tx.is_closed() {
+                    tracing::info!("Telemetry channel closed by client disconnect; terminating AgenticStateGraph loop");
+                    return Ok(graph_state);
+                }
+            }
+
             match state_name {
                 AgenticStateName::ClassifyIntent => {
                     ClassifyIntentNode::execute(&mut graph_state, &hw);
@@ -148,8 +158,32 @@ impl AgenticStateGraphRunner {
                         graph_state.query_metadata_filters = cached.query_metadata_filters.clone();
 
                         if let Some(ref tx) = telemetry_tx {
+                            // 1. Stream response text FIRST so citations appear strictly AFTER the response
+                            if let Some(ref resp_text) = graph_state.synthesized_response {
+                                for word in resp_text.split_inclusive(' ') {
+                                    if tx.is_closed() {
+                                        break;
+                                    }
+                                    let _ = tx
+                                        .send(AgenticTelemetryEvent::TokenDelta {
+                                            delta: word.to_string(),
+                                        })
+                                        .await;
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(6)).await;
+                                }
+                            }
+
+                            if tx.is_closed() {
+                                return Ok(graph_state);
+                            }
+
+                            // 2. Emit SOURCES citations AFTER all response tokens have been sent
                             for cit in &graph_state.citations {
-                                let _ = tx.send(AgenticTelemetryEvent::CitationEmitted { citation: cit.clone() }).await;
+                                let _ = tx
+                                    .send(AgenticTelemetryEvent::CitationEmitted {
+                                        citation: cit.clone(),
+                                    })
+                                    .await;
                             }
 
                             let _ = tx
@@ -318,6 +352,9 @@ impl AgenticStateGraphRunner {
 
                 AgenticStateName::SynthesizeWithCitations => {
                     if let Some(ref tx) = telemetry_tx {
+                        if tx.is_closed() {
+                            return Ok(graph_state);
+                        }
                         let _ = tx
                             .send(AgenticTelemetryEvent::SynthesisStarted {
                                 model_name: graph_state.selected_model_tag.clone(),
@@ -328,7 +365,10 @@ impl AgenticStateGraphRunner {
                             .await;
                     }
 
-                    SynthesizeWithCitationsNode::execute(&mut graph_state);
+                    SynthesizeWithCitationsNode::execute(
+                        &mut graph_state,
+                        telemetry_tx.as_ref(),
+                    );
 
                     // Insert into QueryCache
                     let epoch = engine.local_storage.index_epoch();
@@ -350,6 +390,7 @@ impl AgenticStateGraphRunner {
                     );
 
                     if let Some(ref tx) = telemetry_tx {
+                        // Emit SOURCES citations strictly AFTER all TokenDelta events have completed
                         for cit in &graph_state.citations {
                             let _ = tx
                                 .send(AgenticTelemetryEvent::CitationEmitted {

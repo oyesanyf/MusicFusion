@@ -93,7 +93,7 @@ impl Level1DedupCatalog {
 
     /// Compute 64-char lowercase hex BLAKE3 hash of a file via streaming reader.
     pub fn hash_file_stream(path: impl AsRef<Path>) -> io::Result<String> {
-        let f = File::open(path)?;
+        let f = quorum_classifier::FileTypeClassifier::open_file_with_retry(path.as_ref())?;
         let mut reader = BufReader::with_capacity(64 * 1024, f);
         let mut hasher = blake3::Hasher::new();
         let mut buffer = [0u8; 64 * 1024];
@@ -299,6 +299,40 @@ impl Level2ChunkCache {
         inner.map.insert(chunk_blake3, (vector, order_len));
     }
 
+    /// Expands the cache capacity if `min_capacity` exceeds the current capacity.
+    pub fn ensure_capacity(&self, min_capacity: usize) {
+        if let Ok(mut inner) = self.inner.write() {
+            if min_capacity > inner.capacity {
+                inner.capacity = min_capacity;
+            }
+        }
+    }
+
+    /// Inserts a batch of chunk hash and embedding vector pairs under a single write lock.
+    pub fn insert_batch(&self, items: impl IntoIterator<Item = (String, Vec<f32>)>) {
+        let mut inner = match self.inner.write() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+
+        for (chunk_blake3, vector) in items {
+            if inner.map.contains_key(&chunk_blake3) {
+                continue;
+            }
+
+            // Evict if at capacity
+            while inner.map.len() >= inner.capacity && !inner.order.is_empty() {
+                if let Some(oldest) = inner.order.pop_front() {
+                    inner.map.remove(&oldest);
+                }
+            }
+
+            let order_len = inner.order.len();
+            inner.order.push_back(chunk_blake3.clone());
+            inner.map.insert(chunk_blake3, (vector, order_len));
+        }
+    }
+
     pub fn stats(&self) -> CacheStats {
         let inner = self.inner.read().unwrap();
         CacheStats {
@@ -374,5 +408,92 @@ impl TwoLevelDedupEngine {
     pub fn get_all_tracked_files(&self) -> Vec<PathBuf> {
         let catalog = self.catalog.read().ok();
         catalog.map(|c| c.get_all_tracked_files()).unwrap_or_default()
+    }
+
+    /// Hydrates deduplication state (both Level-1 File Catalog and Level-2 Chunk Cache)
+    /// directly from stored LanceDB chunks on startup.
+    ///
+    /// # Behavior
+    /// 1. Scans all stored `DocumentChunk` records from LanceDB via `storage.scan_all_chunks().await?`.
+    /// 2. Expands `Level2ChunkCache` capacity to accommodate all stored chunks without eviction.
+    /// 3. Populates `Level2ChunkCache` with `(blake3_hash, vector)` under a single batch operation.
+    /// 4. Groups chunks by parent `document_id` (the BLAKE3 digest of the document).
+    /// 5. Sorts chunk hashes for each document deterministically by `(line_start, chunk_index)`.
+    /// 6. Probes local filesystem metadata for each unique file to prime `mtime_secs` and `size_bytes`
+    ///    for immediate Level-1 Fast Path hits, safely falling back to `(0, 0)` for offline drives.
+    /// 7. Populates `Level1DedupCatalog` under a single write lock.
+    ///
+    /// Returns the total number of hydrated chunks.
+    pub async fn hydrate_from_storage(
+        &self,
+        storage: &Arc<quorum_storage::StorageEngine>,
+    ) -> Result<usize, crate::error::IngestError> {
+        let chunks = storage.scan_all_chunks().await?;
+        if chunks.is_empty() {
+            return Ok(0);
+        }
+
+        let chunk_count = chunks.len();
+
+        // Step 1: Ensure Level-2 cache capacity and batch-insert chunk vectors
+        self.cache.ensure_capacity(chunk_count);
+        let cache_items = chunks
+            .iter()
+            .filter(|c| !c.vector.is_empty())
+            .map(|c| (c.blake3_hash.clone(), c.vector.clone()));
+        self.cache.insert_batch(cache_items);
+
+        // Step 2: Group chunks by document_id:
+        // document_id -> (file_path, Vec<(line_start, chunk_index, blake3_hash)>)
+        let mut doc_groups: HashMap<String, (PathBuf, Vec<(u32, usize, String)>)> = HashMap::new();
+
+        for chunk in chunks {
+            // Parse chunk index from chunk_id (e.g. "{doc_id}:{chunk_index}")
+            let chunk_index: usize = chunk
+                .chunk_id
+                .rsplit_once(':')
+                .and_then(|(_, idx)| idx.parse().ok())
+                .unwrap_or(0);
+
+            let group = doc_groups
+                .entry(chunk.document_id)
+                .or_insert_with(|| (PathBuf::from(&chunk.file_path), Vec::new()));
+            group.1.push((chunk.line_start, chunk_index, chunk.blake3_hash));
+        }
+
+        // Step 3: Populate Level-1 File Catalog under single lock
+        let mut catalog = self.catalog.write().map_err(|_| {
+            std::io::Error::other("Level 1 dedup catalog lock poisoned")
+        })?;
+
+        for (doc_id, (file_path, mut chunk_list)) in doc_groups {
+            // Sort chunks by line_start and chunk_index to maintain deterministic order
+            chunk_list.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            let chunk_hashes: Vec<String> = chunk_list.into_iter().map(|(_, _, hash)| hash).collect();
+
+            // Opportunistically probe disk metadata for fast-path evaluation; fallback to (0, 0)
+            let (mtime_secs, size_bytes) = match std::fs::metadata(&file_path) {
+                Ok(meta) => {
+                    let mtime = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    (mtime, meta.len())
+                }
+                Err(_) => (0, 0),
+            };
+
+            catalog.register_entry(FileCatalogEntry {
+                file_path,
+                file_blake3: doc_id,
+                mtime_secs,
+                size_bytes,
+                chunk_hashes,
+            });
+        }
+
+        Ok(chunk_count)
     }
 }

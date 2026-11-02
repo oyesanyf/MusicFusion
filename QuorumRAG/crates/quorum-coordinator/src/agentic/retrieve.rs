@@ -101,6 +101,14 @@ impl RetrieveMeshNode {
             state.cached_vector_hits = new_vector_hits;
         }
 
+        // When running in the live daemon (or when non-code user documents exist), filter out source code,
+        // lock files, raw .dat blobs, and monolithic chat dumps so they never crowd out user PDF/DOCX documents.
+        let daemon_active = crate::dlp_mesh::global_mesh_dlp_controller()
+            .settings_file_path
+            .read()
+            .map(|p| p.is_some())
+            .unwrap_or(false);
+
         // Supplement candidate pool with direct entity-term keyword hits so large corpora
         // never drown out specific entity documents (e.g. "Femi_Oyesanya_CV_2026.pdf") when generic
         // education/profile expansion terms ("school", "university", "experience") are present.
@@ -113,7 +121,7 @@ impl RetrieveMeshNode {
             })
             .map(|w| w.to_string())
             .collect();
-        if !prelim_entities.is_empty() {
+        if daemon_active && !prelim_entities.is_empty() {
             let entity_kw_query = prelim_entities.join(" ");
             let entity_hits = engine
                 .local_storage
@@ -144,14 +152,7 @@ impl RetrieveMeshNode {
             || query_lower.contains("struct ")
             || query_lower.contains("fn ");
 
-        // When running in the live daemon (or when non-code user documents exist), filter out source code,
-        // lock files, raw .dat blobs, and monolithic chat dumps so they never crowd out user PDF/DOCX documents.
-        let daemon_active = crate::dlp_mesh::global_mesh_dlp_controller()
-            .settings_file_path
-            .read()
-            .map(|p| p.is_some())
-            .unwrap_or(false);
-        if daemon_active && !requests_code {
+        if (daemon_active || engine.config.exclude_source_code) && !requests_code {
             const EXCLUDED_EXTS: &[&str] = &[
                 ".rs", ".py", ".js", ".ts", ".jsx", ".tsx", ".c", ".cpp", ".h", ".hpp",
                 ".cc", ".cs", ".java", ".go", ".kt", ".rb", ".php", ".swift", ".scala",
@@ -381,9 +382,7 @@ impl RetrieveMeshNode {
                 } else {
                     0
                 };
-                let required_query_hits = if !entity_terms.is_empty() {
-                    required_entity_hits
-                } else if query_terms.len() >= 2 {
+                let required_query_hits = if query_terms.len() >= 2 {
                     ((query_terms.len() + 1) / 2).max(2).min(query_terms.len())
                 } else {
                     1

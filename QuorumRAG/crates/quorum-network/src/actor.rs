@@ -32,7 +32,20 @@ impl NetworkSwarmActor {
                 cmd = self.command_rx.recv() => {
                     match cmd {
                         Some(NetworkCommand::Dial { addr, reply }) => {
-                            let res = self.swarm.dial(addr.clone()).map_err(|e| NetworkError::DialError { addr, source: Box::new(e) });
+                            let res = if !crate::transport::is_allowed_dial_address(&addr) {
+                                let err = std::io::Error::new(
+                                    std::io::ErrorKind::PermissionDenied,
+                                    format!("dial to non-airgapped multiaddr {} rejected by security policy", addr),
+                                );
+                                Err(NetworkError::DialError {
+                                    addr: addr.clone(),
+                                    source: Box::new(libp2p::swarm::DialError::Denied {
+                                        cause: libp2p::swarm::ConnectionDenied::new(err),
+                                    }),
+                                })
+                            } else {
+                                self.swarm.dial(addr.clone()).map_err(|e| NetworkError::DialError { addr, source: Box::new(e) })
+                            };
                             let _ = reply.send(res);
                         }
                         Some(NetworkCommand::SendQuery { peer_id, request, reply }) => {

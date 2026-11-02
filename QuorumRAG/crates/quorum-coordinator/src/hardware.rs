@@ -24,23 +24,46 @@ impl Default for HardwareTelemetry {
 
 impl HardwareTelemetry {
     /// Probes live host RAM via `sysinfo` and GPU VRAM via `nvidia-smi` (with CREATE_NO_WINDOW).
+    /// Cached for 30 seconds and uses lightweight memory-only refresh to avoid process/disk scan stalls.
     pub fn probe() -> Self {
-        let mut sys = System::new_all();
-        sys.refresh_all();
+        use std::sync::{Mutex, OnceLock};
+        use std::time::{Duration, Instant};
 
-        let total_ram_gb = sys.total_memory() as f64 / 1_073_741_824.0;
-        let free_ram_gb = sys.available_memory() as f64 / 1_073_741_824.0;
-        let cpu_cores = sys.physical_core_count().unwrap_or_else(|| sys.cpus().len()).max(1);
+        static CACHE: OnceLock<Mutex<Option<(Instant, HardwareTelemetry)>>> = OnceLock::new();
+        let cache_mutex = CACHE.get_or_init(|| Mutex::new(None));
+        if let Ok(guard) = cache_mutex.lock() {
+            if let Some((ts, ref cached)) = *guard {
+                if ts.elapsed() < Duration::from_secs(30) {
+                    return cached.clone();
+                }
+            }
+        }
+
+        let mut sys = System::new();
+        sys.refresh_memory();
+
+        let total_ram_gb = (sys.total_memory() as f64 / 1_073_741_824.0).max(1.0);
+        let free_ram_gb = (sys.available_memory() as f64 / 1_073_741_824.0).max(0.5);
+        let cpu_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(8)
+            .max(1);
 
         let (gpu_name, free_vram_mb) = Self::probe_gpu();
 
-        Self {
+        let fresh = Self {
             total_ram_gb,
             free_ram_gb,
             cpu_cores,
             gpu_name,
             free_vram_mb,
+        };
+
+        if let Ok(mut guard) = cache_mutex.lock() {
+            *guard = Some((Instant::now(), fresh.clone()));
         }
+
+        fresh
     }
 
     fn probe_gpu() -> (Option<String>, u64) {

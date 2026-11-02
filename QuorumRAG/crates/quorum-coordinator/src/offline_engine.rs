@@ -340,8 +340,8 @@ impl DeterministicOfflineSynthesisEngine {
             } else {
                 0
             };
-            let required_query_hits = if !entity_terms.is_empty() {
-                required_entity_hits
+            let required_query_hits = if entity_terms.len() == 1 && query_terms.len() == 2 {
+                1
             } else if query_terms.len() >= 2 {
                 ((query_terms.len() + 1) / 2).max(2).min(query_terms.len())
             } else {
@@ -500,9 +500,18 @@ impl DeterministicOfflineSynthesisEngine {
             }
             let synthesized_rag = sections.join("\n\n");
             if let Some(tx) = telemetry_tx {
-                let _ = tx.try_send(AgenticTelemetryEvent::TokenDelta {
-                    delta: synthesized_rag.clone(),
-                });
+                for word in synthesized_rag.split_inclusive(' ') {
+                    if tx.is_closed() {
+                        tracing::debug!("Token streaming stopped: tx channel closed");
+                        break;
+                    }
+                    if tx.try_send(AgenticTelemetryEvent::TokenDelta {
+                        delta: word.to_string(),
+                    }).is_err() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(6));
+                }
             }
             (synthesized_rag, citations)
         } else {
@@ -511,9 +520,17 @@ impl DeterministicOfflineSynthesisEngine {
                 prompt
             );
             if let Some(tx) = telemetry_tx {
-                let _ = tx.try_send(AgenticTelemetryEvent::TokenDelta {
-                    delta: fallback.clone(),
-                });
+                for word in fallback.split_inclusive(' ') {
+                    if tx.is_closed() {
+                        break;
+                    }
+                    if tx.try_send(AgenticTelemetryEvent::TokenDelta {
+                        delta: word.to_string(),
+                    }).is_err() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(6));
+                }
             }
             (fallback, Vec::new())
         }
@@ -986,6 +1003,7 @@ impl DeterministicOfflineSynthesisEngine {
             ("coverge", "coverage"),
             ("covrage", "coverage"),
             ("coveage", "coverage"),
+            ("patientpoint", "PatientPoint"),
             ("patienpoint", "PatientPoint"),
             ("patientpnt", "PatientPoint"),
             ("patintpoint", "PatientPoint"),
@@ -995,6 +1013,7 @@ impl DeterministicOfflineSynthesisEngine {
             ("houstn", "Houston"),
             ("baptst", "Baptist"),
             ("bapist", "Baptist"),
+            ("mckinney", "McKinney"),
             ("mckiney", "McKinney"),
             ("mckinny", "McKinney"),
             ("lagange", "La Grange"),

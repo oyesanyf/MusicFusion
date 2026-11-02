@@ -33,6 +33,8 @@ regex = "1"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+quorum-classifier = { workspace = true }
+quorum-ingest = { workspace = true }
 quorum-ui = { workspace = true }
 axum = { version = "0.7", features = ["macros", "tokio"] }
 tower = "0.5"

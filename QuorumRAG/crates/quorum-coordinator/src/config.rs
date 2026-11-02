@@ -6,6 +6,7 @@ pub struct CoordinatorConfig {
     pub default_top_k: usize,
     pub candidate_multiplier: usize,
     pub default_peer_access_tier: u8,
+    pub exclude_source_code: bool,
 }
 
 impl Default for CoordinatorConfig {
@@ -17,6 +18,7 @@ impl Default for CoordinatorConfig {
             default_top_k: 10,
             candidate_multiplier: 2,
             default_peer_access_tier: 0,
+            exclude_source_code: true,
         }
     }
 }

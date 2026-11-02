@@ -654,12 +654,12 @@ async fn challenge_tier5_agentic_state_graph_loop_rewrite_and_max_hops() {
     let storage_chunk = DocumentChunk::new(
         "c_agentic_01",
         "doc_agentic",
-        "crypto.rs",
+        "crypto_spec.md",
         1,
         20,
         0,
         vec![0.5; 768],
-        "Ed25519 signature algorithm requires 32-byte public key and 64-byte signature vector.",
+        "Ed25519 signatures are verified in QuorumRAG using 32-byte public key and 64-byte signature vector algorithm.",
         None,
     )
     .expect("chunk creation");

@@ -187,7 +187,11 @@ impl TantivyFtsIndex {
         doc.add_text(self.field_chunk_id, &c.chunk_id);
         doc.add_text(self.field_document_id, &c.document_id);
         doc.add_text(self.field_file_path, &c.file_path);
-        doc.add_text(self.field_file_path_text, &c.file_path);
+        let normalized_path_tokens = c.file_path.replace(['_', '-', '\\', '/', '.'], " ");
+        doc.add_text(
+            self.field_file_path_text,
+            &format!("{} {}", c.file_path, normalized_path_tokens),
+        );
         doc.add_u64(self.field_line_start, c.line_start as u64);
         doc.add_u64(self.field_line_end, c.line_end as u64);
         doc.add_text(self.field_blake3_hash, &c.blake3_hash);
@@ -768,8 +772,7 @@ impl TantivyFtsIndex {
 
         // Fast path: if reader is already synchronized to at least target_seq, no reload needed!
         // But only if no specific semantic verification (e.g. DocPresent/DocAbsent) is required.
-        if target_seq > 0
-            && self.synced_seq.load(Ordering::Acquire) >= target_seq
+        if self.synced_seq.load(Ordering::Acquire) >= target_seq
             && matches!(check, SyncCheck::None)
         {
             return Ok(());
@@ -910,9 +913,7 @@ impl TantivyFtsIndex {
             }
 
             // Step 5: All checks passed! Update synced sequence counter
-            if target_seq > 0 {
-                self.synced_seq.store(target_seq, Ordering::Release);
-            }
+            self.synced_seq.store(target_seq, Ordering::Release);
             return Ok(());
         }
 

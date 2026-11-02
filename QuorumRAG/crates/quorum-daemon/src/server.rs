@@ -19,6 +19,8 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         // Chat & Query Endpoints (SSE streaming & JSON)
         .route("/api/chat", post(chat::chat_sse_handler))
         .route("/api/chat/stream", get(chat_stream_compat_handler))
+        .route("/api/chat/cancel", post(chat::cancel_chat_handler))
+        .route("/api/chat/spellcheck", post(chat::spellcheck_handler))
         .route("/api/query", post(chat::query_handler))
 
         // ChatGPT Settings, OshoosiClaw P2P Mesh, Shared Folders & HIPAA PHI DLP Endpoints
@@ -39,6 +41,7 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         // Reindex Worker Endpoints
         .route("/api/reindex", post(reindex::start_reindex_handler))
         .route("/api/reindex/status", get(reindex::reindex_status_handler))
+        .route("/api/index/status", get(reindex::reindex_status_handler))
         .route("/api/reindex/cancel", post(reindex::cancel_reindex_handler))
 
         // Drift Healing Endpoints
@@ -65,13 +68,29 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
 
 /// GET / - Serves embedded ChatGPT-like interface.
 async fn serve_index() -> impl IntoResponse {
-    Html(quorum_ui::get_index_html())
+    (
+        [(
+            header::CACHE_CONTROL,
+            "no-store, no-cache, must-revalidate, max-age=0",
+        )],
+        Html(quorum_ui::get_index_html()),
+    )
 }
 
 /// GET /assets/*path - Serves embedded static assets.
 async fn serve_asset(Path(path): Path<String>) -> Response {
     if let Some((bytes, mime)) = quorum_ui::get_asset(&path) {
-        ([(header::CONTENT_TYPE, mime)], bytes).into_response()
+        (
+            [
+                (header::CONTENT_TYPE, mime),
+                (
+                    header::CACHE_CONTROL,
+                    "no-store, no-cache, must-revalidate, max-age=0",
+                ),
+            ],
+            bytes,
+        )
+            .into_response()
     } else {
         (StatusCode::NOT_FOUND, "Asset not found").into_response()
     }
@@ -100,6 +119,7 @@ async fn chat_stream_compat_handler(
         top_k: Some(12),
         access_tier: Some(0),
         history: Vec::new(),
+        query_id: None,
     };
     chat::chat_sse_handler(State(state), axum::Json(req)).await
 }

@@ -11,7 +11,7 @@ fn test_cli_parsing_default_and_flags() {
     // 1. Default CLI arguments
     let cli = Cli::parse_from(["quorumrag"]);
     assert_eq!(cli.port, 3030);
-    assert_eq!(cli.host, "127.0.0.1");
+    assert_eq!(cli.host, "0.0.0.0");
     assert!(!cli.no_browser, "Default should not disable browser");
     assert!(cli.command.is_none());
 
@@ -99,6 +99,7 @@ async fn test_daemon_server_routes_and_health() {
         host: "127.0.0.1".to_string(),
         data_dir,
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        in_flight_queries: Arc::new(quorum_daemon::InFlightQueryRegistry::new()),
     });
 
     let app = build_router(state);

@@ -109,27 +109,83 @@
     });
   }
 
+  // Ensure any legacy quick-prompt chips are removed while keeping the top page logo (#welcome-banner) visible
+  document.querySelectorAll('.quick-prompts, .prompt-chip').forEach(el => el.remove());
+
   // 5. NEW CHAT
   btnNewChat.addEventListener('click', () => {
     conversationHistoryTurns = [];
     chatStream.innerHTML = '';
-    welcomeBanner.classList.remove('hidden');
+    if (welcomeBanner) {
+      welcomeBanner.style.display = '';
+      welcomeBanner.classList.remove('hidden');
+    }
     telemetryBar.classList.add('hidden');
     resetTelemetryPills();
   });
 
-  // 6. QUICK PROMPTS
-  document.querySelectorAll('.prompt-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      promptInput.value = chip.dataset.prompt;
-      submitPrompt();
-    });
-  });
+  // 7. INPUT AUTO-RESIZE, LIVE LLM SPELLCHECK & KEYBOARD HANDLING
+  const btnSpellcheck = document.getElementById('btn-spellcheck');
+  const spellcheckStatus = document.getElementById('spellcheck-status');
+  let spellcheckDebounceTimer = null;
+  let lastSpellcheckedText = '';
 
-  // 7. INPUT AUTO-RESIZE & KEYBOARD HANDLING
+  async function spellcheckChatBox(useLlm = true) {
+    const rawVal = promptInput.value;
+    const trimmed = rawVal.trim();
+    if (!trimmed || trimmed.startsWith('@') || trimmed.startsWith('/') || trimmed === lastSpellcheckedText) {
+      return trimmed;
+    }
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1600);
+      const res = await fetch('/api/chat/spellcheck', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: trimmed, use_llm: useLlm })
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) return trimmed;
+      const data = await res.json();
+      if (data && data.corrected) {
+        lastSpellcheckedText = data.corrected;
+        // Only update the chat box if the user hasn't typed something completely different in the meantime
+        if (promptInput.value.trim() === trimmed && data.changed) {
+          const trailingSpace = /\s$/.test(rawVal) ? ' ' : '';
+          promptInput.value = data.corrected + trailingSpace;
+          promptInput.style.height = 'auto';
+          promptInput.style.height = Math.min(promptInput.scrollHeight, 160) + 'px';
+          if (spellcheckStatus) {
+            spellcheckStatus.textContent = `✨ Spellchecked: "${data.corrected}"`;
+          }
+        }
+        return data.corrected;
+      }
+    } catch (_e) {}
+    return trimmed;
+  }
+
+  if (btnSpellcheck) {
+    btnSpellcheck.addEventListener('click', async () => {
+      if (spellcheckStatus) {
+        spellcheckStatus.textContent = '✨ Checking spelling with LLM...';
+      }
+      lastSpellcheckedText = '';
+      await spellcheckChatBox(true);
+    });
+  }
+
   promptInput.addEventListener('input', () => {
     promptInput.style.height = 'auto';
     promptInput.style.height = Math.min(promptInput.scrollHeight, 160) + 'px';
+    if (spellcheckDebounceTimer) {
+      clearTimeout(spellcheckDebounceTimer);
+    }
+    // Trigger live LLM spellcheck after a 550ms typing pause (or after spacebar completes a word)
+    spellcheckDebounceTimer = setTimeout(() => {
+      spellcheckChatBox(true);
+    }, 550);
   });
 
   promptInput.addEventListener('keydown', (e) => {
@@ -154,9 +210,34 @@
     })
     .catch(() => {});
 
+  const btnStop = document.getElementById('btn-stop');
+  let activeAbortController = null;
+  let activeQueryId = null;
+
+  if (btnStop) {
+    btnStop.addEventListener('click', () => {
+      if (activeAbortController) {
+        activeAbortController.abort();
+        activeAbortController = null;
+      }
+      if (activeQueryId) {
+        fetch('/api/chat/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query_id: activeQueryId })
+        }).catch(() => {});
+        activeQueryId = null;
+      }
+    });
+  }
+
   // 8. SEND PROMPT & SSE CONSUMER
   async function submitPrompt() {
-    const text = promptInput.value.trim();
+    if (spellcheckDebounceTimer) {
+      clearTimeout(spellcheckDebounceTimer);
+      spellcheckDebounceTimer = null;
+    }
+    let text = promptInput.value.trim();
     if (!text || isGenerating) return;
 
     // Check for @extract slash command
@@ -168,9 +249,25 @@
       return;
     }
 
+    // Run fast LLM spellcheck on the chat box before submitting the RAG query
+    const correctedText = await spellcheckChatBox(true);
+    if (correctedText && correctedText.trim()) {
+      text = correctedText.trim();
+      promptInput.value = text;
+    }
+
     isGenerating = true;
     btnSend.disabled = true;
-    welcomeBanner.classList.add('hidden');
+    btnSend.classList.add('hidden');
+    if (btnStop) {
+      btnStop.classList.remove('hidden');
+    }
+    activeAbortController = new AbortController();
+    activeQueryId = 'q-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    if (welcomeBanner) {
+      welcomeBanner.classList.remove('hidden');
+      welcomeBanner.style.display = '';
+    }
     telemetryBar.classList.remove('hidden');
     resetTelemetryPills();
 
@@ -181,20 +278,26 @@
 
     // Create Assistant Message with animated cycling thinking indicator
     const { msgEl, bodyEl, citationsEl, headerEl } = createAssistantMessage();
+    citationsEl._pendingCitations = [];
     startThinkingIndicator(bodyEl);
 
     try {
       let resp = null;
       let lastErr = null;
       for (let attempt = 0; attempt < 6; attempt++) {
+        if (activeAbortController && activeAbortController.signal.aborted) {
+          throw new DOMException('Generation stopped by user', 'AbortError');
+        }
         try {
           resp = await fetch('/api/chat', {
             method: 'POST',
+            signal: activeAbortController ? activeAbortController.signal : undefined,
             headers: {
               'Content-Type': 'application/json',
               'Accept': 'text/event-stream',
             },
             body: JSON.stringify({
+              query_id: activeQueryId,
               prompt: text,
               search_mode: currentSearchMode,
               model_family: currentModel,
@@ -206,6 +309,9 @@
           if (resp.ok) break;
           lastErr = new Error(`Server returned status ${resp.status}`);
         } catch (fetchErr) {
+          if (fetchErr && (fetchErr.name === 'AbortError' || (activeAbortController && activeAbortController.signal.aborted))) {
+            throw fetchErr;
+          }
           lastErr = fetchErr;
         }
         await new Promise(r => setTimeout(r, 1500));
@@ -245,10 +351,18 @@
 
     } catch (err) {
       stopThinkingIndicator(bodyEl);
-      bodyEl.innerHTML += `<div style="color:var(--danger);">Error: ${escapeHtml(err.message)}</div>`;
+      if (err && (err.name === 'AbortError' || err.message?.includes('stopped'))) {
+        if (bodyEl._rawMarkdown) {
+          bodyEl._rawMarkdown += '\n\n*(Generation stopped by user)*';
+        } else {
+          bodyEl.innerHTML = `<div style="color:var(--text-muted); font-style:italic;">⏹ Generation stopped by user.</div>`;
+        }
+      } else {
+        bodyEl.innerHTML += `<div style="color:var(--danger);">Error: ${escapeHtml(err.message)}</div>`;
+      }
     } finally {
       stopThinkingIndicator(bodyEl);
-      // Finalize clean markdown rendering without typing cursor
+      // 1. Finalize clean markdown rendering of the response body FIRST
       if (bodyEl._rawMarkdown) {
         bodyEl.style.whiteSpace = 'normal';
         bodyEl.innerHTML = renderMarkdownHtml(bodyEl._rawMarkdown);
@@ -260,38 +374,144 @@
         const cursor = bodyEl.querySelector('.typing-cursor');
         if (cursor) cursor.remove();
       }
+      // 2. Render grounded RAG document Sources strictly AFTER the response is complete
+      const pending = citationsEl._pendingCitations || [];
+      citationsEl.innerHTML = '';
+      for (const cit of pending) {
+        if (cit && cit.file_path && !String(cit.file_path).startsWith('Local Neural')) {
+          appendCitation(citationsEl, cit);
+        }
+      }
+      activeAbortController = null;
+      activeQueryId = null;
       isGenerating = false;
       btnSend.disabled = false;
+      btnSend.classList.remove('hidden');
+      if (btnStop) {
+        btnStop.classList.add('hidden');
+      }
+      scrollToBottom();
     }
   }
 
   const THINKING_PHRASES = [
-    '✨ Thinking...',
-    '🔍 Searching local physical drives...',
-    '🧠 Analyzing retrieved documents...',
-    '📚 Cross-referencing evidence & citations...',
-    '💡 Reasoning through context...',
-    '🔬 Verifying factual grounding...',
-    '⚡ Synthesizing comprehensive response...',
-    '🌐 Querying local neural engine...',
-    '📝 Formulating detailed answer...'
+    // 1. P2P Mesh Discovery & rust-libp2p Swarm
+    '📡 Scanning mDNS for local LAN peers...',
+    '🌐 Gossiping query vector across rust-libp2p mesh...',
+    '🤝 Exchanging Ed25519 peer attestation handshakes...',
+    '🧭 Traversing Kademlia DHT routing table...',
+    '⚡ Scattering federated 400ms query probes...',
+    '🛡️ Enforcing ZeroizeOnDrop volatile memory protection...',
+    '📡 Gathering remote peer candidate fragments...',
+    '🔗 Verifying peer Gemma embedding contract compatibility...',
+    '🛰️ Broadcasting query across decentralized swarm...',
+
+    // 2. Vector Embedding & High-Dimensional Geometry
+    '🧬 Projecting query into Gemma 768d vector space...',
+    '📐 Normalizing L2 high-dimensional embeddings...',
+    '⚡ Scanning LanceDB IVF_PQ vector clusters...',
+    '🧠 Sifting through dense semantic representations...',
+    '🔬 Aligning Cosine distance metrics...',
+    '💡 Navigating dense embedding manifolds...',
+    '🎯 Locking onto semantic nearest neighbors...',
+    '🧬 Evaluating vector angle similarities...',
+    '🧲 Attracting topologically close chunks...',
+
+    // 3. Hybrid Search & Reciprocal Rank Fusion (RRF)
+    '🧮 Computing Reciprocal Rank Fusion: RRF(d) = Σ 1/(60+r)...',
+    '📊 Fusing Tantivy BM25 keyword ranks with LanceDB vectors...',
+    '⚖️ Calibrating reciprocal rank score normalization...',
+    '🔎 Harmonizing lexical and semantic matches...',
+    '🎯 Re-ranking candidate chunks via ordinal consensus...',
+    '📈 Balancing BM25 keyword precision with vector recall...',
+    '🗂️ Merging multi-index candidate rankings...',
+    '🎲 Synthesizing hybrid rank distribution...',
+
+    // 4. Ingestion, OCR & Google Magika Content Inspection
+    '🏷️ Running Google Magika deep-learning content inspection...',
+    '🖼️ Extracting OCR text and visual tokens from image assets...',
+    '🔍 Scanning local physical drives (NTFS/ReFS/FAT32)...',
+    '📄 Parsing PDF, DOCX, and XLSX document passages...',
+    '🧹 Deterministically filtering compiled binaries & DLLs...',
+    '👁️ Inspecting embedded EXIF metadata and image dimensions...',
+    '📂 Traversing directory hierarchies with ignore filters...',
+    '🚫 Purging temporary lock files (~* and .tmp)...',
+    '📑 Ingesting clean document passages...',
+
+    // 5. Merkle State & Two-Level BLAKE3 Deduplication
+    '⚡ Computing two-level BLAKE3 chunk content digests...',
+    '🔒 Verifying tamper-free chunk cryptographic proofs...',
+    '🗂️ Deduplicating redundant chunks via BLAKE3 hash catalog...',
+    '🌳 Auditing Merkle tree state consistency across drives...',
+    '🛡️ Validating tamper-free chunk lineage and hashes...',
+    '🔐 Enforcing Ed25519 access-tier pre-filters in LanceDB...',
+    '🔍 Checking chunk hash cache to bypass redundant embeddings...',
+    '🧩 Verifying index state against filesystem Merkle root...',
+
+    // 6. Agentic State Graph & LangGraph Reasoning
+    '🔄 Iterating Agentic State Graph reasoning hops...',
+    '🎯 Classifying query intent and retrieval strategy...',
+    '🧭 Resolving multi-turn conversational coreferences...',
+    '🔬 Grading document relevance against query intent...',
+    '✏️ Rewriting query for deeper retrieval hops...',
+    '🧩 Aligning multi-hop contextual dependencies...',
+    '🔭 Focusing on subject-specific entities & technical symbols...',
+    '📊 Re-evaluating candidate chunk sufficiency...',
+    '🚀 Transitioning through agentic graph nodes...',
+
+    // 7. Grounded Synthesis & Citations
+    '📚 Cross-referencing grounded source passages...',
+    '📌 Anchoring claims to local document excerpts...',
+    '📑 Verifying exact source file paths and line ranges...',
+    '🧱 Structuring clean, well-grounded Markdown sections...',
+    '🖋️ Drafting accurate, citation-backed response...',
+    '💡 Connecting insights across retrieved documents...',
+    '🕵️ Pinpointing exact verbatim excerpts...',
+    '📝 Polishing technical prose clarity and conciseness...',
+    '📎 Preparing structured source citations at the bottom...',
+
+    // 8. Witty, Engaging & Air-Gapped Local Touches
+    '☕ Brewing fresh insights from local files...',
+    '✨ Connecting dots that didn\'t know they were related...',
+    '🧙 Casting high-dimensional retrieval spells...',
+    '🤖 Running 100% air-gapped local neural inference...',
+    '🧹 Dusting off unindexed document corners...',
+    '🌊 Swimming through oceans of local text...',
+    '🔮 Mulling over subtle contextual nuances...',
+    '🚀 Preparing comprehensive, hallucination-free answer...',
+    '🧶 Weaving together isolated document threads...',
+    '💡 Pondering the deepest local vectors...',
+    '🔎 Sifting through local archives for hidden gems...',
+    '⚙️ Tuning neural weights for maximum precision...'
   ];
 
   function startThinkingIndicator(bodyEl) {
     stopThinkingIndicator(bodyEl);
-    let idx = 0;
+    let idx = Math.floor(Math.random() * THINKING_PHRASES.length);
+
     const renderPhrase = (phrase) => {
-      bodyEl.innerHTML = `<div class="thinking-status-indicator" style="display:inline-flex; align-items:center; gap:8px; color:var(--text-muted); font-style:italic; font-size:14px; padding:4px 0;"><span class="pulse-dot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent, #10a37f);"></span><span>${escapeHtml(phrase)}</span></div>`;
+      let textSpan = bodyEl.querySelector('.thinking-text');
+      if (!textSpan) {
+        bodyEl.innerHTML = `<div class="thinking-status-indicator" style="display:inline-flex; align-items:center; gap:8px; color:var(--text-muted); font-style:italic; font-size:14px; padding:4px 0;"><span class="pulse-dot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent, #10a37f);"></span><span class="thinking-text">${escapeHtml(phrase)}</span></div>`;
+      } else {
+        textSpan.textContent = phrase;
+      }
     };
-    renderPhrase(THINKING_PHRASES[0]);
+
+    renderPhrase(THINKING_PHRASES[idx]);
+
     bodyEl._thinkingInterval = setInterval(() => {
       if (bodyEl._rawMarkdown) {
         stopThinkingIndicator(bodyEl);
         return;
       }
-      idx = (idx + 1 + Math.floor(Math.random() * 2)) % THINKING_PHRASES.length;
+      let nextIdx = idx;
+      while (nextIdx === idx && THINKING_PHRASES.length > 1) {
+        nextIdx = Math.floor(Math.random() * THINKING_PHRASES.length);
+      }
+      idx = nextIdx;
       renderPhrase(THINKING_PHRASES[idx]);
-    }, 1100);
+    }, 650);
   }
 
   function stopThinkingIndicator(bodyEl) {
@@ -305,6 +525,18 @@
         ind.remove();
       }
     }
+  }
+
+  // Backward-compatible function aliases
+  const startThinkingAnimation = startThinkingIndicator;
+  const stopThinkingAnimation = stopThinkingIndicator;
+
+  if (typeof window !== 'undefined') {
+    window.startThinkingIndicator = startThinkingIndicator;
+    window.stopThinkingIndicator = stopThinkingIndicator;
+    window.startThinkingAnimation = startThinkingAnimation;
+    window.stopThinkingAnimation = stopThinkingAnimation;
+    window.THINKING_PHRASES = THINKING_PHRASES;
   }
 
   function handleTelemetryEvent(event, bodyEl, citationsEl, headerEl) {
@@ -329,8 +561,31 @@
         telemetryModelInfo.textContent = `HW: ${Number(data.free_ram_gb).toFixed(1)}GB free RAM | ${data.selected_tier || ''}`;
       }
     } else if (type === 'IntentClassified' || type === 'intent_classified') {
+      setActiveStep('step-classify');
       if (telemetryModelInfo) {
         telemetryModelInfo.textContent = `Model: ${data.model_name || ''} | Mode: ${data.search_mode || ''}`;
+      }
+    } else if (type === 'RetrievalCompleted' || type === 'retrieval_completed') {
+      setCompletedStep('step-classify');
+      setActiveStep('step-retrieve');
+      if (telemetryModelInfo) {
+        telemetryModelInfo.textContent = `Retrieved ${data.retrieved_count || 0} chunks (${data.local_count || 0} local, ${data.remote_count || 0} mesh) in ${data.latency_ms || 0}ms`;
+      }
+    } else if (type === 'RelevanceGraded' || type === 'relevance_graded') {
+      setCompletedStep('step-retrieve');
+      setActiveStep('step-grade');
+      if (telemetryModelInfo) {
+        telemetryModelInfo.textContent = `Relevance: ${data.grade || 'Satisfied'} (${Math.round((data.score || 0) * 100)}%)${data.will_rewrite ? ' → Rewriting' : ''}`;
+      }
+    } else if (type === 'QueryRewritten' || type === 'query_rewritten') {
+      if (telemetryModelInfo) {
+        telemetryModelInfo.textContent = `Hop ${data.hop || 1} Rewritten: "${data.rewritten_query || ''}"`;
+      }
+    } else if (type === 'SynthesisStarted' || type === 'synthesis_started') {
+      setCompletedStep('step-grade');
+      setActiveStep('step-synthesize');
+      if (telemetryModelInfo) {
+        telemetryModelInfo.textContent = `Synthesizing with ${data.model_name || 'Neural Model'} (${data.context_chunks_count || 0} chunks)...`;
       }
     } else if (type === 'TokenDelta' || type === 'token_delta' || type === 'token') {
       const delta = data.delta || data.content || '';
@@ -338,7 +593,10 @@
     } else if (type === 'CitationEmitted' || type === 'citation') {
       const cit = data.citation || event.citation;
       if (cit) {
-        appendCitation(citationsEl, cit);
+        if (!citationsEl._pendingCitations) {
+          citationsEl._pendingCitations = [];
+        }
+        citationsEl._pendingCitations.push(cit);
       }
     } else if (type === 'ExecutionFinished' || type === 'execution_finished' || type === 'done') {
       markTelemetryComplete();
@@ -614,6 +872,8 @@
     });
   }
 
+  let lastMonotonicPct = 0;
+
   function pollReindexProgress() {
     if (reindexPollInterval) clearInterval(reindexPollInterval);
     reindexPollInterval = setInterval(checkReindexStatus, 1000);
@@ -631,16 +891,31 @@
       const skipped = Number(data.files_skipped_unmodified || 0);
       const newChunks = Number(data.chunks_newly_embedded || 0);
       const storedChunks = Number(data.total_stored_chunks || 0);
-      let pct = Number(data.percent || 0);
-      if (totalEst > 0) {
-        pct = Math.min(100, Math.max(2, (scanned / totalEst) * 100));
-      } else if (phase === 'completed') {
+
+      let pct = 0;
+      if (typeof data.percent === 'number') {
+        pct = data.percent;
+      } else if (totalEst > 0) {
+        pct = (scanned / totalEst) * 100;
+      } else if (phase === 'completed' || storedChunks > 0) {
         pct = 100;
       } else {
-        pct = 25;
+        pct = 0;
       }
-      const pctFormatted = totalEst > 0 ? `${pct.toFixed(1)}%` : (phase === 'completed' ? '100%' : 'Scanning...');
+      pct = Math.min(100, Math.max(0, pct));
+
       const isRunning = phase === 'scanning_filesystem' || phase === 'chunking_and_vectorizing' || phase === 'writing_to_storage' || phase === 'compacting_indexes';
+
+      if (isRunning && totalEst > 0) {
+        pct = Math.max(lastMonotonicPct, pct);
+        lastMonotonicPct = pct;
+      } else if (!isRunning) {
+        lastMonotonicPct = 0;
+      }
+
+      const pctFormatted = (isRunning && totalEst === 0)
+        ? 'Scanning...'
+        : (totalEst > 0 ? `${pct.toFixed(1)}%` : (storedChunks > 0 ? '100%' : '0%'));
 
       // Update Sidebar Live Continuous Indexer Card
       const phaseEl = document.getElementById('live-indexer-phase');

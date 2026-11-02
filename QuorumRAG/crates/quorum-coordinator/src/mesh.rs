@@ -200,6 +200,53 @@ impl OsoosiMeshInboundHandler {
 #[async_trait::async_trait]
 impl quorum_network::InboundQueryHandler for OsoosiMeshInboundHandler {
     async fn handle_query(&self, req: FederatedQueryRequest) -> FederatedQueryResponse {
+        // 1. Reject malformed payloads: embedding dimension 768, finite floats, text length <= 4096, top_k > 0
+        if req.embedding.len() != 768
+            || !req.embedding.iter().all(|f| f.is_finite())
+            || req.query_text.len() > 4096
+            || req.top_k == 0
+        {
+            tracing::warn!(
+                "Rejecting malformed mesh query payload from peer: {}",
+                req.sender_peer_id
+            );
+            return FederatedQueryResponse {
+                query_id: req.query_id,
+                responder_peer_id: self.local_peer_id.clone(),
+                chunks: Vec::new(),
+            };
+        }
+
+        // 2. Validate sender_pubkey derives to claimed sender_peer_id
+        match quorum_network::derive_peer_id_from_pubkey(&req.sender_pubkey) {
+            Ok(derived_id) => {
+                if derived_id.to_string() != req.sender_peer_id {
+                    tracing::warn!(
+                        "Rejecting spoofed sender peer id: claimed={}, derived={}",
+                        req.sender_peer_id,
+                        derived_id
+                    );
+                    return FederatedQueryResponse {
+                        query_id: req.query_id,
+                        responder_peer_id: self.local_peer_id.clone(),
+                        chunks: Vec::new(),
+                    };
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Rejecting invalid sender pubkey from {}: {}",
+                    req.sender_peer_id,
+                    e
+                );
+                return FederatedQueryResponse {
+                    query_id: req.query_id,
+                    responder_peer_id: self.local_peer_id.clone(),
+                    chunks: Vec::new(),
+                };
+            }
+        }
+
         let controller = crate::dlp_mesh::global_mesh_dlp_controller();
         let (p2p_enabled, is_quarantined, max_tier) = {
             let guard = controller.settings.read().unwrap_or_else(|e| e.into_inner());
@@ -223,9 +270,35 @@ impl quorum_network::InboundQueryHandler for OsoosiMeshInboundHandler {
             };
         }
 
+        // 3. Cryptographic handshake & anti-replay timestamp verification (drift <= 60s)
+        let mut verified_tier = None;
+        for t in 0..=max_tier.min(3) {
+            if let Ok(candidate_tier) = quorum_types::AccessTier::from_u8(t) {
+                if crate::crypto::verify_request(&req, candidate_tier, 60).is_ok() {
+                    verified_tier = Some(candidate_tier);
+                    break;
+                }
+            }
+        }
+
+        let effective_tier = match verified_tier {
+            Some(tier) => tier.as_u8().min(max_tier),
+            None => {
+                tracing::warn!(
+                    "Rejecting unverified or stale query signature (>60s drift) from peer: {}",
+                    req.sender_peer_id
+                );
+                return FederatedQueryResponse {
+                    query_id: req.query_id,
+                    responder_peer_id: self.local_peer_id.clone(),
+                    chunks: Vec::new(),
+                };
+            }
+        };
+
         let scored = self
             .local_storage
-            .search_hybrid(&req.query_text, &req.embedding, max_tier, req.top_k.min(16))
+            .search_hybrid(&req.query_text, &req.embedding, effective_tier, req.top_k.min(16))
             .await;
 
         let candidate_dtos: Vec<CandidateChunkDto> = scored

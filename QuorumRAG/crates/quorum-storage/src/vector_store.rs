@@ -24,6 +24,7 @@ pub(crate) struct VectorStore {
     table: Arc<RwLock<Table>>,
     _db: Connection,
     config: StorageConfig,
+    ivf_index_built: std::sync::atomic::AtomicBool,
 }
 
 impl VectorStore {
@@ -64,6 +65,7 @@ impl VectorStore {
             table: Arc::new(RwLock::new(table)),
             _db: db,
             config: config.clone(),
+            ivf_index_built: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -84,10 +86,13 @@ impl VectorStore {
         let count = chunks.len();
         drop(table);
 
-        // Auto-index if threshold crossed
-        let total_rows = self.count().await.unwrap_or(0);
-        if total_rows >= self.config.auto_index_threshold {
-            let _ = self.create_ivf_pq_index().await;
+        // Auto-index at most once when crossing threshold (never rebuild IVF_PQ on every batch!)
+        if !self.ivf_index_built.load(std::sync::atomic::Ordering::Relaxed) {
+            let total_rows = self.count().await.unwrap_or(0);
+            if total_rows >= self.config.auto_index_threshold {
+                self.ivf_index_built.store(true, std::sync::atomic::Ordering::Relaxed);
+                let _ = self.create_ivf_pq_index().await;
+            }
         }
 
         Ok(count)

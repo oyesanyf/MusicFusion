@@ -216,13 +216,15 @@ impl DeterministicOfflineEngine {
             .filter(|s| !s.is_empty())
             .collect();
 
+        // Pre-allocate reused slice buffer for BLAKE3 XOF output to avoid per-token heap allocations
+        let mut raw = vec![0u8; dim * 4];
+
         if tokens.is_empty() {
             // If empty text, seed with model name and contract version to avoid all-zero vector
             let mut hasher = blake3::Hasher::new();
             hasher.update(b"EMPTY_PROMPT_SEED_V1\n");
             hasher.update(self.contract.model_name.as_bytes());
             let mut xof = hasher.finalize_xof();
-            let mut raw = vec![0u8; dim * 4];
             xof.fill(&mut raw);
 
             for (i, chunk) in raw.chunks_exact(4).enumerate() {
@@ -237,7 +239,6 @@ impl DeterministicOfflineEngine {
                 hasher.update(token.to_ascii_lowercase().as_bytes());
 
                 let mut xof = hasher.finalize_xof();
-                let mut raw = vec![0u8; dim * 4];
                 xof.fill(&mut raw);
 
                 for (i, chunk) in raw.chunks_exact(4).enumerate() {

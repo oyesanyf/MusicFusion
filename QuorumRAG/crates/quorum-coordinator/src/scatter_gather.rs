@@ -23,6 +23,24 @@ pub trait StorageSearcher: Send + Sync {
         top_k: usize,
     ) -> Vec<ScoredChunk>;
 
+    async fn search_vector(
+        &self,
+        _vector: &[f32],
+        _max_tier: u8,
+        _top_k: usize,
+    ) -> Vec<ScoredChunk> {
+        Vec::new()
+    }
+
+    async fn search_text(
+        &self,
+        _query: &str,
+        _max_tier: u8,
+        _top_k: usize,
+    ) -> Vec<ScoredChunk> {
+        Vec::new()
+    }
+
     fn index_epoch(&self) -> u64 {
         1
     }
@@ -38,6 +56,28 @@ impl StorageSearcher for quorum_storage::StorageEngine {
         top_k: usize,
     ) -> Vec<ScoredChunk> {
         self.search_hybrid(query_text, query_vec, max_tier, top_k)
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn search_vector(
+        &self,
+        vector: &[f32],
+        max_tier: u8,
+        top_k: usize,
+    ) -> Vec<ScoredChunk> {
+        self.search_vector(vector, max_tier, top_k)
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn search_text(
+        &self,
+        query: &str,
+        max_tier: u8,
+        top_k: usize,
+    ) -> Vec<ScoredChunk> {
+        self.search_text(query, max_tier, top_k)
             .await
             .unwrap_or_default()
     }
@@ -59,6 +99,24 @@ impl<T: StorageSearcher + ?Sized> StorageSearcher for Arc<T> {
         (**self)
             .search_hybrid(query_text, query_vec, max_tier, top_k)
             .await
+    }
+
+    async fn search_vector(
+        &self,
+        vector: &[f32],
+        max_tier: u8,
+        top_k: usize,
+    ) -> Vec<ScoredChunk> {
+        (**self).search_vector(vector, max_tier, top_k).await
+    }
+
+    async fn search_text(
+        &self,
+        query: &str,
+        max_tier: u8,
+        top_k: usize,
+    ) -> Vec<ScoredChunk> {
+        (**self).search_text(query, max_tier, top_k).await
     }
 
     fn index_epoch(&self) -> u64 {
@@ -95,26 +153,70 @@ impl ScatterGatherEngine {
         }
     }
 
-    /// Dispatches parallel queries across local storage and remote peers with strict 400ms deadline.
-    pub async fn execute_query(
+    /// Dispatches parallel queries across local storage and remote peers with optional cached vector hits
+    /// to avoid redundant LanceDB vector nearest-neighbor searches during rewrite hops.
+    pub async fn execute_query_with_cached_vector(
         &self,
         query_text: &str,
         query_vec: &[f32],
+        cached_vector: Option<&[ScoredChunk]>,
         access_tier: u8,
         top_k: usize,
-    ) -> (Vec<ScoredChunk>, Vec<VolatileRemoteChunk>, u64) {
+    ) -> (Vec<ScoredChunk>, Vec<VolatileRemoteChunk>, u64, Vec<ScoredChunk>) {
         let start = tokio::time::Instant::now();
+        let candidate_limit = top_k * self.config.candidate_multiplier;
 
-        // 1. Fast Local Search
-        let local_results = self
-            .local_storage
-            .search_hybrid(
-                query_text,
-                query_vec,
-                access_tier,
-                top_k * self.config.candidate_multiplier,
-            )
-            .await;
+        // 1. Fast Local Search: Reuse cached vector hits if available, avoiding redundant LanceDB scans
+        let (local_results, new_cached_vector) = if let Some(cached) = cached_vector {
+            if !cached.is_empty() {
+                let text_hits = self
+                    .local_storage
+                    .search_text(query_text, access_tier, candidate_limit)
+                    .await;
+                // Fuse cached vector hits and fresh text hits via RRF
+                let mut rrf_map: std::collections::HashMap<String, (f32, quorum_types::DocumentChunk)> =
+                    std::collections::HashMap::new();
+
+                for (i, scored) in cached.iter().enumerate() {
+                    let rrf = 1.0 / (60.0 + (i + 1) as f32);
+                    let entry = rrf_map
+                        .entry(scored.chunk.chunk_id.clone())
+                        .or_insert_with(|| (0.0, scored.chunk.clone()));
+                    entry.0 += rrf;
+                }
+
+                for (i, scored) in text_hits.into_iter().enumerate() {
+                    let rrf = 1.0 / (60.0 + (i + 1) as f32);
+                    let entry = rrf_map
+                        .entry(scored.chunk.chunk_id.clone())
+                        .or_insert_with(|| (0.0, scored.chunk.clone()));
+                    entry.0 += rrf;
+                }
+
+                let mut fused_local: Vec<ScoredChunk> = rrf_map
+                    .into_iter()
+                    .map(|(_id, (score, chunk))| ScoredChunk::new(chunk, score, "local", false))
+                    .collect();
+                fused_local.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                (fused_local, cached.to_vec())
+            } else {
+                let results = self
+                    .local_storage
+                    .search_hybrid(query_text, query_vec, access_tier, candidate_limit)
+                    .await;
+                (results.clone(), results)
+            }
+        } else {
+            let results = self
+                .local_storage
+                .search_hybrid(query_text, query_vec, access_tier, candidate_limit)
+                .await;
+            (results.clone(), results)
+        };
 
         // 2. Parallel Remote Peer Queries bounded by 400ms hard deadline
         // Enforces OshoosiClaw P2P Mesh gate & PHI/PII DLP on both outbound queries and inbound remote chunks
@@ -159,6 +261,18 @@ impl ScatterGatherEngine {
         for resp in remote_responses {
             let mut clean_peer_chunks = Vec::new();
             for mut chunk in resp.chunks {
+                // Byzantine consensus hardening: validate line numbers and clamp remote access tier
+                if chunk.line_start > chunk.line_end {
+                    tracing::warn!(
+                        "Rejecting malformed remote chunk line_start {} > line_end {} from peer {}",
+                        chunk.line_start,
+                        chunk.line_end,
+                        resp.responder_peer_id
+                    );
+                    continue;
+                }
+                chunk.access_tier = chunk.access_tier.min(access_tier);
+
                 let dlp_res = controller.inspect_and_enforce_text(
                     &chunk.content,
                     &chunk.file_path,
@@ -187,7 +301,21 @@ impl ScatterGatherEngine {
         );
 
         let duration_ms = start.elapsed().as_millis() as u64;
-        (fused, volatile_chunks, duration_ms)
+        (fused, volatile_chunks, duration_ms, new_cached_vector)
+    }
+
+    /// Dispatches parallel queries across local storage and remote peers with strict 400ms deadline.
+    pub async fn execute_query(
+        &self,
+        query_text: &str,
+        query_vec: &[f32],
+        access_tier: u8,
+        top_k: usize,
+    ) -> (Vec<ScoredChunk>, Vec<VolatileRemoteChunk>, u64) {
+        let (fused, volatile, duration_ms, _) = self
+            .execute_query_with_cached_vector(query_text, query_vec, None, access_tier, top_k)
+            .await;
+        (fused, volatile, duration_ms)
     }
 }
 
@@ -241,8 +369,17 @@ impl<S: StorageSearcher> FederatedQueryCoordinator<S> {
         let mut peer_lists: Vec<Vec<CandidateChunkDto>> = Vec::new();
         let _ = tokio::time::timeout(self.timeout_duration, async {
             while let Some(res) = futures.next().await {
-                if let Ok(chunks) = res {
-                    peer_lists.push(chunks);
+                if let Ok(mut chunks) = res {
+                    chunks.retain_mut(|c| {
+                        if c.line_start > c.line_end {
+                            return false;
+                        }
+                        c.access_tier = c.access_tier.min(access_tier);
+                        true
+                    });
+                    if !chunks.is_empty() {
+                        peer_lists.push(chunks);
+                    }
                 }
             }
         })
