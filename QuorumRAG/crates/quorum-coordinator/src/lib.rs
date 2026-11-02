@@ -14,10 +14,16 @@ pub mod model_router;
 pub mod offline_engine;
 pub mod scatter_gather;
 pub mod telemetry;
+pub mod tpm;
 pub mod types;
 pub mod volatile;
 
-pub use acl::{AccessTierPolicy, PeerAclManager};
+pub use acl::{AccessTierPolicy, AttestationTier, PeerAclManager, PeerAttestationRecord};
+pub use tpm::{
+    compute_pcr_composite_digest, default_pcr_selection, extend_simulated_pcr_16,
+    inspect_tpm_hardware, simulated_pcr, TpmEkCertificate, TpmHardwareInspection, TpmOemVendor,
+    PCR_APPLICATION_AUDIT, PCR_PLATFORM_FIRMWARE, PCR_SECURE_BOOT,
+};
 pub use agentic::AgenticStateGraphRunner;
 pub use cache::{
     derive_embedding_cache_key, derive_query_cache_key, normalize_text_for_caching,

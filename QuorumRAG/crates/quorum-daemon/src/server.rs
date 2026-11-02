@@ -5,7 +5,7 @@ use axum::routing::{get, post};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
-use crate::handlers::{cache, chat, drift, health, langextract, reindex, settings};
+use crate::handlers::{cache, chat, drift, health, langextract, mesh, reindex, settings};
 use crate::state::DaemonState;
 
 /// Constructs the complete Axum 0.7 web server Router.
@@ -33,6 +33,28 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         .route("/api/dlp/policy", post(settings::update_dlp_policy_handler))
         .route("/api/dlp/test", post(settings::test_dlp_inspection_handler))
         .route("/api/endpoints/probe", post(settings::probe_endpoint_handler))
+
+        // OshoosiClaw Mesh Network & TPM 2.0 Hardware RoT Endpoints
+        .route("/api/mesh/tpm/status", get(mesh::get_tpm_status_handler))
+        .route("/api/tpm/status", get(mesh::get_tpm_status_handler))
+        .route("/api/mesh/topology", get(mesh::get_mesh_topology_handler))
+        .route("/api/topology", get(mesh::get_mesh_topology_handler))
+        .route("/api/peers", get(mesh::get_mesh_topology_handler))
+        .route("/api/mesh/peers", get(mesh::get_mesh_topology_handler))
+        .route("/api/mesh/bootstrap-peers", get(mesh::get_bootstrap_peers_handler).post(mesh::post_bootstrap_peers_handler))
+        .route("/mesh/bootstrap-peers", get(mesh::get_bootstrap_peers_handler).post(mesh::post_bootstrap_peers_handler))
+        .route("/api/mesh/pending-joins", get(mesh::get_pending_joins_handler))
+        .route("/api/pending-joins", get(mesh::get_pending_joins_handler))
+        .route("/api/mesh/pending-joins/clear", post(mesh::clear_pending_joins_handler))
+        .route("/api/pending-joins/clear", post(mesh::clear_pending_joins_handler))
+        .route("/api/mesh/pending-joins/:peer_id/allow", post(mesh::allow_pending_join_handler))
+        .route("/api/pending-joins/:peer_id/allow", post(mesh::allow_pending_join_handler))
+        .route("/api/mesh/pending-joins/:peer_id/deny", post(mesh::deny_pending_join_handler))
+        .route("/api/pending-joins/:peer_id/deny", post(mesh::deny_pending_join_handler))
+        .route("/api/mesh/quarantined-peers", get(mesh::get_quarantined_peers_handler))
+        .route("/api/quarantined-peers", get(mesh::get_quarantined_peers_handler))
+        .route("/api/mesh/quarantined-peers/:peer_id/release", post(mesh::release_quarantined_peer_handler))
+        .route("/api/quarantined-peers/:peer_id/release", post(mesh::release_quarantined_peer_handler))
 
         // Cache Management Endpoints
         .route("/api/cache/recache", post(cache::recache_handler))
