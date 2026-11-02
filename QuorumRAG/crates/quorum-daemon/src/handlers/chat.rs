@@ -10,7 +10,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info};
 
 use crate::state::DaemonState;
-use quorum_coordinator::{AgenticTelemetryEvent, SynthesisModelFamily};
+use quorum_coordinator::{AgenticTelemetryEvent, ChatTurnMessage, SynthesisModelFamily};
 use quorum_storage::SearchMode;
 
 /// Request payload for `/api/chat` and `/api/query`.
@@ -25,11 +25,15 @@ pub struct ChatRequest {
     /// Model family selector: AutoFusion, Glm4Agentic, Qwen25Code, GemmaProse.
     pub model_family: Option<String>,
 
-    /// Top candidate chunks count (default: 8).
+    /// Top candidate chunks count (default: 12).
     pub top_k: Option<usize>,
 
     /// Authorized upper bound access tier (0=Public..3=Restricted, default: 0).
     pub access_tier: Option<u8>,
+
+    /// Multi-turn conversation history (`[{ "role": "user" | "assistant", "content": "..." }]`).
+    #[serde(default)]
+    pub history: Vec<ChatTurnMessage>,
 }
 
 /// SSE Streaming chat endpoint: `POST /api/chat`.
@@ -38,10 +42,15 @@ pub async fn chat_sse_handler(
     State(state): State<Arc<DaemonState>>,
     Json(payload): Json<ChatRequest>,
 ) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
-    info!(prompt = %payload.prompt, "Received /api/chat SSE streaming request");
+    info!(
+        prompt = %payload.prompt,
+        history_turns = payload.history.len(),
+        "Received /api/chat SSE streaming request"
+    );
 
     let prompt = payload.prompt.trim().to_string();
-    let top_k = payload.top_k.unwrap_or(8);
+    let history = payload.history;
+    let top_k = payload.top_k.unwrap_or(12).max(10);
     let _access_tier = payload.access_tier.unwrap_or(0);
 
     let family = match payload.model_family.as_deref() {
@@ -68,7 +77,7 @@ pub async fn chat_sse_handler(
         }
 
         match coordinator
-            .query_agentic(&prompt, family, top_k, Some(tx.clone()))
+            .query_agentic_with_history(&prompt, history, family, top_k, Some(tx.clone()))
             .await
         {
             Ok(result) => {
@@ -84,7 +93,7 @@ pub async fn chat_sse_handler(
                 }
             }
             Err(e) => {
-                error!("Error in query_agentic: {}", e);
+                error!("Error in query_agentic_with_history: {}", e);
                 let _ = tx
                     .send(AgenticTelemetryEvent::ExecutionError {
                         failed_state: quorum_coordinator::types::AgenticStateName::SynthesizeWithCitations,
@@ -119,7 +128,7 @@ pub async fn query_handler(
             .into_response();
     }
 
-    let top_k = payload.top_k.unwrap_or(8);
+    let top_k = payload.top_k.unwrap_or(12).max(10);
     let family = match payload.model_family.as_deref() {
         Some("Glm4Agentic") => SynthesisModelFamily::Glm4Agentic,
         Some("Qwen25Code") => SynthesisModelFamily::Qwen25Code,
@@ -128,7 +137,11 @@ pub async fn query_handler(
         _ => state.default_model_family,
     };
 
-    match state.coordinator.query_agentic(prompt, family, top_k, None).await {
+    match state
+        .coordinator
+        .query_agentic_with_history(prompt, payload.history, family, top_k, None)
+        .await
+    {
         Ok(result) => Json(result).into_response(),
         Err(e) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,

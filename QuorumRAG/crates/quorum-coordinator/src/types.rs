@@ -51,6 +51,13 @@ pub enum SynthesisModelFamily {
     AutoFusion,
 }
 
+/// A single turn in a multi-turn conversation (`role`: `"user"` or `"assistant"`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatTurnMessage {
+    pub role: String,
+    pub content: String,
+}
+
 /// Full state context propagated through the agentic graph nodes.
 #[derive(Debug)]
 pub struct AgenticGraphState {
@@ -58,6 +65,7 @@ pub struct AgenticGraphState {
     pub original_prompt: String,
     pub current_query: String,
     pub query_history: Vec<String>,
+    pub conversation_history: Vec<ChatTurnMessage>,
     pub hop_count: usize,
     pub max_hops: usize, // default: 3
     pub intent: Option<QueryIntentType>,
@@ -82,6 +90,7 @@ impl AgenticGraphState {
             original_prompt: prompt.to_string(),
             current_query: prompt.to_string(),
             query_history: vec![prompt.to_string()],
+            conversation_history: Vec::new(),
             hop_count: 0,
             max_hops,
             intent: None,
@@ -97,6 +106,79 @@ impl AgenticGraphState {
             synthesized_response: None,
             citations: Vec::new(),
             query_metadata_filters: None,
+        }
+    }
+
+    /// Attaches prior multi-turn conversation messages and expands `current_query` for follow-up coreference resolution.
+    pub fn with_conversation_history(mut self, history: Vec<ChatTurnMessage>) -> Self {
+        if !history.is_empty() {
+            let expanded = Self::expand_followup_query(&self.original_prompt, &history);
+            if expanded != self.original_prompt {
+                self.current_query = expanded.clone();
+                self.query_history.push(expanded);
+            }
+        }
+        self.conversation_history = history;
+        self
+    }
+
+    /// Resolves pronouns and short follow-up questions by appending salient subject terms from prior user turns.
+    pub fn expand_followup_query(prompt: &str, history: &[ChatTurnMessage]) -> String {
+        if history.is_empty() {
+            return prompt.to_string();
+        }
+        const PRONOUNS_AND_FOLLOWUPS: &[&str] = &[
+            "he", "him", "his", "she", "her", "hers", "they", "them", "their", "theirs",
+            "it", "its", "there", "that", "this", "these", "those", "more", "else",
+            "also", "elaborate", "expand", "further", "detail", "details", "continue",
+        ];
+        const STOPWORDS: &[&str] = &[
+            "what", "does", "do", "did", "where", "when", "who", "how", "why",
+            "is", "are", "was", "were", "the", "and", "for", "with", "from",
+            "into", "about", "using", "have", "has", "had", "will", "would",
+            "should", "could", "can", "you", "tell", "show", "please", "give",
+            "me", "on", "in", "of", "to", "a", "an",
+        ];
+
+        let words: Vec<String> = prompt
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(|w| w.to_ascii_lowercase())
+            .collect();
+
+        let has_followup_marker = words
+            .iter()
+            .any(|w| PRONOUNS_AND_FOLLOWUPS.contains(&w.as_str()));
+        let content_word_count = words
+            .iter()
+            .filter(|w| w.len() >= 3 && !STOPWORDS.contains(&w.as_str()) && !PRONOUNS_AND_FOLLOWUPS.contains(&w.as_str()))
+            .count();
+
+        if !has_followup_marker && content_word_count >= 4 {
+            return prompt.to_string();
+        }
+
+        // Collect salient subject keywords from the last 2 user turns in history
+        let mut prior_terms: Vec<String> = Vec::new();
+        for msg in history.iter().rev().filter(|m| m.role.eq_ignore_ascii_case("user")).take(2) {
+            for token in msg.content.split(|c: char| !c.is_alphanumeric()) {
+                let low = token.trim().to_ascii_lowercase();
+                if low.len() >= 3
+                    && !STOPWORDS.contains(&low.as_str())
+                    && !PRONOUNS_AND_FOLLOWUPS.contains(&low.as_str())
+                    && !words.contains(&low)
+                    && !prior_terms.contains(&low)
+                {
+                    prior_terms.push(low);
+                }
+            }
+        }
+
+        if prior_terms.is_empty() {
+            prompt.to_string()
+        } else {
+            let context_suffix = prior_terms.into_iter().take(6).collect::<Vec<_>>().join(" ");
+            format!("{} ({})", prompt.trim(), context_suffix)
         }
     }
 }

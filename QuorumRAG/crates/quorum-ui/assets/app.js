@@ -15,6 +15,7 @@
   let currentSearchMode = 'Hybrid';
   let isGenerating = false;
   let reindexPollInterval = null;
+  let conversationHistoryTurns = [];
 
   // DOM Elements
   const themeSelector = document.getElementById('theme-selector');
@@ -110,6 +111,7 @@
 
   // 5. NEW CHAT
   btnNewChat.addEventListener('click', () => {
+    conversationHistoryTurns = [];
     chatStream.innerHTML = '';
     welcomeBanner.classList.remove('hidden');
     telemetryBar.classList.add('hidden');
@@ -196,8 +198,9 @@
               prompt: text,
               search_mode: currentSearchMode,
               model_family: currentModel,
-              top_k: 8,
-              access_tier: 0
+              top_k: 12,
+              access_tier: 0,
+              history: conversationHistoryTurns.slice(-14)
             })
           });
           if (resp.ok) break;
@@ -249,6 +252,10 @@
       if (bodyEl._rawMarkdown) {
         bodyEl.style.whiteSpace = 'normal';
         bodyEl.innerHTML = renderMarkdownHtml(bodyEl._rawMarkdown);
+        conversationHistoryTurns.push(
+          { role: 'user', content: text },
+          { role: 'assistant', content: bodyEl._rawMarkdown }
+        );
       } else {
         const cursor = bodyEl.querySelector('.typing-cursor');
         if (cursor) cursor.remove();

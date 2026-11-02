@@ -5,7 +5,7 @@ use crate::error::CoordinatorError;
 use crate::offline_engine::DeterministicOfflineSynthesisEngine;
 use crate::scatter_gather::ScatterGatherEngine;
 use crate::telemetry::AgenticTelemetryEvent;
-use crate::types::SynthesisModelFamily;
+use crate::types::{AgenticGraphState, ChatTurnMessage, SynthesisModelFamily};
 use quorum_contract::EmbeddingGenerator;
 use quorum_storage::{SearchMode, StorageEngine};
 use quorum_types::{CacheTelemetry, Citation, QueryResult};
@@ -154,14 +154,28 @@ impl QueryCoordinator {
         top_k: usize,
         telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
     ) -> Result<QueryResult, CoordinatorError> {
+        self.query_agentic_with_history(prompt, Vec::new(), family, top_k, telemetry_tx)
+            .await
+    }
+
+    /// Executes iterative multi-hop retrieval and synthesis with multi-turn conversation history.
+    pub async fn query_agentic_with_history(
+        &self,
+        prompt: &str,
+        history: Vec<ChatTurnMessage>,
+        family: SynthesisModelFamily,
+        top_k: usize,
+        telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
+    ) -> Result<QueryResult, CoordinatorError> {
         let start = std::time::Instant::now();
+        let embed_query = AgenticGraphState::expand_followup_query(prompt, &history);
         let embedder = quorum_contract::DeterministicOfflineEngine::new();
         let contract_hash = embedder.contract_hash();
-        let vector = if let Some(cached_vec) = self.cache_manager.embedding_cache.get(&contract_hash, prompt) {
+        let vector = if let Some(cached_vec) = self.cache_manager.embedding_cache.get(&contract_hash, &embed_query) {
             cached_vec
         } else {
-            let fresh = embedder.embed_text(prompt).unwrap_or_else(|_| vec![0.0; 768]);
-            self.cache_manager.embedding_cache.insert(&contract_hash, prompt, fresh.clone());
+            let fresh = embedder.embed_text(&embed_query).unwrap_or_else(|_| vec![0.0; 768]);
+            self.cache_manager.embedding_cache.insert(&contract_hash, &embed_query, fresh.clone());
             fresh
         };
 
@@ -170,8 +184,9 @@ impl QueryCoordinator {
 
         let final_state = self
             .agentic_runner
-            .run(
+            .run_with_history(
                 prompt,
+                history,
                 family,
                 &self.engine,
                 &vector,

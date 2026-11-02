@@ -41,7 +41,8 @@ pub use offline_engine::DeterministicOfflineSynthesisEngine;
 pub use scatter_gather::{FederatedQueryCoordinator, ScatterGatherEngine, StorageSearcher};
 pub use telemetry::AgenticTelemetryEvent;
 pub use types::{
-    AgenticGraphState, AgenticStateName, QueryIntentType, RelevanceGrade, SynthesisModelFamily,
+    AgenticGraphState, AgenticStateName, ChatTurnMessage, QueryIntentType, RelevanceGrade,
+    SynthesisModelFamily,
 };
 pub use volatile::{scrub_volatile, wrap_candidates, VolatileRemoteChunk};
 pub use langextract::{

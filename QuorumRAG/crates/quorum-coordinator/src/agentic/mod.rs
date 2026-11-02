@@ -59,8 +59,36 @@ impl AgenticStateGraphRunner {
         top_k: usize,
         telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
     ) -> Result<AgenticGraphState, String> {
+        self.run_with_history(
+            prompt,
+            Vec::new(),
+            requested_family,
+            engine,
+            vector,
+            access_tier,
+            top_k,
+            telemetry_tx,
+        )
+        .await
+    }
+
+    /// Executes the LangGraph-style state graph with multi-turn conversation history support.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_with_history(
+        &self,
+        prompt: &str,
+        history: Vec<ChatTurnMessage>,
+        requested_family: SynthesisModelFamily,
+        engine: &ScatterGatherEngine,
+        vector: &[f32],
+        access_tier: u8,
+        top_k: usize,
+        telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
+    ) -> Result<AgenticGraphState, String> {
         let mut state_name = AgenticStateName::ClassifyIntent;
-        let mut graph_state = AgenticGraphState::new(prompt, requested_family, self.max_hops);
+        let mut graph_state = AgenticGraphState::new(prompt, requested_family, self.max_hops)
+            .with_conversation_history(history);
+        let cache_key_query = graph_state.current_query.clone();
 
         let hw = HardwareTelemetry::probe();
         if let Some(ref tx) = telemetry_tx {
@@ -88,7 +116,7 @@ impl AgenticStateGraphRunner {
 
                     let epoch = engine.local_storage.index_epoch();
                     let maybe_cached = self.cache_manager.query_cache.get(
-                        &graph_state.original_prompt,
+                        &cache_key_query,
                         graph_state.search_mode,
                         graph_state.model_family,
                         access_tier,
@@ -305,7 +333,7 @@ impl AgenticStateGraphRunner {
                     // Insert into QueryCache
                     let epoch = engine.local_storage.index_epoch();
                     self.cache_manager.query_cache.insert(
-                        &graph_state.original_prompt,
+                        &cache_key_query,
                         graph_state.search_mode,
                         graph_state.model_family,
                         access_tier,
