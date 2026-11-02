@@ -43,6 +43,15 @@ pub fn extend_simulated_pcr_16(hash_bytes: &[u8]) {
     }
 }
 
+/// Resets the simulated volatile PCR 16 state back to its initial deterministic baseline.
+pub fn reset_simulated_pcr_16() {
+    if let Ok(mut guard) = SIMULATED_PCR_16.write() {
+        let mut hasher = Sha256::new();
+        hasher.update(b"SIMULATED_PCR_16_QUORUMRAG_APPLICATION_AUDIT_LOG");
+        *guard = hasher.finalize().into();
+    }
+}
+
 /// Deterministic simulated PCR generator for non-hardware environments (CI, VMs, Linux containers).
 pub fn simulated_pcr(pcr_index: u32) -> String {
     let mut hasher = Sha256::new();

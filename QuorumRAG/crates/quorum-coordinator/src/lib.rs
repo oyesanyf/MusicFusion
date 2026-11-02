@@ -21,8 +21,9 @@ pub mod volatile;
 pub use acl::{AccessTierPolicy, AttestationTier, PeerAclManager, PeerAttestationRecord};
 pub use tpm::{
     compute_pcr_composite_digest, default_pcr_selection, extend_simulated_pcr_16,
-    inspect_tpm_hardware, simulated_pcr, TpmEkCertificate, TpmHardwareInspection, TpmOemVendor,
-    PCR_APPLICATION_AUDIT, PCR_PLATFORM_FIRMWARE, PCR_SECURE_BOOT,
+    inspect_tpm_hardware, reset_simulated_pcr_16, simulated_pcr, TpmEkCertificate,
+    TpmHardwareInspection, TpmOemVendor, PCR_APPLICATION_AUDIT, PCR_PLATFORM_FIRMWARE,
+    PCR_SECURE_BOOT,
 };
 pub use agentic::AgenticStateGraphRunner;
 pub use cache::{

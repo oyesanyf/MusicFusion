@@ -853,6 +853,24 @@
     if (!actionsEl) return;
     actionsEl.innerHTML = '';
 
+    // 0. Continue Button (▶️ Continue)
+    const btnContinue = document.createElement('button');
+    btnContinue.type = 'button';
+    btnContinue.className = 'response-action-btn continue-btn btn-continue-response';
+    btnContinue.title = 'Continue expanding this answer with deeper RAG details';
+    btnContinue.innerHTML = '<span>▶️</span><span>Continue</span>';
+    btnContinue.addEventListener('click', async () => {
+      if (isGenerating) return;
+      if (promptInput) {
+        promptInput.value = 'continue';
+      }
+      if (btnSend) {
+        btnSend.click();
+      } else {
+        submitPrompt();
+      }
+    });
+
     // 1. Copy Button
     const btnCopy = document.createElement('button');
     btnCopy.type = 'button';
@@ -922,7 +940,60 @@
       window.speechSynthesis.speak(utterance);
     });
 
-    // 4. Helpful (Thumbs Up) & Not Helpful (Thumbs Down) Buttons
+    // 4. Save File Button (💾 Save File)
+    const btnSave = document.createElement('button');
+    btnSave.type = 'button';
+    btnSave.className = 'response-action-btn save-file-btn btn-save-response';
+    btnSave.title = 'Save response and citations as Markdown file';
+    btnSave.innerHTML = '<span>💾</span><span>Save File</span>';
+    btnSave.addEventListener('click', () => {
+      const markdown = bodyEl._rawMarkdown || bodyEl.innerText || '';
+      let citationsText = '';
+      if (citationsEl && citationsEl.innerText) {
+        citationsText = '\n\n---\n### Sources\n' + citationsEl.innerText.trim();
+      }
+      const fullContent = `# QuorumRAG Response\n\n**Prompt**: ${turnPrompt || 'Query'}\n\n${markdown}${citationsText}\n`;
+      const blob = new Blob([fullContent], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safePrompt = (turnPrompt || 'response')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '_')
+        .slice(0, 30);
+      a.download = `quorumrag-response-${safePrompt}-${Date.now()}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      btnSave.classList.add('active');
+      setTimeout(() => btnSave.classList.remove('active'), 1500);
+    });
+
+    // 5. Clear Button (🗑️ Clear)
+    const btnClear = document.createElement('button');
+    btnClear.type = 'button';
+    btnClear.className = 'response-action-btn clear-btn btn-clear-response';
+    btnClear.title = 'Clear this turn from the conversation';
+    btnClear.innerHTML = '<span>🗑️</span><span>Clear</span>';
+    btnClear.addEventListener('click', () => {
+      const assistantMsg = actionsEl.closest('.message') || actionsEl.closest('.chat-message');
+      if (assistantMsg) {
+        const prevUserMsg = assistantMsg.previousElementSibling;
+        if (prevUserMsg && (prevUserMsg.classList.contains('message-user') || prevUserMsg.classList.contains('user-message'))) {
+          prevUserMsg.remove();
+        }
+        assistantMsg.remove();
+      }
+      if (chatStream && chatStream.children.length === 0) {
+        if (welcomeBanner) {
+          welcomeBanner.classList.remove('hidden');
+          welcomeBanner.style.display = '';
+        }
+      }
+    });
+
+    // 6. Helpful (Thumbs Up) & Not Helpful (Thumbs Down) Buttons
     const btnUp = document.createElement('button');
     btnUp.type = 'button';
     btnUp.className = 'response-action-btn btn-feedback-up';
@@ -947,12 +1018,66 @@
       btnUp.classList.remove('active');
     });
 
+    actionsEl.appendChild(btnContinue);
     actionsEl.appendChild(btnCopy);
     actionsEl.appendChild(btnRegenerate);
     actionsEl.appendChild(btnSpeak);
+    actionsEl.appendChild(btnSave);
+    actionsEl.appendChild(btnClear);
     actionsEl.appendChild(btnUp);
     actionsEl.appendChild(btnDown);
   }
+
+  // Global window handlers for programmatically triggering turn actions
+  window.quorumContinueTurn = async function(turnIndex, promptText) {
+    if (isGenerating) return;
+    const query = promptText || 'continue';
+    if (promptInput) {
+      promptInput.value = query;
+      submitPrompt();
+    }
+  };
+
+  window.quorumSaveFile = function(turnIndex) {
+    const messages = chatStream ? chatStream.querySelectorAll('.message-assistant') : [];
+    const targetMsg = (typeof turnIndex === 'number' && messages[turnIndex]) ? messages[turnIndex] : messages[messages.length - 1];
+    if (!targetMsg) return;
+    const bodyEl = targetMsg.querySelector('.message-body');
+    const citationsEl = targetMsg.querySelector('.citation-container');
+    const markdown = bodyEl ? (bodyEl._rawMarkdown || bodyEl.innerText || '') : '';
+    let citationsText = '';
+    if (citationsEl && citationsEl.innerText) {
+      citationsText = '\n\n---\n### Sources\n' + citationsEl.innerText.trim();
+    }
+    const fullContent = `# QuorumRAG Response\n\n${markdown}${citationsText}\n`;
+    const blob = new Blob([fullContent], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `quorumrag-response-${Date.now()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  window.quorumClearTurn = function(turnIndex) {
+    const messages = chatStream ? chatStream.querySelectorAll('.message-assistant') : [];
+    const targetMsg = (typeof turnIndex === 'number' && messages[turnIndex]) ? messages[turnIndex] : messages[messages.length - 1];
+    if (targetMsg) {
+      const prevUserMsg = targetMsg.previousElementSibling;
+      if (prevUserMsg && (prevUserMsg.classList.contains('message-user') || prevUserMsg.classList.contains('user-message'))) {
+        prevUserMsg.remove();
+      }
+      targetMsg.remove();
+    }
+    if (chatStream && chatStream.children.length === 0) {
+      if (welcomeBanner) {
+        welcomeBanner.classList.remove('hidden');
+        welcomeBanner.style.display = '';
+      }
+    }
+  };
 
   function scrollToBottom() {
     const autoScroll = !cachedSettingsData || !cachedSettingsData.ui || cachedSettingsData.ui.auto_scroll !== false;
