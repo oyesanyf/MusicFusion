@@ -156,6 +156,21 @@ impl AgenticStateGraphRunner {
                         graph_state.synthesized_response = cached.synthesized_response.clone();
                         graph_state.citations = cached.citations.clone();
                         graph_state.query_metadata_filters = cached.query_metadata_filters.clone();
+                        graph_state.langextract_result = cached.langextract_result.clone();
+                        if let Some(ref res) = graph_state.langextract_result {
+                            graph_state.extracted_questions = res
+                                .verified_extractions
+                                .iter()
+                                .filter(|e| e.extraction_class == "question")
+                                .map(|e| e.extraction_text.clone())
+                                .collect();
+                            graph_state.extracted_entities = res
+                                .verified_extractions
+                                .iter()
+                                .filter(|e| e.extraction_class != "question")
+                                .cloned()
+                                .collect();
+                        }
 
                         if let Some(ref tx) = telemetry_tx {
                             // 1. Stream response text FIRST so citations appear strictly AFTER the response
@@ -385,33 +400,29 @@ impl AgenticStateGraphRunner {
                         ),
                         graph_state.synthesized_response.clone(),
                         graph_state.citations.clone(),
-                        None,
+                        graph_state.langextract_result.clone(),
                         graph_state.query_metadata_filters.clone(),
                     );
 
                     if let Some(ref tx) = telemetry_tx {
                         // Emit SOURCES citations strictly AFTER all TokenDelta events have completed
                         for cit in &graph_state.citations {
-                            let _ = tx
-                                .send(AgenticTelemetryEvent::CitationEmitted {
-                                    citation: cit.clone(),
-                                })
-                                .await;
+                            let _ = tx.try_send(AgenticTelemetryEvent::CitationEmitted {
+                                citation: cit.clone(),
+                            });
                         }
 
-                        let _ = tx
-                            .send(AgenticTelemetryEvent::ExecutionFinished {
-                                total_hops: graph_state.hop_count,
-                                total_duration_ms: graph_state.start_time.elapsed().as_millis() as u64,
-                                total_tokens: graph_state
-                                    .synthesized_response
-                                    .as_ref()
-                                    .map(|s| s.len() / 4)
-                                    .unwrap_or(0),
-                                final_state: AgenticStateName::Complete,
-                                model_name: graph_state.selected_model_tag.clone(),
-                            })
-                            .await;
+                        let _ = tx.try_send(AgenticTelemetryEvent::ExecutionFinished {
+                            total_hops: graph_state.hop_count,
+                            total_duration_ms: graph_state.start_time.elapsed().as_millis() as u64,
+                            total_tokens: graph_state
+                                .synthesized_response
+                                .as_ref()
+                                .map(|s| s.len() / 4)
+                                .unwrap_or(0),
+                            final_state: AgenticStateName::Complete,
+                            model_name: graph_state.selected_model_tag.clone(),
+                        });
                     }
 
                     return Ok(graph_state);

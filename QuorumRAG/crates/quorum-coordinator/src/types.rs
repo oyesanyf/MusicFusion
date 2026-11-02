@@ -82,6 +82,9 @@ pub struct AgenticGraphState {
     pub citations: Vec<Citation>,
     pub query_metadata_filters: Option<std::collections::BTreeMap<String, String>>,
     pub cached_vector_hits: Vec<ScoredChunk>,
+    pub langextract_result: Option<crate::langextract::ConsensusExtractionResult>,
+    pub extracted_questions: Vec<String>,
+    pub extracted_entities: Vec<crate::langextract::Extraction>,
 }
 
 impl AgenticGraphState {
@@ -108,6 +111,9 @@ impl AgenticGraphState {
             citations: Vec::new(),
             query_metadata_filters: None,
             cached_vector_hits: Vec::new(),
+            langextract_result: None,
+            extracted_questions: Vec::new(),
+            extracted_entities: Vec::new(),
         }
     }
 
@@ -152,28 +158,44 @@ impl AgenticGraphState {
         let has_followup_marker = words
             .iter()
             .any(|w| PRONOUNS_AND_FOLLOWUPS.contains(&w.as_str()));
-        let content_word_count = words
+        let specific_entity_count = words
             .iter()
-            .filter(|w| w.len() >= 3 && !STOPWORDS.contains(&w.as_str()) && !PRONOUNS_AND_FOLLOWUPS.contains(&w.as_str()))
+            .filter(|w| {
+                w.len() >= 3
+                    && !STOPWORDS.contains(&w.as_str())
+                    && !PRONOUNS_AND_FOLLOWUPS.contains(&w.as_str())
+                    && !crate::agentic::retrieve::GENERIC_ATTRIBUTE_TERMS.contains(&w.as_str())
+            })
             .count();
 
-        if !has_followup_marker && content_word_count >= 4 {
+        // If the query has no pronouns/follow-up markers and already names a specific entity (e.g. "WHAT REDACTX"),
+        // treat it as a standalone topic query and do not pollute it with prior turns.
+        if !has_followup_marker && specific_entity_count >= 1 {
             return prompt.to_string();
         }
 
-        // Collect salient subject keywords from the last 2 user turns in history
+        // Collect salient subject keywords from the most recent user turn in history that has specific entities
         let mut prior_terms: Vec<String> = Vec::new();
-        for msg in history.iter().rev().filter(|m| m.role.eq_ignore_ascii_case("user")).take(2) {
+        for msg in history
+            .iter()
+            .rev()
+            .filter(|m| m.role.eq_ignore_ascii_case("user"))
+            .take(3)
+        {
             for token in msg.content.split(|c: char| !c.is_alphanumeric()) {
                 let low = token.trim().to_ascii_lowercase();
                 if low.len() >= 3
                     && !STOPWORDS.contains(&low.as_str())
                     && !PRONOUNS_AND_FOLLOWUPS.contains(&low.as_str())
+                    && !crate::agentic::retrieve::GENERIC_ATTRIBUTE_TERMS.contains(&low.as_str())
                     && !words.contains(&low)
                     && !prior_terms.contains(&low)
                 {
                     prior_terms.push(low);
                 }
+            }
+            if !prior_terms.is_empty() {
+                break;
             }
         }
 
