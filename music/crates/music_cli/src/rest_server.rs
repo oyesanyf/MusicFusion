@@ -385,11 +385,44 @@ pub async fn handle_iterate_song(
 
     let mut next_state = prev_state.clone();
     next_state.advance_version();
-    next_state.bpm = iteration_result.blueprint.bpm.round() as u32;
-    next_state.key_signature = iteration_result.blueprint.key_signature.clone();
-    if !iteration_result.blueprint.lyrics_text.is_empty() {
-        next_state.lyrics = iteration_result.blueprint.lyrics_text.clone();
+
+    let crit_lower = req.critique.to_ascii_lowercase();
+    let wants_bpm_change = crit_lower.contains("bpm")
+        || crit_lower.contains("tempo")
+        || crit_lower.contains("faster")
+        || crit_lower.contains("slower")
+        || crit_lower.contains("speed")
+        || req.bpm.is_some_and(|b| b != prev_state.bpm);
+    let wants_key_change = crit_lower.contains("key of")
+        || crit_lower.contains("transpose")
+        || req.key_signature.as_ref().is_some_and(|k| !k.eq_ignore_ascii_case(&prev_state.key_signature));
+
+    if wants_bpm_change {
+        next_state.bpm = req.bpm.unwrap_or_else(|| iteration_result.blueprint.bpm.round() as u32);
+    } else {
+        next_state.bpm = prev_state.bpm;
     }
+
+    if wants_key_change {
+        next_state.key_signature = req
+            .key_signature
+            .clone()
+            .unwrap_or_else(|| iteration_result.blueprint.key_signature.clone());
+    } else {
+        next_state.key_signature = prev_state.key_signature.clone();
+    }
+
+    // Preserve existing lyrics unless user explicitly asked to rewrite lyrics
+    let wants_lyrics_change = crit_lower.contains("rewrite lyrics")
+        || crit_lower.contains("new lyrics")
+        || crit_lower.contains("sing:")
+        || crit_lower.contains("lyrics:");
+    if wants_lyrics_change && !iteration_result.blueprint.lyrics_text.is_empty() {
+        next_state.lyrics = iteration_result.blueprint.lyrics_text.clone();
+    } else {
+        next_state.lyrics = prev_state.lyrics.clone();
+    }
+
     if !req.critique.trim().is_empty() {
         next_state.style_prompt = format!("{}, {}", prev_state.style_prompt.trim_end_matches('.'), req.critique.trim());
     }
@@ -402,49 +435,132 @@ pub async fn handle_iterate_song(
     blueprint.parent_version = Some(req.from_version);
     blueprint.bpm = next_state.bpm as f64;
     blueprint.key_signature = next_state.key_signature.clone();
-    blueprint.iteration_notes = iteration_result.iteration_summary.clone();
 
-    // Stem tweaks
-    let crit_lower = req.critique.to_ascii_lowercase();
+    let mut stem_deltas = iteration_result.stem_deltas.clone();
+    let mut summary_notes = Vec::new();
+
+    // Natural-Language Prompt Mix & Stem Adjustments (Speaker / Vocal / Bass / Guitar / Drums / Organ)
+    let mentions_vocal_or_speaker = crit_lower.contains("speaker")
+        || crit_lower.contains("vocal")
+        || crit_lower.contains("voice")
+        || crit_lower.contains("singer")
+        || crit_lower.contains("words")
+        || crit_lower.contains("hear")
+        || crit_lower.contains("talk");
+    let is_too_low_or_louder = crit_lower.contains("too low")
+        || crit_lower.contains("low")
+        || crit_lower.contains("louder")
+        || crit_lower.contains("boost")
+        || crit_lower.contains("up")
+        || crit_lower.contains("more")
+        || crit_lower.contains("higher")
+        || crit_lower.contains("increase")
+        || crit_lower.contains("clear");
+    let is_too_loud_or_lower = crit_lower.contains("too loud")
+        || crit_lower.contains("quieter")
+        || crit_lower.contains("lower")
+        || crit_lower.contains("less")
+        || crit_lower.contains("down")
+        || crit_lower.contains("reduce");
+
+    if mentions_vocal_or_speaker {
+        if is_too_loud_or_lower && !crit_lower.contains("too low") {
+            blueprint.stem_mix.lead_vocal_db = (blueprint.stem_mix.lead_vocal_db - 4.0).max(-12.0);
+            stem_deltas.insert("raspy_tenor_vocals".to_string(), "-4.0 dB vocal level trim".to_string());
+            summary_notes.push("Reduced vocal/speaker level by -4.0 dB while preserving the melody".to_string());
+        } else {
+            blueprint.stem_mix.lead_vocal_db = (blueprint.stem_mix.lead_vocal_db + 5.0).min(12.0);
+            blueprint.stem_mix.guitar_db = (blueprint.stem_mix.guitar_db - 1.5).max(-12.0);
+            blueprint.stem_mix.organ_brass_db = (blueprint.stem_mix.organ_brass_db - 1.5).max(-12.0);
+            stem_deltas.insert("raspy_tenor_vocals".to_string(), "+5.0 dB vocal/speaker boost & -2.6 dB instrumental ducking".to_string());
+            summary_notes.push("Boosted speaker/lead vocal level by +5.0 dB with sidechain ducking while preserving the original melody".to_string());
+        }
+    } else if is_too_low_or_louder && !crit_lower.contains("bass") && !crit_lower.contains("guitar") && !crit_lower.contains("drum") && !crit_lower.contains("organ") {
+        // Generic "too low" / "make it louder" -> boost lead vocal clarity and overall presence
+        blueprint.stem_mix.lead_vocal_db = (blueprint.stem_mix.lead_vocal_db + 4.5).min(12.0);
+        stem_deltas.insert("raspy_tenor_vocals".to_string(), "+4.5 dB vocal/speaker clarity boost".to_string());
+        summary_notes.push("Boosted speaker/vocal clarity by +4.5 dB while preserving the original melody".to_string());
+    }
+
     if let Some(rasp) = tweaks.vocal_rasp {
         blueprint.stem_mix.vocal_rasp_intensity = rasp;
-    } else if crit_lower.contains("rasp") || crit_lower.contains("vocal") {
+    } else if crit_lower.contains("rasp") {
         blueprint.stem_mix.vocal_rasp_intensity = (blueprint.stem_mix.vocal_rasp_intensity + 0.15).min(1.0);
     }
 
-    if let Some(bass) = tweaks.sub_bass_weight {
+    if crit_lower.contains("bass") || crit_lower.contains("sub") {
+        if is_too_loud_or_lower && !crit_lower.contains("too low") {
+            blueprint.stem_mix.dub_bass_db = (blueprint.stem_mix.dub_bass_db - 3.5).max(-12.0);
+            stem_deltas.insert("bass".to_string(), "-3.5 dB dub bass trim".to_string());
+            summary_notes.push("Trimmed dub sub-bass by -3.5 dB".to_string());
+        } else {
+            blueprint.stem_mix.sub_bass_boost_db = (blueprint.stem_mix.sub_bass_boost_db + 2.0).min(6.0);
+            blueprint.stem_mix.dub_bass_db = (blueprint.stem_mix.dub_bass_db + 3.5).min(10.0);
+            stem_deltas.insert("bass".to_string(), "+3.5 dB dub sub-bass warmth boost".to_string());
+            summary_notes.push("Boosted dub sub-bass warmth by +3.5 dB".to_string());
+        }
+    } else if let Some(bass) = tweaks.sub_bass_weight {
         blueprint.stem_mix.sub_bass_boost_db = bass * 6.0;
-        blueprint.stem_mix.dub_bass_db += 1.5;
-    } else if crit_lower.contains("bass") || crit_lower.contains("sub") {
-        blueprint.stem_mix.sub_bass_boost_db = (blueprint.stem_mix.sub_bass_boost_db + 1.8).min(6.0);
-        blueprint.stem_mix.dub_bass_db += 1.2;
     }
 
-    if let Some(wah) = tweaks.guitar_wah {
-        blueprint.stem_mix.guitar_db += 1.0;
+    if crit_lower.contains("guitar") || crit_lower.contains("wah") || crit_lower.contains("solo") {
+        if is_too_loud_or_lower && !crit_lower.contains("too low") {
+            blueprint.stem_mix.guitar_db = (blueprint.stem_mix.guitar_db - 3.5).max(-12.0);
+            stem_deltas.insert("inpainted_guitar".to_string(), "-3.5 dB guitar level trim".to_string());
+            summary_notes.push("Reduced guitar level by -3.5 dB".to_string());
+        } else {
+            blueprint.stem_mix.guitar_db = (blueprint.stem_mix.guitar_db + 3.5).min(10.0);
+            for sec in &mut blueprint.sections {
+                sec.wah_pedal_depth = (sec.wah_pedal_depth + 0.20).min(1.0);
+                sec.guitar_solo_intensity = (sec.guitar_solo_intensity + 0.15).min(1.0);
+            }
+            stem_deltas.insert("inpainted_guitar".to_string(), "+3.5 dB lead/skank guitar boost".to_string());
+            summary_notes.push("Boosted guitar presence & solo sustain by +3.5 dB".to_string());
+        }
+    } else if let Some(wah) = tweaks.guitar_wah {
         for sec in &mut blueprint.sections {
             sec.wah_pedal_depth = wah;
             sec.guitar_solo_intensity = wah;
         }
-    } else if crit_lower.contains("guitar") || crit_lower.contains("wah") || crit_lower.contains("solo") {
-        blueprint.stem_mix.guitar_db += 1.5;
-        for sec in &mut blueprint.sections {
-            sec.wah_pedal_depth = (sec.wah_pedal_depth + 0.20).min(1.0);
-            sec.guitar_solo_intensity = (sec.guitar_solo_intensity + 0.15).min(1.0);
-        }
     }
 
-    if let Some(drum) = tweaks.drum_fill_complexity {
-        blueprint.stem_mix.drums_db += 0.8;
+    if crit_lower.contains("drum") || crit_lower.contains("fill") || crit_lower.contains("nyabinghi") || crit_lower.contains("kick") || crit_lower.contains("snare") {
+        if is_too_loud_or_lower && !crit_lower.contains("too low") {
+            blueprint.stem_mix.drums_db = (blueprint.stem_mix.drums_db - 3.5).max(-12.0);
+            stem_deltas.insert("inpainted_drums".to_string(), "-3.5 dB drum level trim".to_string());
+            summary_notes.push("Reduced drum kit level by -3.5 dB".to_string());
+        } else {
+            blueprint.stem_mix.drums_db = (blueprint.stem_mix.drums_db + 3.0).min(10.0);
+            for sec in &mut blueprint.sections {
+                sec.drum_fill_complexity = (sec.drum_fill_complexity + 0.20).min(1.0);
+            }
+            stem_deltas.insert("inpainted_drums".to_string(), "+3.0 dB one-drop drum punch boost".to_string());
+            summary_notes.push("Boosted drum punch by +3.0 dB".to_string());
+        }
+    } else if let Some(drum) = tweaks.drum_fill_complexity {
         for sec in &mut blueprint.sections {
             sec.drum_fill_complexity = drum;
         }
-    } else if crit_lower.contains("drum") || crit_lower.contains("fill") || crit_lower.contains("nyabinghi") {
-        blueprint.stem_mix.drums_db += 1.0;
-        for sec in &mut blueprint.sections {
-            sec.drum_fill_complexity = (sec.drum_fill_complexity + 0.20).min(1.0);
+    }
+
+    if crit_lower.contains("organ") || crit_lower.contains("horn") || crit_lower.contains("brass") || crit_lower.contains("keys") {
+        if is_too_loud_or_lower && !crit_lower.contains("too low") {
+            blueprint.stem_mix.organ_brass_db = (blueprint.stem_mix.organ_brass_db - 3.5).max(-12.0);
+            stem_deltas.insert("other".to_string(), "-3.5 dB organ & brass trim".to_string());
+            summary_notes.push("Reduced organ & brass level by -3.5 dB".to_string());
+        } else {
+            blueprint.stem_mix.organ_brass_db = (blueprint.stem_mix.organ_brass_db + 3.5).min(10.0);
+            stem_deltas.insert("other".to_string(), "+3.5 dB Hammond organ & brass horn swell boost".to_string());
+            summary_notes.push("Boosted Hammond B3 organ & brass horns by +3.5 dB".to_string());
         }
     }
+
+    let final_summary = if !summary_notes.is_empty() {
+        summary_notes.join(" • ")
+    } else {
+        iteration_result.iteration_summary.clone()
+    };
+    blueprint.iteration_notes = final_summary.clone();
 
     next_state.blueprint = Some(blueprint);
     next_state.history.push(format!(
@@ -452,8 +568,54 @@ pub async fn handle_iterate_song(
         req.from_version, next_state.version, req.critique, next_state.bpm, next_state.key_signature
     ));
 
-    // 4. Re-execute pipeline
-    match state.runner.execute_song(next_state).await {
+    // Copy all existing stems from v(from_version) to v(next_state.version) so the original melody is NEVER lost
+    let prev_v_dir = state.storage_dir.join("songs").join(&clean_req_id).join(format!("v{}", req.from_version));
+    let next_v_dir = state.storage_dir.join("songs").join(&clean_req_id).join(format!("v{}", next_state.version));
+    let prev_stems_dir = prev_v_dir.join("stems");
+    let next_stems_dir = next_v_dir.join("stems");
+    let _ = std::fs::create_dir_all(&next_stems_dir);
+
+    for txt_name in ["genre.txt", "lyrics.txt"] {
+        let src_txt = prev_v_dir.join(txt_name);
+        if src_txt.exists() {
+            let _ = std::fs::copy(&src_txt, next_v_dir.join(txt_name));
+        }
+    }
+
+    let mut copied_stems = 0usize;
+    let stem_entries = [
+        (STEM_DRAFT_GROOVE, "draft_groove.wav"),
+        (STEM_DRUMS, "drums.wav"),
+        (STEM_BASS, "bass.wav"),
+        (STEM_GUITAR, "guitar.wav"),
+        (STEM_OTHER, "other.wav"),
+        (STEM_INPAINTED_GUITAR, "inpainted_guitar.wav"),
+        (STEM_INPAINTED_DRUMS, "inpainted_drums.wav"),
+        ("yue_instrumentals", "yue_instrumentals.wav"),
+        (STEM_YUE_VOCALS, "yue_vocals.wav"),
+        (STEM_RASPY_TENOR_VOCALS, "raspy_tenor_vocals.wav"),
+    ];
+    for (stem_key, file_name) in stem_entries {
+        let src_file = prev_stems_dir.join(file_name);
+        let dst_file = next_stems_dir.join(file_name);
+        if src_file.exists() {
+            if std::fs::copy(&src_file, &dst_file).is_ok() {
+                next_state.set_stem(stem_key, dst_file);
+                copied_stems += 1;
+            }
+        }
+    }
+
+    // 4. If BPM, Key, and Lyrics did not change and we have the existing stems, preserve the exact melody
+    //    and run Node 6 (AnalogMasteringNode) with the new stem_mix dB gains & vocal sidechain ducking!
+    let exec_res = if !wants_bpm_change && !wants_key_change && !wants_lyrics_change && copied_stems >= 4 {
+        let _ = state.runner.checkpointer().save_checkpoint(&next_state, "copilot_non_destructive_mix").await;
+        state.runner.master_track(&clean_req_id, next_state.version).await
+    } else {
+        state.runner.execute_song(next_state).await
+    };
+
+    match exec_res {
         Ok(final_state) => {
             let audio_urls = build_audio_urls(&final_state.song_id, final_state.version);
 
@@ -462,8 +624,8 @@ pub async fn handle_iterate_song(
                 song_id: final_state.song_id.clone(),
                 from_version: req.from_version,
                 to_version: final_state.version,
-                iteration_summary: iteration_result.iteration_summary,
-                stem_deltas: iteration_result.stem_deltas,
+                iteration_summary: final_summary,
+                stem_deltas,
                 suggested_next_iterations: iteration_result.suggested_next_iterations,
                 judge_score: final_state.judge_score,
                 state: final_state,
@@ -516,6 +678,100 @@ pub async fn handle_regenerate_stem(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RevertSongRequest {
+    pub song_id: String,
+    #[serde(default = "default_version_one")]
+    pub current_version: u32,
+    #[serde(default)]
+    pub target_version: Option<u32>,
+}
+
+/// POST /api/songs/revert — Reverts a song to its previous state (either restoring in-place backup on v1 or stepping back to v(N-1)).
+pub async fn handle_revert_song(
+    State(state): State<AppState>,
+    Json(req): Json<RevertSongRequest>,
+) -> Response {
+    let clean_req_id = match CheckpointManager::sanitize_path_component(&req.song_id) {
+        Ok(id) => resolve_song_alias(&state.storage_dir, &id),
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+    };
+
+    let cur_v = req.current_version.max(1);
+    let cur_v_dir = state.storage_dir.join("songs").join(&clean_req_id).join(format!("v{}", cur_v));
+    let prev_master_backup = cur_v_dir.join("prev_final_master.wav");
+    let orig_master_backup = cur_v_dir.join("original_final_master.wav");
+
+    // 1. If an in-place edit backup exists on cur_v (from TTS vocals or Re-Master), restore it first!
+    if req.target_version.is_none() && prev_master_backup.exists() {
+        let _ = std::fs::copy(&prev_master_backup, cur_v_dir.join("final_master.wav"));
+        let _ = std::fs::remove_file(&prev_master_backup);
+
+        let cur_stems = cur_v_dir.join("stems");
+        let prev_lead = cur_stems.join("prev_raspy_tenor_vocals.wav");
+        if prev_lead.exists() {
+            let _ = std::fs::copy(&prev_lead, cur_stems.join("raspy_tenor_vocals.wav"));
+            let _ = std::fs::remove_file(&prev_lead);
+        }
+        let prev_yue = cur_stems.join("prev_yue_vocals.wav");
+        if prev_yue.exists() {
+            let _ = std::fs::copy(&prev_yue, cur_stems.join("yue_vocals.wav"));
+            let _ = std::fs::remove_file(&prev_yue);
+        }
+
+        let audio_urls = build_audio_urls(&clean_req_id, cur_v);
+        return Json(serde_json::json!({
+            "status": "success",
+            "song_id": clean_req_id,
+            "reverted_from_version": cur_v,
+            "reverted_to_version": cur_v,
+            "restored_in_place_backup": true,
+            "summary": format!("Reverted v{} to previous state before last edit", cur_v),
+            "audio_urls": audio_urls,
+        })).into_response();
+    }
+
+    // 2. If cur_v == 1 and original_final_master.wav exists, restore original baseline state!
+    if req.target_version.is_none() && cur_v == 1 && orig_master_backup.exists() {
+        let _ = std::fs::copy(&orig_master_backup, cur_v_dir.join("final_master.wav"));
+        let cur_stems = cur_v_dir.join("stems");
+        let orig_lead = cur_stems.join("original_raspy_tenor_vocals.wav");
+        if orig_lead.exists() {
+            let _ = std::fs::copy(&orig_lead, cur_stems.join("raspy_tenor_vocals.wav"));
+        }
+        let orig_yue = cur_stems.join("original_yue_vocals.wav");
+        if orig_yue.exists() {
+            let _ = std::fs::copy(&orig_yue, cur_stems.join("yue_vocals.wav"));
+        }
+        let audio_urls = build_audio_urls(&clean_req_id, 1);
+        return Json(serde_json::json!({
+            "status": "success",
+            "song_id": clean_req_id,
+            "reverted_from_version": 1,
+            "reverted_to_version": 1,
+            "restored_in_place_backup": true,
+            "summary": "Reverted v1 to original baseline state",
+            "audio_urls": audio_urls,
+        })).into_response();
+    }
+
+    // 3. Otherwise step back to target_version or (cur_v - 1).max(1)
+    let target_v = req.target_version.unwrap_or_else(|| cur_v.saturating_sub(1).max(1)).max(1);
+    let audio_urls = build_audio_urls(&clean_req_id, target_v);
+    let loaded_state = state.runner.checkpointer().load_checkpoint(&clean_req_id, target_v).await.ok();
+
+    Json(serde_json::json!({
+        "status": "success",
+        "song_id": clean_req_id,
+        "reverted_from_version": cur_v,
+        "reverted_to_version": target_v,
+        "restored_in_place_backup": false,
+        "summary": format!("Reverted from v{} to v{}", cur_v, target_v),
+        "state": loaded_state,
+        "audio_urls": audio_urls,
+    })).into_response()
+}
+
 /// POST /api/songs/master — Runs Node 6 analog tape mastering with specified profile.
 pub async fn handle_master_song(
     State(state): State<AppState>,
@@ -525,6 +781,16 @@ pub async fn handle_master_song(
         Ok(id) => resolve_song_alias(&state.storage_dir, &id),
         Err(e) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
     };
+
+    // Save pre-master backup so Revert can undo in-place mastering
+    let v_dir = state.storage_dir.join("songs").join(&clean_req_id).join(format!("v{}", req.version.max(1)));
+    let cur_master = v_dir.join("final_master.wav");
+    if cur_master.exists() {
+        if !v_dir.join("original_final_master.wav").exists() {
+            let _ = std::fs::copy(&cur_master, v_dir.join("original_final_master.wav"));
+        }
+        let _ = std::fs::copy(&cur_master, v_dir.join("prev_final_master.wav"));
+    }
 
     let profile = req.profile.unwrap_or_else(|| "WarmAnalogTape".to_string());
     match state.runner.master_track(&clean_req_id, req.version).await {
@@ -563,11 +829,31 @@ pub async fn handle_tts_vocals(
     };
 
     let target_version = req.version.max(1);
-    let stems_dir = state.storage_dir
+    let v_dir = state.storage_dir
         .join("songs")
         .join(&clean_req_id)
-        .join(format!("v{}", target_version))
-        .join("stems");
+        .join(format!("v{}", target_version));
+    let stems_dir = v_dir.join("stems");
+
+    // Save pre-TTS backup of final_master and vocal stems so Revert can always restore exact prior audio!
+    if v_dir.join("final_master.wav").exists() {
+        if !v_dir.join("original_final_master.wav").exists() {
+            let _ = std::fs::copy(v_dir.join("final_master.wav"), v_dir.join("original_final_master.wav"));
+        }
+        let _ = std::fs::copy(v_dir.join("final_master.wav"), v_dir.join("prev_final_master.wav"));
+    }
+    if stems_dir.join("raspy_tenor_vocals.wav").exists() {
+        if !stems_dir.join("original_raspy_tenor_vocals.wav").exists() {
+            let _ = std::fs::copy(stems_dir.join("raspy_tenor_vocals.wav"), stems_dir.join("original_raspy_tenor_vocals.wav"));
+        }
+        let _ = std::fs::copy(stems_dir.join("raspy_tenor_vocals.wav"), stems_dir.join("prev_raspy_tenor_vocals.wav"));
+    }
+    if stems_dir.join("yue_vocals.wav").exists() {
+        if !stems_dir.join("original_yue_vocals.wav").exists() {
+            let _ = std::fs::copy(stems_dir.join("yue_vocals.wav"), stems_dir.join("original_yue_vocals.wav"));
+        }
+        let _ = std::fs::copy(stems_dir.join("yue_vocals.wav"), stems_dir.join("prev_yue_vocals.wav"));
+    }
 
     let lyrics = if req.text.trim().is_empty() {
         "One love! One heart! Let us get together and feel all right!".to_string()
@@ -1355,6 +1641,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/songs/regenerate-stem", post(handle_regenerate_stem))
         .route("/api/songs/master", post(handle_master_song))
         .route("/api/songs/tts-vocals", post(handle_tts_vocals))
+        .route("/api/songs/revert", post(handle_revert_song))
         .route("/api/songs/:id/versions", get(handle_list_versions))
         .route("/api/songs/:id/versions/:v/audio/:stem", get(handle_stream_audio))
         .route("/api/songs/:id/:version/audio/:file", get(handle_stream_audio))

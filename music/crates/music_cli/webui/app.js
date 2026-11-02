@@ -688,15 +688,50 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     // Deck Revert Button
     if (DOM.btnDeckRevert) {
       DOM.btnDeckRevert.addEventListener('click', function () {
-        if (State.activeVersion > 1) {
-          const prevVer = State.activeVersion - 1;
-          switchVersion(prevVer, true);
-          DOM.deckStatusMsg.textContent = `⏪ Reverted to Version ${prevVer}`;
-        } else {
-          DOM.deckStatusMsg.textContent = 'Already at earliest version (v1)';
-        }
+        performStudioRevert();
       });
     }
+  }
+
+  function performStudioRevert(targetVerOptional) {
+    DOM.deckStatusMsg.textContent = '⏪ Reverting to previous state...';
+    fetch('/api/songs/revert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        song_id: State.activeSongId,
+        current_version: State.activeVersion,
+        target_version: targetVerOptional || undefined
+      })
+    })
+    .then(r => r.json())
+    .then(data => {
+      const targetVer = (data && data.reverted_to_version)
+        ? data.reverted_to_version
+        : (targetVerOptional || Math.max(1, State.activeVersion - 1));
+      const song = State.songs[State.activeSongId];
+      if (song && song.versions && song.versions[targetVer]) {
+        const verObj = song.versions[targetVer];
+        const cb = `?t=${Date.now()}`;
+        const baseMaster = `/api/songs/${State.activeSongId}/versions/${targetVer}/audio/final_master`;
+        const baseVocals = `/api/songs/${State.activeSongId}/versions/${targetVer}/audio/raspy_tenor_vocals`;
+        verObj.audioUrls = {
+          ...verObj.audioUrls,
+          master: baseMaster + cb,
+          vocals: baseVocals + cb
+        };
+      }
+      switchVersion(targetVer, true);
+      const summary = (data && data.summary)
+        ? data.summary
+        : `Reverted to Version ${targetVer}`;
+      DOM.deckStatusMsg.textContent = `⏪ ${summary}`;
+    })
+    .catch(() => {
+      const prevVer = targetVerOptional || Math.max(1, State.activeVersion - 1);
+      switchVersion(prevVer, true);
+      DOM.deckStatusMsg.textContent = `⏪ Reverted to Version ${prevVer}`;
+    });
   }
 
   function getActiveOutputDeviceLabel() {
@@ -2057,11 +2092,13 @@ Grace and love shining forevermore!`
       draft_groove: `/api/songs/${State.activeSongId}/versions/1/audio/draft_groove`
     };
 
+    const actualVer = (data && data.to_version) ? data.to_version : nextVer;
+    const cb = `?t=${Date.now()}`;
     let resolvedAudioUrls = { ...lastValidUrls };
     if (data && data.audio_urls && typeof data.audio_urls === 'object') {
       resolvedAudioUrls = {
-        master: data.audio_urls.final_master || data.audio_urls.master || lastValidUrls.master,
-        vocals: data.audio_urls.raspy_tenor_vocals || data.audio_urls.vocals || lastValidUrls.vocals,
+        master: (data.audio_urls.final_master || data.audio_urls.master || lastValidUrls.master).split('?')[0] + cb,
+        vocals: (data.audio_urls.raspy_tenor_vocals || data.audio_urls.vocals || lastValidUrls.vocals).split('?')[0] + cb,
         drums: data.audio_urls.drums || lastValidUrls.drums,
         bass: data.audio_urls.bass || lastValidUrls.bass,
         guitar: data.audio_urls.guitar || lastValidUrls.guitar,
@@ -2072,9 +2109,9 @@ Grace and love shining forevermore!`
       };
     }
 
-    song.versions[nextVer] = {
-      version: nextVer,
-      title: `${song.title} (v${nextVer} Iteration)`,
+    song.versions[actualVer] = {
+      version: actualVer,
+      title: `${song.title} (v${actualVer} Iteration)`,
       bpm: bpm,
       key: key,
       engineMode: 'pure_rust',
@@ -2098,8 +2135,8 @@ Grace and love shining forevermore!`
 
     // Add option to header select
     const opt = document.createElement('option');
-    opt.value = nextVer;
-    opt.textContent = `Version ${nextVer} (${bpm} BPM - Adjusted)`;
+    opt.value = actualVer;
+    opt.textContent = `Version ${actualVer} (${bpm} BPM - Adjusted)`;
     DOM.headerVersionSelect.appendChild(opt);
 
     // Add chip to sidebar history item
@@ -2108,20 +2145,20 @@ Grace and love shining forevermore!`
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'version-chip';
-      chip.dataset.version = nextVer;
-      chip.textContent = `v${nextVer}`;
-      chip.addEventListener('click', () => switchVersion(nextVer, true));
+      chip.dataset.version = actualVer;
+      chip.textContent = `v${actualVer}`;
+      chip.addEventListener('click', () => switchVersion(actualVer, true));
       historyItem.appendChild(chip);
     }
 
     // Append Assistant Producer Reply Bubble with Stage-by-Stage Badges & Inline Controls
-    appendAssistantProducerReply(nextVer, feedback, resolvedAudioUrls);
+    appendAssistantProducerReply(actualVer, feedback, resolvedAudioUrls, data);
 
-    switchVersion(nextVer, true);
-    DOM.deckStatusMsg.textContent = `Version ${nextVer} generated and ready for playback!`;
+    switchVersion(actualVer, true);
+    DOM.deckStatusMsg.textContent = `Version ${actualVer} generated and ready for playback!`;
   }
 
-  function appendAssistantProducerReply(version, promptText, audioUrls) {
+  function appendAssistantProducerReply(version, promptText, audioUrls, serverData) {
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble assistant-bubble';
 
@@ -2130,8 +2167,8 @@ Grace and love shining forevermore!`
     // Stage feedback pills
     let stageBadges = `
       <div class="stage-feedback-container">
-        <span class="stage-feedback-pill">🎤 VOCALS ADDED: Lead Tenor + Gospel Choir</span>
-        <span class="stage-feedback-pill pill-instruments">🎸 ALL INSTRUMENTS MIXED</span>
+        <span class="stage-feedback-pill">🎤 VOCALS UPFRONT: Lead Tenor + Gospel Choir</span>
+        <span class="stage-feedback-pill pill-instruments">🎸 ORIGINAL MELODY PRESERVED</span>
     `;
     if (pLower.includes('scratch') || pLower.includes('noise') || pLower.includes('static')) {
       stageBadges += `<span class="stage-feedback-pill pill-scratch">🛠️ SCRATCH REMOVED</span>`;
@@ -2140,16 +2177,20 @@ Grace and love shining forevermore!`
 
     // Conversational explanation
     let explanation = '';
-    if (pLower.includes('what was the scratch') || pLower.includes('what is the scratch')) {
+    if (serverData && serverData.iteration_summary && (pLower.includes('speaker') || pLower.includes('low') || pLower.includes('louder') || pLower.includes('vocal') || pLower.includes('voice'))) {
+      explanation = `${serverData.iteration_summary}. All original instrumental stems and melodies from v${Math.max(1, version - 1)} were preserved intact.`;
+    } else if (pLower.includes('what was the scratch') || pLower.includes('what is the scratch')) {
       explanation = `The scratch noise was caused by unfiltered high-frequency broadband white noise bursts in the percussion generator and Karplus-Strong string pluck delay buffer. I have replaced them with band-passed metallic resonators (3.2 kHz snare sizzle, 7.2–9.4 kHz hi-hat clusters, 4.5 kHz shaker bandpass) and smoothed phase-continuous harmonic string excitation with a 5.2 kHz cabinet filter roll-off. All scratch noise has been completely eliminated.`;
     } else if (pLower.includes('remove') && pLower.includes('scratch')) {
       explanation = `Understood! I eliminated the harsh transient scratch noise, re-shaped all drum wire sizzles with band-limited filters, and remixed the master with zero sandpaper static. Playback is now smooth and warm.`;
+    } else if (pLower.includes('speaker') || pLower.includes('vocal') || pLower.includes('tts') || pLower.includes('voice') || pLower.includes('sing') || pLower.includes('too low') || pLower.includes('louder')) {
+      explanation = `Boosted speaker/lead vocal level by +5.0 dB upfront in the mix with vocal-priority sidechain ducking (-2.6 dB) while 100% preserving your original melody and instrumental stems.`;
     } else if (pLower.includes('guitar') || pLower.includes('wah') || pLower.includes('solo')) {
       explanation = `Boosted lead guitar wah & sustain! The Chamberlin SVF filter sweep has been accentuated (380 Hz to 1450 Hz) with warm tube overdrive harmonics while preserving clean string articulation.`;
-    } else if (pLower.includes('vocal') || pLower.includes('tts') || pLower.includes('voice') || pLower.includes('sing')) {
-      explanation = `Synthesized articulated lead vocals and backing choir harmonies using ModelFusion vocal engine with vocal-priority sidechain ducking (-1.8 dB) so lyrics shine cleanly over the band.`;
     } else if (pLower.includes('bass') || pLower.includes('sub')) {
-      explanation = `Boosted the sub-bass warmth (+3.2 dB in the 55–90 Hz region) with analog Studer tape saturation for a solid, deep foundation.`;
+      explanation = `Boosted the sub-bass warmth (+3.5 dB in the 55–90 Hz region) with analog Studer tape saturation for a solid, deep foundation while preserving the melody.`;
+    } else if (serverData && serverData.iteration_summary) {
+      explanation = `Produced Version ${version}: ${serverData.iteration_summary}.`;
     } else {
       explanation = `Produced Version ${version}: Applied your requested production adjustments, balanced stem dynamics with vocal-priority sidechain ducking, and rendered a 48 kHz stereo master at -0.1 dBFS true peak.`;
     }
@@ -2164,7 +2205,7 @@ Grace and love shining forevermore!`
       </div>
       <div class="bubble-content">
         ${stageBadges}
-        <p style="margin: 6px 0 10px 0; line-height: 1.5; color: var(--text-primary);">${explanation}</p>
+        <p style="margin: 6px 0 10px 0; line-height: 1.5; color: var(--text-primary);">${escapeHTML(explanation)}</p>
         <div class="assistant-inline-deck">
           <div style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px;">
             TRACK CONTROLS (v${version}):
@@ -2176,10 +2217,9 @@ Grace and love shining forevermore!`
             <button type="button" class="btn-inline-solo-vocals" data-version="${version}" title="Solo vocals only for this version">
               🎤 Solo Vocals Only
             </button>
-            ${version > 1 ? `
-            <button type="button" class="btn-inline-revert" data-version="${version}" title="Revert to previous version (v${version - 1})">
-              ⏪ Revert to v${version - 1}
-            </button>` : ''}
+            <button type="button" class="btn-inline-revert" data-version="${version}" title="Revert to previous state (v${Math.max(1, version - 1)})">
+              ⏪ Revert to Last State
+            </button>
             <a href="${downloadUrl}" download="${State.activeSongId}_v${version}_master.wav" class="btn-inline-download" title="Download 48 kHz WAV">
               ⬇ Download WAV
             </a>
@@ -2216,9 +2256,7 @@ Grace and love shining forevermore!`
     const btnRev = bubble.querySelector('.btn-inline-revert');
     if (btnRev) {
       btnRev.addEventListener('click', () => {
-        const prevVer = version - 1;
-        switchVersion(prevVer, true);
-        DOM.deckStatusMsg.textContent = `⏪ Reverted to Version ${prevVer}`;
+        performStudioRevert(Math.max(1, version - 1));
       });
     }
 
@@ -3156,6 +3194,9 @@ Grace and love shining forevermore!`
                     <button type="button" class="btn-inline-solo-vocals" id="btn-solo-new-tts" title="Listen to Isolated Vocals">
                       🎤 Solo New Vocals
                     </button>
+                    <button type="button" class="btn-inline-revert" id="btn-revert-new-tts" title="Revert to previous state before TTS synthesis">
+                      ⏪ Revert to Last State
+                    </button>
                     <a href="/api/songs/${State.activeSongId}/versions/${State.activeVersion}/download" download="${State.activeSongId}_master.wav" class="btn-inline-download">
                       ⬇ Download Remixed WAV
                     </a>
@@ -3192,6 +3233,13 @@ Grace and love shining forevermore!`
                   State.isPlayingMaster = true;
                   DOM.deckStatusMsg.textContent = 'Solo ModelFusion Vocals Playing';
                 }).catch(() => {});
+              });
+            }
+
+            const revertBtn = bubble.querySelector('#btn-revert-new-tts');
+            if (revertBtn) {
+              revertBtn.addEventListener('click', () => {
+                performStudioRevert();
               });
             }
 

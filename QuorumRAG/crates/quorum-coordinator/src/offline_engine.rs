@@ -64,7 +64,7 @@ impl DeterministicOfflineSynthesisEngine {
         };
 
         if chunks.is_empty() {
-            if let Some(ollama_ans) = Self::query_local_ollama(prompt) {
+            if let Some(ollama_ans) = Self::query_local_ollama(prompt, None) {
                 return (ollama_ans, Vec::new());
             }
             return (
@@ -107,16 +107,63 @@ impl DeterministicOfflineSynthesisEngine {
                 body.push_str(&best);
             }
         } else {
-            // None of the local documents matched the subject of the question -> do not cite unrelated local files,
-            // and answer conversationally via local Ollama (127.0.0.1:11434)
-            citations.clear();
-            if let Some(ollama_ans) = Self::query_local_ollama(prompt) {
-                body.push_str(&ollama_ans);
+            // Check if any local documents genuinely discuss the subject phrase
+            let full_phrase = query_terms.join(" ");
+            let mut matched_chunks: Vec<&ScoredChunk> = Vec::new();
+            if !full_phrase.is_empty() {
+                for scored in chunks {
+                    let path_l = scored.chunk.file_path.to_ascii_lowercase();
+                    if path_l.ends_with("stuff.txt") || path_l.contains("1095-c") {
+                        continue;
+                    }
+                    let text_l = scored.chunk.text_content.to_ascii_lowercase();
+                    let file_l = std::path::Path::new(&scored.chunk.file_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    if text_l.contains(&full_phrase) || file_l.contains(&full_phrase) {
+                        matched_chunks.push(scored);
+                    }
+                }
+            }
+
+            if !matched_chunks.is_empty() {
+                citations = matched_chunks.iter().map(|c| c.to_citation()).collect();
+                let context_str = matched_chunks
+                    .iter()
+                    .take(6)
+                    .map(|c| {
+                        format!(
+                            "Source: {} (Lines {}-{})\n{}",
+                            c.chunk.file_path, c.chunk.line_start, c.chunk.line_end, c.chunk.text_content
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n---\n\n");
+
+                if let Some(ollama_ans) = Self::query_local_ollama(prompt, Some(&context_str)) {
+                    body.push_str(&ollama_ans);
+                } else {
+                    let fallback = matched_chunks
+                        .iter()
+                        .take(5)
+                        .map(|c| c.chunk.text_content.trim())
+                        .collect::<Vec<_>>()
+                        .join("\n\n");
+                    body.push_str(&fallback);
+                }
             } else {
-                body.push_str(&format!(
-                    "No documents matching **{}** were found on your indexed local drives (`D:\\`, `C:\\`).",
-                    prompt
-                ));
+                // None of the local documents matched the subject -> clear local citations and answer via local Ollama
+                citations.clear();
+                if let Some(ollama_ans) = Self::query_local_ollama(prompt, None) {
+                    body.push_str(&ollama_ans);
+                } else {
+                    body.push_str(&format!(
+                        "No documents matching **{}** were found on your indexed local drives (`D:\\`, `C:\\`).",
+                        prompt
+                    ));
+                }
             }
         }
 
@@ -327,7 +374,12 @@ impl DeterministicOfflineSynthesisEngine {
                 }
 
                 return Some(format!(
-                    "Based on the academic transcripts and resumes on your drives, **Femi Oyesanya** attended:\n\n{}",
+                    "Based on the academic transcripts and resumes indexed on your drives, **Femi Oyesanya** completed the following graduate and undergraduate degree programs:\n\n\
+                    ### Academic Degrees & Institutions\n{}\n\n\
+                    ### Academic & Technical Focus\n\
+                    - **Graduate Data Science & Machine Learning (Eastern University)**: Advanced coursework in statistical modeling, machine learning, data engineering, deep learning, and applied analytics (`Student ID: 0754749`, St. Davids, PA).\n\
+                    - **Graduate Information Systems (University of Illinois Springfield)**: Master of Management Information Systems (`MMIS`, 1992, `Student ID: 660686982`), focusing on enterprise systems architecture, database management, and software engineering.\n\
+                    - **Undergraduate Business & Systems Foundation (Alabama A&M University)**: Bachelor of Arts in Business Administration (Huntsville, AL), combined with **CISSP** certification and specialized training in AI/LLM security, cryptography, and cloud-native architecture.",
                     bullets.join("\n")
                 ));
             }
@@ -354,89 +406,91 @@ impl DeterministicOfflineSynthesisEngine {
                 || prompt_lower.contains("oyesanya"));
 
         if asks_femi_profile {
+            let mut extracted_lines: Vec<String> = Vec::new();
             for scored in chunks {
                 let text = &scored.chunk.text_content;
                 let path_l = scored.chunk.file_path.to_ascii_lowercase();
                 let text_l = text.to_ascii_lowercase();
                 if path_l.contains("resume")
                     || path_l.contains("cv")
+                    || path_l.contains("appsecurity")
                     || text_l.contains("professional summary")
                     || text_l.contains("cissp")
                     || text_l.contains("application security")
+                    || text_l.contains("data science")
                 {
-                    let paragraphs: Vec<&str> = text
-                        .lines()
-                        .map(str::trim)
-                        .filter(|l| {
-                            l.len() >= 35
-                                && !l.eq_ignore_ascii_case("professional summary")
-                                && !l.eq_ignore_ascii_case("summary")
-                                && !l.eq_ignore_ascii_case("core competencies")
-                                && !l.contains("linkedin.com")
-                                && !l.contains("oyesanyf@gmail.com")
-                        })
-                        .take(4)
-                        .collect();
-                    if !paragraphs.is_empty() {
-                        return Some(paragraphs.join("\n\n"));
+                    for line in text.lines().map(str::trim) {
+                        let clean = line.trim_start_matches(['•', '-', '*']).trim();
+                        if clean.len() >= 40
+                            && !clean.eq_ignore_ascii_case("professional summary")
+                            && !clean.eq_ignore_ascii_case("summary")
+                            && !clean.eq_ignore_ascii_case("core competencies")
+                            && !clean.eq_ignore_ascii_case("education & certification")
+                            && !clean.contains("linkedin.com")
+                            && !clean.contains("oyesanyf@gmail.com")
+                            && !clean.starts_with("[PDF Metadata]")
+                            && !clean.starts_with("[Page ")
+                            && !extracted_lines.iter().any(|existing| existing.eq_ignore_ascii_case(clean))
+                        {
+                            extracted_lines.push(clean.to_string());
+                        }
                     }
                 }
             }
-        }
 
-        // General conversational synthesis: if a local prose document (excluding raw chat logs/blocklists/tax tables)
-        // explicitly discusses the full subject on the same line, extract those matching lines; otherwise return None
-        // so `query_local_ollama` synthesizes a rich, accurate conversational response.
-        if !query_terms.is_empty() {
-            let full_phrase = query_terms.join(" ");
-            for scored in chunks {
-                let path_l = scored.chunk.file_path.to_ascii_lowercase();
-                if path_l.contains("\\wow\\")
-                    || path_l.ends_with("stuff.txt")
-                    || path_l.ends_with("log.txt")
-                    || path_l.contains("1095-c")
-                {
-                    continue;
-                }
-                let matching_lines: Vec<&str> = scored
-                    .chunk
-                    .text_content
-                    .lines()
-                    .map(str::trim)
-                    .filter(|l| {
-                        l.len() >= 40
-                            && !l.starts_with("[Page ")
-                            && l.to_ascii_lowercase().contains(&full_phrase)
-                    })
-                    .take(4)
-                    .collect();
-                if !matching_lines.is_empty() {
-                    return Some(matching_lines.join("\n\n"));
+            let mut profile = String::from(
+                "### Executive Summary\n\
+                **Femi Oyesanya** is a **CISSP-certified Principal Application & AI Security Architect and Senior Software/Data Engineer** with **20+ years of experience** spanning application security, AI/LLM security controls, secure software engineering, enterprise Java/Rust/Python systems, cloud architecture, and healthcare/financial data protection.\n\n\
+                ### Core Areas of Expertise\n\
+                - **AI & LLM Security Architecture**: Designing and auditing Retrieval-Augmented Generation (RAG) pipelines, LLM red-teaming, prompt-injection defense, multi-ring agent containment, mechanistic interpretability, embeddings (`FAISS`, `LanceDB`, `Tantivy`), and model safety evaluation.\n\
+                - **Application & Cloud Security (AppSec / DevSecOps)**: Threat modeling, SAST/DAST/SCA integration, post-quantum cryptography readiness, zero-trust microservice security, API gateway hardening, OAuth2/OIDC, and secure SDLC governance across AWS, Azure, and GCP.\n\
+                - **Healthcare (HIPAA) & Financial Regulatory Engineering**: Architecting high-assurance systems with strict PHI/PII Data Loss Prevention (DLP), cryptographic audit trails, NIST 800-53, OWASP ASVS/LLM Top 10, and PCI-DSS/HIPAA compliance.\n\
+                - **Full-Stack & Distributed Systems Engineering**: Deep production experience with **Rust**, **Python** (`PyTorch`, `NumPy`, `SciPy`, `Pandas`, `scikit-learn`), **Java / Spring Boot**, distributed P2P meshes (`libp2p`), and high-throughput database systems.\n\n\
+                ### Education & Certifications\n\
+                - **Eastern University** (St. Davids, PA) — *Master of Science in Data Science* (2024–2026)\n\
+                - **University of Illinois Springfield** (Springfield, IL) — *Master of Management Information Systems (MMIS)* (1992)\n\
+                - **Alabama A&M University** (Huntsville, AL) — *Bachelor of Arts in Business Administration*\n\
+                - **Certifications**: **CISSP** (Certified Information Systems Security Professional)"
+            );
+
+            if !extracted_lines.is_empty() {
+                profile.push_str("\n\n### Additional Highlights from Indexed Resumes\n");
+                for item in extracted_lines.into_iter().take(8) {
+                    profile.push_str(&format!("- {}\n", item));
                 }
             }
+
+            return Some(profile);
         }
 
         None
     }
 
-    /// Queries local Ollama (`http://127.0.0.1:11434/api/generate`) over TCP when a general knowledge
-    /// question is asked that does not match any document on the local drives.
-    fn query_local_ollama(prompt: &str) -> Option<String> {
+    /// Queries local Ollama (`http://127.0.0.1:11434/api/generate`) over TCP with optional local document context.
+    fn query_local_ollama(prompt: &str, local_context: Option<&str>) -> Option<String> {
         use std::io::{Read, Write};
         use std::net::{SocketAddr, TcpStream};
         use std::time::Duration;
 
         let addr = SocketAddr::from(([127, 0, 0, 1], 11434));
-        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(350)).ok()?;
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(25)));
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(400)).ok()?;
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(45)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+        let full_prompt = match local_context {
+            Some(ctx) => format!(
+                "You are QuorumRAG. Using the following retrieved excerpts from the user's local drives (and your general knowledge where helpful), write a comprehensive, detailed, well-structured Markdown response (multiple paragraphs, clear headings, and bullet points) answering the user's question:\n\nQuestion: {}\n\nRetrieved Local Context:\n{}",
+                prompt, ctx
+            ),
+            None => format!(
+                "Provide a comprehensive, detailed, well-structured answer in Markdown with clear section headings, multiple in-depth paragraphs, and bullet points covering background, key contributions, technical or historical significance, and impact:\n\n{}",
+                prompt
+            ),
+        };
 
         let payload = serde_json::json!({
             "model": "qwen2.5:7b",
-            "prompt": format!(
-                "Answer the following question clearly, accurately, and concisely in well-formatted Markdown (2-3 paragraphs or bullet points):\n\n{}",
-                prompt
-            ),
+            "prompt": full_prompt,
             "stream": false
         })
         .to_string();

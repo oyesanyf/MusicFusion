@@ -1168,6 +1168,7 @@ dependencies = [
  "futures",
  "log",
  "music_core",
+ "music_dsp",
  "regex",
  "reqwest",
  "serde",

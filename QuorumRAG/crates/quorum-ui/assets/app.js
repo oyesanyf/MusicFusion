@@ -177,27 +177,39 @@
     promptInput.value = '';
     promptInput.style.height = 'auto';
 
-    // Create Assistant Message with typing cursor
+    // Create Assistant Message with animated cycling thinking indicator
     const { msgEl, bodyEl, citationsEl, headerEl } = createAssistantMessage();
+    startThinkingIndicator(bodyEl);
 
     try {
-      const resp = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-        },
-        body: JSON.stringify({
-          prompt: text,
-          search_mode: currentSearchMode,
-          model_family: currentModel,
-          top_k: 8,
-          access_tier: 0
-        })
-      });
+      let resp = null;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        try {
+          resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'text/event-stream',
+            },
+            body: JSON.stringify({
+              prompt: text,
+              search_mode: currentSearchMode,
+              model_family: currentModel,
+              top_k: 8,
+              access_tier: 0
+            })
+          });
+          if (resp.ok) break;
+          lastErr = new Error(`Server returned status ${resp.status}`);
+        } catch (fetchErr) {
+          lastErr = fetchErr;
+        }
+        await new Promise(r => setTimeout(r, 1500));
+      }
 
-      if (!resp.ok) {
-        throw new Error(`Server returned status ${resp.status}`);
+      if (!resp || !resp.ok) {
+        throw lastErr || new Error('Unable to reach local QuorumRAG daemon');
       }
 
       const reader = resp.body.getReader();
@@ -229,8 +241,10 @@
       }
 
     } catch (err) {
-      bodyEl.innerHTML += `<div style="color:var(--danger);">Error: ${err.message}</div>`;
+      stopThinkingIndicator(bodyEl);
+      bodyEl.innerHTML += `<div style="color:var(--danger);">Error: ${escapeHtml(err.message)}</div>`;
     } finally {
+      stopThinkingIndicator(bodyEl);
       // Finalize clean markdown rendering without typing cursor
       if (bodyEl._rawMarkdown) {
         bodyEl.style.whiteSpace = 'normal';
@@ -241,6 +255,48 @@
       }
       isGenerating = false;
       btnSend.disabled = false;
+    }
+  }
+
+  const THINKING_PHRASES = [
+    '✨ Thinking...',
+    '🔍 Searching local physical drives...',
+    '🧠 Analyzing retrieved documents...',
+    '📚 Cross-referencing evidence & citations...',
+    '💡 Reasoning through context...',
+    '🔬 Verifying factual grounding...',
+    '⚡ Synthesizing comprehensive response...',
+    '🌐 Querying local neural engine...',
+    '📝 Formulating detailed answer...'
+  ];
+
+  function startThinkingIndicator(bodyEl) {
+    stopThinkingIndicator(bodyEl);
+    let idx = 0;
+    const renderPhrase = (phrase) => {
+      bodyEl.innerHTML = `<div class="thinking-status-indicator" style="display:inline-flex; align-items:center; gap:8px; color:var(--text-muted); font-style:italic; font-size:14px; padding:4px 0;"><span class="pulse-dot" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent, #10a37f);"></span><span>${escapeHtml(phrase)}</span></div>`;
+    };
+    renderPhrase(THINKING_PHRASES[0]);
+    bodyEl._thinkingInterval = setInterval(() => {
+      if (bodyEl._rawMarkdown) {
+        stopThinkingIndicator(bodyEl);
+        return;
+      }
+      idx = (idx + 1 + Math.floor(Math.random() * 2)) % THINKING_PHRASES.length;
+      renderPhrase(THINKING_PHRASES[idx]);
+    }, 1100);
+  }
+
+  function stopThinkingIndicator(bodyEl) {
+    if (bodyEl && bodyEl._thinkingInterval) {
+      clearInterval(bodyEl._thinkingInterval);
+      bodyEl._thinkingInterval = null;
+    }
+    if (bodyEl) {
+      const ind = bodyEl.querySelector('.thinking-status-indicator');
+      if (ind && !bodyEl._rawMarkdown) {
+        ind.remove();
+      }
     }
   }
 
@@ -309,16 +365,26 @@
         continue;
       }
 
-      if (trimmed.startsWith('### ')) {
+      if (trimmed.startsWith('#### ')) {
+        if (inList) { html += '</ul>'; inList = false; }
+        const heading = renderInlineMarkdown(escapeHtml(trimmed.slice(5)));
+        html += `<h5 style="margin:10px 0 4px 0;font-size:0.92rem;font-weight:600;">${heading}</h5>`;
+      } else if (trimmed.startsWith('### ')) {
         if (inList) { html += '</ul>'; inList = false; }
         const heading = renderInlineMarkdown(escapeHtml(trimmed.slice(4)));
-        html += `<h4 style="margin:12px 0 6px 0;font-size:0.96rem;font-weight:600;">${heading}</h4>`;
-      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        html += `<h4 style="margin:12px 0 6px 0;font-size:0.98rem;font-weight:600;">${heading}</h4>`;
+      } else if (trimmed.startsWith('## ') || trimmed.startsWith('# ')) {
+        if (inList) { html += '</ul>'; inList = false; }
+        const sliceLen = trimmed.startsWith('## ') ? 3 : 2;
+        const heading = renderInlineMarkdown(escapeHtml(trimmed.slice(sliceLen)));
+        html += `<h3 style="margin:14px 0 6px 0;font-size:1.05rem;font-weight:600;">${heading}</h3>`;
+      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || /^\d+\.\s+/.test(trimmed)) {
         if (!inList) {
           html += '<ul style="margin:8px 0 12px 20px;padding:0;line-height:1.65;">';
           inList = true;
         }
-        const item = renderInlineMarkdown(escapeHtml(trimmed.slice(2)));
+        const itemText = trimmed.replace(/^([-*]|\d+\.)\s+/, '');
+        const item = renderInlineMarkdown(escapeHtml(itemText));
         html += `<li style="margin-bottom:6px;">${item}</li>`;
       } else {
         if (inList) { html += '</ul>'; inList = false; }
@@ -331,6 +397,7 @@
   }
 
   function appendToken(bodyEl, token) {
+    stopThinkingIndicator(bodyEl);
     bodyEl._rawMarkdown = (bodyEl._rawMarkdown || '') + token;
     bodyEl.style.whiteSpace = 'normal';
     bodyEl.innerHTML = renderMarkdownHtml(bodyEl._rawMarkdown) + '<span class="typing-cursor">▍</span>';
