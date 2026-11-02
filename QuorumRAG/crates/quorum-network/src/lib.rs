@@ -13,7 +13,16 @@ pub use handle::{NetworkCommand, NetworkEvent, NetworkSwarmHandle};
 pub use handshake::{
     extract_contract_hash, make_agent_version, make_protocol_version, verify_peer_contract,
 };
-pub use libp2p::Multiaddr;
+pub use transport::{is_allowed_dial_address, is_private_or_loopback_ip4, is_private_or_loopback_ip6};
+pub use libp2p::{self, Multiaddr};
+
+/// Derives a libp2p `PeerId` from 32-byte Ed25519 public key bytes.
+pub fn derive_peer_id_from_pubkey(pubkey: &[u8; 32]) -> Result<libp2p::PeerId, String> {
+    let ed_pk = libp2p::identity::ed25519::PublicKey::try_from_bytes(pubkey)
+        .map_err(|e| format!("Invalid ed25519 public key: {e}"))?;
+    let pk = libp2p::identity::PublicKey::from(ed_pk);
+    Ok(libp2p::PeerId::from_public_key(&pk))
+}
 
 use quorum_types::{FederatedQueryRequest, FederatedQueryResponse};
 use std::collections::HashMap;
@@ -67,7 +76,11 @@ pub async fn start_network_node(
     }
 
     for peer in &config.bootstrap_peers {
-        let _ = swarm.dial(peer.clone());
+        if transport::is_allowed_dial_address(peer) {
+            let _ = swarm.dial(peer.clone());
+        } else {
+            tracing::warn!("Rejecting bootstrap peer dial to non-airgapped multiaddr: {}", peer);
+        }
     }
 
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(128);

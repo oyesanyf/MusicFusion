@@ -198,6 +198,32 @@ impl FileTypeClassifier {
         Self
     }
 
+    /// Helper to open a file with retry on transient Windows Error 32 sharing violations.
+    pub fn open_file_with_retry(path: &Path) -> Result<File, std::io::Error> {
+        const BACKOFFS_MS: [u64; 3] = [25, 50, 100];
+        let mut last_err = None;
+
+        for attempt in 0..=BACKOFFS_MS.len() {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(BACKOFFS_MS[attempt - 1]));
+            }
+
+            match File::open(path) {
+                Ok(file) => return Ok(file),
+                Err(err) => {
+                    let is_sharing_violation = err.raw_os_error() == Some(32)
+                        || err.kind() == std::io::ErrorKind::PermissionDenied;
+                    last_err = Some(err);
+                    if !is_sharing_violation && attempt > 0 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| std::io::Error::other("Failed to open file after retries")))
+    }
+
     /// Classify a file given its filesystem path.
     ///
     /// Reads up to the first 4096 bytes for content inspection.
@@ -215,7 +241,7 @@ impl FileTypeClassifier {
             ));
         }
 
-        let mut file = File::open(path)?;
+        let mut file = Self::open_file_with_retry(path)?;
         let mut buffer = [0u8; 4096];
         let bytes_read = file.read(&mut buffer)?;
         let filename_hint = path.file_name().and_then(|n| n.to_str());
@@ -241,8 +267,26 @@ impl FileTypeClassifier {
         }
 
         // Tier 1: Deterministic Magic Header Inspection
-        if let Some(id) = self.match_magic_headers(bytes) {
+        if let Some(id) = self.match_magic_headers(bytes, filename_hint) {
             return id;
+        }
+
+        // Tier 1.2: Known rich document/office extensions (.docx, .doc, .xlsx, .xls, .pptx, .ppt, .odt, .ods, .odp, .rtf, .epub, .ipynb, .pdf)
+        if let Some(name) = filename_hint {
+            let ext = Path::new(name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if matches!(
+                ext.as_str(),
+                "pdf" | "docx" | "doc" | "docm" | "odt" | "rtf" | "epub"
+                    | "xlsx" | "xls" | "xlsm" | "ods"
+                    | "pptx" | "ppt" | "pptm" | "odp"
+                    | "ipynb" | "sqlite" | "sqlite3" | "db"
+            ) {
+                return self.classify_by_extension(name, 0.96);
+            }
         }
 
         // Tier 1.5: Deep Learning Google Magika ONNX Model (optional feature)
@@ -323,7 +367,7 @@ impl FileTypeClassifier {
     }
 
     /// Inspect magic bytes at the beginning of the stream.
-    fn match_magic_headers(&self, bytes: &[u8]) -> Option<FileIdentity> {
+    fn match_magic_headers(&self, bytes: &[u8], filename_hint: Option<&str>) -> Option<FileIdentity> {
         // MZ / PE Executable (Windows exe, dll, sys)
         if bytes.starts_with(b"MZ") {
             return Some(FileIdentity::new(
@@ -455,9 +499,106 @@ impl FileTypeClassifier {
             ));
         }
 
-        // ZIP and OpenXML archives (PK\x03\x04 or PK\x05\x06)
+        // Rich Text Format (RTF)
+        if bytes.starts_with(b"{\\rtf") {
+            return Some(FileIdentity::new(
+                "rtf",
+                "application/rtf",
+                FileCategory::Document,
+                "Rich Text Format document",
+                true,
+                0.99,
+                ClassifierEngine::HeaderInspection,
+            ));
+        }
+
+        // Legacy Microsoft Office OLE2 Compound Document (.doc, .xls, .ppt)
+        if bytes.starts_with(&[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) {
+            let ext = filename_hint
+                .and_then(|n| Path::new(n).extension())
+                .and_then(|e| e.to_str())
+                .unwrap_or("doc")
+                .to_ascii_lowercase();
+            return match ext.as_str() {
+                "xls" | "xlt" => Some(FileIdentity::new(
+                    "xls",
+                    "application/vnd.ms-excel",
+                    FileCategory::Document,
+                    "Microsoft Excel legacy spreadsheet",
+                    false,
+                    0.97,
+                    ClassifierEngine::HeaderInspection,
+                )),
+                "ppt" | "pps" => Some(FileIdentity::new(
+                    "ppt",
+                    "application/vnd.ms-powerpoint",
+                    FileCategory::Document,
+                    "Microsoft PowerPoint legacy presentation",
+                    false,
+                    0.97,
+                    ClassifierEngine::HeaderInspection,
+                )),
+                _ => Some(FileIdentity::new(
+                    "doc",
+                    "application/msword",
+                    FileCategory::Document,
+                    "Microsoft Word legacy document",
+                    false,
+                    0.97,
+                    ClassifierEngine::HeaderInspection,
+                )),
+            };
+        }
+
+        // ZIP and OpenXML / ODF / EPUB archives (PK\x03\x04 or PK\x05\x06)
         if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") {
-            let sample = &bytes[..bytes.len().min(2048)];
+            if let Some(name) = filename_hint {
+                let ext = Path::new(name)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                match ext.as_str() {
+                    "docx" | "docm" | "dotx" => {
+                        return Some(FileIdentity::new(
+                            "docx",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            FileCategory::Document,
+                            "Microsoft Word OpenXML document",
+                            false,
+                            0.99,
+                            ClassifierEngine::HeaderInspection,
+                        ));
+                    }
+                    "xlsx" | "xlsm" | "xltx" => {
+                        return Some(FileIdentity::new(
+                            "xlsx",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            FileCategory::Document,
+                            "Microsoft Excel OpenXML spreadsheet",
+                            false,
+                            0.99,
+                            ClassifierEngine::HeaderInspection,
+                        ));
+                    }
+                    "pptx" | "pptm" | "potx" => {
+                        return Some(FileIdentity::new(
+                            "pptx",
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                            FileCategory::Document,
+                            "Microsoft PowerPoint presentation",
+                            false,
+                            0.99,
+                            ClassifierEngine::HeaderInspection,
+                        ));
+                    }
+                    "odt" | "ods" | "odp" | "epub" => {
+                        return Some(self.classify_by_extension(name, 0.99));
+                    }
+                    _ => {}
+                }
+            }
+            let sample = &bytes[..bytes.len().min(4096)];
             if find_subsequence(sample, b"word/").is_some() {
                 return Some(FileIdentity::new(
                     "docx",
@@ -965,7 +1106,7 @@ impl FileTypeClassifier {
     }
 
     /// Resolve file type based on extension fallback.
-    fn classify_by_extension(&self, filename: &str, base_score: f32) -> FileIdentity {
+    pub fn classify_by_extension(&self, filename: &str, base_score: f32) -> FileIdentity {
         let ext = Path::new(filename)
             .extension()
             .and_then(|e| e.to_str())
@@ -999,24 +1140,107 @@ impl FileTypeClassifier {
             "html" | "htm" => FileIdentity::new("html", "text/html", FileCategory::Code, "HTML document", true, base_score, ClassifierEngine::ExtensionFallback),
             "css" | "scss" | "sass" | "less" => FileIdentity::new("css", "text/css", FileCategory::Code, "CSS stylesheet", true, base_score, ClassifierEngine::ExtensionFallback),
             // Documents & Markup
-            "md" | "markdown" => FileIdentity::new("markdown", "text/markdown", FileCategory::Document, "Markdown document", true, base_score, ClassifierEngine::ExtensionFallback),
-            "txt" | "text" | "log" => FileIdentity::new("txt", "text/plain", FileCategory::Text, "Plain text document", true, base_score, ClassifierEngine::ExtensionFallback),
+            "md" | "markdown" | "rst" | "adoc" | "org" | "tex" | "bib" => FileIdentity::new("markdown", "text/markdown", FileCategory::Document, "Markdown / LaTeX document", true, base_score, ClassifierEngine::ExtensionFallback),
+            "txt" | "text" | "log" | "ini" | "cfg" | "conf" | "properties" | "env" => FileIdentity::new("txt", "text/plain", FileCategory::Text, "Plain text document", true, base_score, ClassifierEngine::ExtensionFallback),
             "pdf" => FileIdentity::new("pdf", "application/pdf", FileCategory::Document, "PDF document", false, base_score, ClassifierEngine::ExtensionFallback),
-            "docx" => FileIdentity::new("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", FileCategory::Document, "Word document", false, base_score, ClassifierEngine::ExtensionFallback),
-            "xlsx" => FileIdentity::new("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", FileCategory::Document, "Excel spreadsheet", false, base_score, ClassifierEngine::ExtensionFallback),
-            "pptx" => FileIdentity::new("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", FileCategory::Document, "PowerPoint presentation", false, base_score, ClassifierEngine::ExtensionFallback),
+            "docx" | "doc" | "docm" | "dotx" | "odt" => FileIdentity::new("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", FileCategory::Document, "Word / ODT document", false, base_score, ClassifierEngine::ExtensionFallback),
+            "xlsx" | "xls" | "xlsm" | "xltx" | "ods" => FileIdentity::new("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", FileCategory::Document, "Excel / ODS spreadsheet", false, base_score, ClassifierEngine::ExtensionFallback),
+            "pptx" | "ppt" | "pptm" | "potx" | "odp" => FileIdentity::new("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", FileCategory::Document, "PowerPoint / ODP presentation", false, base_score, ClassifierEngine::ExtensionFallback),
+            "rtf" => FileIdentity::new("rtf", "application/rtf", FileCategory::Document, "Rich Text Format document", true, base_score, ClassifierEngine::ExtensionFallback),
+            "epub" => FileIdentity::new("epub", "application/epub+zip", FileCategory::Document, "EPUB E-book", false, base_score, ClassifierEngine::ExtensionFallback),
+            "ipynb" => FileIdentity::new("ipynb", "application/x-ipynb+json", FileCategory::Code, "Jupyter Notebook", true, base_score, ClassifierEngine::ExtensionFallback),
             // Structured Data
-            "json" => FileIdentity::new("json", "application/json", FileCategory::Data, "JSON data", true, base_score, ClassifierEngine::ExtensionFallback),
+            "json" | "jsonl" | "ndjson" => FileIdentity::new("json", "application/json", FileCategory::Data, "JSON data", true, base_score, ClassifierEngine::ExtensionFallback),
             "yaml" | "yml" => FileIdentity::new("yaml", "text/yaml", FileCategory::Data, "YAML data", true, base_score, ClassifierEngine::ExtensionFallback),
             "toml" => FileIdentity::new("toml", "application/toml", FileCategory::Data, "TOML configuration", true, base_score, ClassifierEngine::ExtensionFallback),
             "xml" => FileIdentity::new("xml", "application/xml", FileCategory::Data, "XML document", true, base_score, ClassifierEngine::ExtensionFallback),
             "csv" => FileIdentity::new("csv", "text/csv", FileCategory::Data, "CSV table data", true, base_score, ClassifierEngine::ExtensionFallback),
             "tsv" => FileIdentity::new("tsv", "text/tab-separated-values", FileCategory::Data, "TSV table data", true, base_score, ClassifierEngine::ExtensionFallback),
             "sql" => FileIdentity::new("sql", "application/sql", FileCategory::Code, "SQL database script", true, base_score, ClassifierEngine::ExtensionFallback),
-            // Executables / Binaries
-            "exe" | "dll" | "sys" => FileIdentity::new("pebin", "application/x-dosexec", FileCategory::Executable, "Windows binary executable/DLL", false, base_score, ClassifierEngine::ExtensionFallback),
-            "so" | "dylib" => FileIdentity::new("dylib", "application/octet-stream", FileCategory::Executable, "Shared library binary", false, base_score, ClassifierEngine::ExtensionFallback),
-            "wasm" => FileIdentity::new("wasm", "application/wasm", FileCategory::Executable, "WebAssembly binary", false, base_score, ClassifierEngine::ExtensionFallback),
+            "sqlite" | "sqlite3" | "db" => FileIdentity::new("sqlite", "application/vnd.sqlite3", FileCategory::Data, "SQLite database", false, base_score, ClassifierEngine::ExtensionFallback),
+            "bat" | "cmd" => FileIdentity::new("batch", "text/x-msdos-batch", FileCategory::Code, "Windows batch script", true, base_score, ClassifierEngine::ExtensionFallback),
+            // Executables / Binaries / System Libraries / Intermediate Artifacts
+            "exe" | "dll" | "sys" | "ocx" | "cpl" | "scr" | "msi" | "drv" => FileIdentity::new(
+                "pebin",
+                "application/x-dosexec",
+                FileCategory::Executable,
+                "Windows binary executable / system library / driver",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
+            "so" | "dylib" | "ko" => FileIdentity::new(
+                "dylib",
+                "application/octet-stream",
+                FileCategory::Executable,
+                "Shared library or kernel module binary",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
+            "lib" | "a" => FileIdentity::new(
+                "staticlib",
+                "application/x-archive",
+                FileCategory::Executable,
+                "Static library archive",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
+            "obj" | "o" => FileIdentity::new(
+                "object",
+                "application/x-object",
+                FileCategory::Executable,
+                "Compiled object file",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
+            "class" => FileIdentity::new(
+                "class",
+                "application/java-vm",
+                FileCategory::Executable,
+                "Java compiled bytecode",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
+            "pyc" | "pyo" | "pyd" => FileIdentity::new(
+                "python_bytecode",
+                "application/x-python-bytecode",
+                FileCategory::Executable,
+                "Python compiled bytecode / C-extension binary",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
+            "pdb" | "ilk" | "exp" => FileIdentity::new(
+                "pdb",
+                "application/octet-stream",
+                FileCategory::Executable,
+                "Debug symbols / incremental linker / export database",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
+            "bin" => FileIdentity::new(
+                "binary",
+                "application/octet-stream",
+                FileCategory::Executable,
+                "Raw compiled binary image",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
+            "wasm" => FileIdentity::new(
+                "wasm",
+                "application/wasm",
+                FileCategory::Executable,
+                "WebAssembly binary",
+                false,
+                base_score,
+                ClassifierEngine::ExtensionFallback,
+            ),
             // Archives
             "zip" => FileIdentity::new("zip", "application/zip", FileCategory::Archive, "ZIP archive", false, base_score, ClassifierEngine::ExtensionFallback),
             "tar" => FileIdentity::new("tar", "application/x-tar", FileCategory::Archive, "TAR archive", false, base_score, ClassifierEngine::ExtensionFallback),
@@ -1026,6 +1250,45 @@ impl FileTypeClassifier {
             _ => FileIdentity::unknown_binary(),
         }
     }
+}
+
+/// Standard compiled binary and executable file extensions for zero-overhead fast-path exclusion.
+pub const COMPILED_BINARY_EXTENSIONS: &[&str] = &[
+    "exe", "dll", "sys", "ocx", "cpl", "scr", "msi", "drv",
+    "lib", "exp", "ilk", "pdb", "obj", "class",
+    "pyc", "pyo", "pyd",
+    "so", "dylib", "o", "a", "bin", "ko",
+];
+
+/// Returns true if the file extension matches a known compiled binary, executable, library, or debug database.
+pub fn is_binary_executable_extension(ext: &str) -> bool {
+    let clean = ext.trim_start_matches('.').to_ascii_lowercase();
+    matches!(
+        clean.as_str(),
+        "exe"
+            | "dll"
+            | "sys"
+            | "ocx"
+            | "cpl"
+            | "scr"
+            | "msi"
+            | "drv"
+            | "lib"
+            | "exp"
+            | "ilk"
+            | "pdb"
+            | "obj"
+            | "class"
+            | "pyc"
+            | "pyo"
+            | "pyd"
+            | "so"
+            | "dylib"
+            | "o"
+            | "a"
+            | "bin"
+            | "ko"
+    )
 }
 
 /// Helper to locate byte subsequence.

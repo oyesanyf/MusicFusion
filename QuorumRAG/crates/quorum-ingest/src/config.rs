@@ -54,6 +54,10 @@ pub struct IngestConfig {
 
     /// Optional automatic drift healing schedule in seconds.
     pub auto_drift_heal_interval_secs: Option<u64>,
+
+    /// Whether to exclude source code files (`FileCategory::Code`), raw `.dat` blobs, and monolithic dumps during ingestion.
+    #[serde(default)]
+    pub exclude_source_code: bool,
 }
 
 impl Default for IngestConfig {
@@ -75,6 +79,7 @@ impl Default for IngestConfig {
             batch_timeout_ms: 500,
             access_tier_rules: Vec::new(),
             auto_drift_heal_interval_secs: None,
+            exclude_source_code: false,
         }
     }
 }
@@ -297,7 +302,7 @@ impl IngestConfig {
                 let vol_label = String::from_utf16_lossy(&vol_name[..vol_len]).to_ascii_lowercase();
                 let fs_label = String::from_utf16_lossy(&fs_name[..fs_len]).to_ascii_uppercase();
 
-                if !matches!(fs_label.as_str(), "NTFS" | "REFS") {
+                if !matches!(fs_label.as_str(), "NTFS" | "REFS" | "EXFAT" | "FAT32") {
                     continue;
                 }
                 if vol_label.contains("google drive")

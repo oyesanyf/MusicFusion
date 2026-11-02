@@ -306,7 +306,7 @@ impl Default for ChatGptUiSettings {
             ollama_url: "http://127.0.0.1:11434".to_string(),
             ipc_url: "http://127.0.0.1:3031".to_string(),
             cdp_port: 9222,
-            primary_workhorse_model: "qwen2.5:7b".to_string(),
+            primary_workhorse_model: "qwen2.5:1.5b".to_string(),
             fusion_panel_size: 0,
             vision_specialist_model: "qwen2.5-vl".to_string(),
             audio_specialist_model: "whisper-base".to_string(),

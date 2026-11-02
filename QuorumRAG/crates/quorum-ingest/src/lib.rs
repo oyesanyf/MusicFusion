@@ -15,6 +15,7 @@ pub mod image_indexer;
 pub mod reindex;
 pub mod warmer;
 pub mod watcher;
+pub mod throttling;
 
 // Re-exports
 pub use classifier_router::{CandidateKind, ClassifierRouter, FilterDecision};
@@ -31,5 +32,6 @@ pub use engine::IngestEngine;
 pub use error::IngestError;
 pub use image_indexer::{ImageIndexer, ImageMetadata};
 pub use reindex::{ReindexPhase, ReindexProgress, ReindexWorker};
+pub use throttling::{end_background_thread_priority, set_background_thread_priority};
 pub use warmer::{CacheWarmReport, CacheWarmer, WarmConfig};
 pub use watcher::{FilesystemWatcher, WatcherEvent, WatcherHandle};

@@ -84,6 +84,7 @@ async fn setup_test_app() -> (axum::Router, Arc<tokio::sync::Notify>) {
         host: "127.0.0.1".to_string(),
         data_dir,
         shutdown_notify: Arc::clone(&shutdown_notify),
+        in_flight_queries: Arc::new(quorum_daemon::InFlightQueryRegistry::new()),
     });
 
     (build_router(state), shutdown_notify)

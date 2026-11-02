@@ -75,6 +75,23 @@ impl ClassifierRouter {
 
     /// Evaluates a candidate path on disk and returns the definitive routing decision.
     pub fn evaluate_file(&self, path: &Path) -> FilterDecision {
+        // Fast-path binary/executable/DLL exclusion:
+        // Exclude compiled binaries immediately BEFORE executing std::fs::metadata or File::open
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if quorum_classifier::is_binary_executable_extension(ext) {
+                let identity = self.classifier.classify_by_extension(
+                    path.to_str().unwrap_or(ext),
+                    1.0,
+                );
+                debug!(
+                    path = %path.display(),
+                    extension = %ext,
+                    "Fast-path filtered out compiled binary/executable without disk I/O"
+                );
+                return FilterDecision::SkipBinary { identity };
+            }
+        }
+
         // 1. Check symlink policy
         if !self.config.follow_symlinks {
             if let Ok(meta) = std::fs::symlink_metadata(path) {
@@ -84,11 +101,32 @@ impl ClassifierRouter {
             }
         }
 
-        // 2. Check hidden file policy
-        if self.config.skip_hidden {
-            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                if file_name.starts_with('.') {
-                    return FilterDecision::SkipHidden;
+        // 2. Check hidden file policy and Office temporary lock files
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+            if self.config.skip_hidden && file_name.starts_with('.') {
+                return FilterDecision::SkipHidden;
+            }
+            let lower_name = file_name.to_ascii_lowercase();
+            if lower_name.starts_with('~')
+                || lower_name.starts_with(".~lock")
+                || lower_name.ends_with(".tmp")
+                || lower_name.ends_with(".bak")
+                || lower_name.ends_with(".wbk")
+            {
+                return FilterDecision::SkipHidden;
+            }
+            if self.config.exclude_source_code {
+                const EXCLUDED_SOURCE_EXTS: &[&str] = &[
+                    ".rs", ".py", ".js", ".ts", ".jsx", ".tsx", ".c", ".cpp", ".h", ".hpp",
+                    ".cc", ".cs", ".java", ".go", ".kt", ".rb", ".php", ".swift", ".scala",
+                    ".sh", ".bash", ".ps1", ".bat", ".cmd", ".sql", ".css", ".scss", ".less",
+                    ".vue", ".svelte", ".toml", ".yaml", ".yml", ".lock", ".dat", ".log",
+                    ".json", ".jsonl", ".xml", ".html", ".htm", ".tex", ".aux", ".bbl",
+                    ".blg", ".out", ".toc", ".synctex", ".crt", ".pem", ".key",
+                ];
+                if EXCLUDED_SOURCE_EXTS.iter().any(|ext| lower_name.ends_with(ext)) {
+                    let identity = self.classifier.classify_by_extension(file_name, 1.0);
+                    return FilterDecision::SkipBinary { identity };
                 }
             }
         }
@@ -118,8 +156,8 @@ impl ClassifierRouter {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
-        // 4. Content classification via Google Magika (first 4KB inspection)
-        let identity = match self.classifier.classify_file(path) {
+        // 4. Content classification via Google Magika (first 4KB inspection with sharing violation retry)
+        let identity = match self.classify_file_with_retry(path, 3) {
             Ok(id) => id,
             Err(e) => return FilterDecision::SkipIoError { error: e.to_string() },
         };
@@ -139,9 +177,14 @@ impl ClassifierRouter {
         }
 
         // 6. Text / Source Code / Structured Data Routing
+        if self.config.exclude_source_code && identity.category == FileCategory::Code {
+            return FilterDecision::SkipBinary { identity };
+        }
+        // Structured text data (JSON, YAML, TOML, CSV, TSV) matches via `identity.is_text == true`.
+        // Non-text Data (is_text == false, e.g. SQLite, PCAP, raw binary) must NOT bypass binary filtering into CandidateKind::Text.
         if identity.is_text || matches!(
             identity.category,
-            FileCategory::Code | FileCategory::Text | FileCategory::Document | FileCategory::Data
+            FileCategory::Code | FileCategory::Text | FileCategory::Document
         ) {
             return FilterDecision::Accept {
                 identity,
@@ -203,5 +246,29 @@ impl ClassifierRouter {
             }
         }
         Err(last_err.unwrap_or_else(|| std::io::Error::other("Unknown error")))
+    }
+
+    /// Windows file-lock retry helper: retries `classify_file` on transient sharing violations.
+    fn classify_file_with_retry(&self, path: &Path, retries: usize) -> std::io::Result<FileIdentity> {
+        const BACKOFFS_MS: [u64; 3] = [25, 50, 100];
+        let mut last_err = None;
+        for attempt in 0..retries {
+            match self.classifier.classify_file(path) {
+                Ok(id) => return Ok(id),
+                Err(e) => {
+                    let is_sharing_violation = e.raw_os_error() == Some(32)
+                        || e.kind() == std::io::ErrorKind::PermissionDenied;
+                    last_err = Some(e);
+                    if !is_sharing_violation {
+                        break;
+                    }
+                    if attempt + 1 < retries {
+                        let delay = BACKOFFS_MS.get(attempt).copied().unwrap_or(100);
+                        std::thread::sleep(std::time::Duration::from_millis(delay));
+                    }
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| std::io::Error::other("Classification failed")))
     }
 }

@@ -72,18 +72,49 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         quorum_contract::DeterministicOfflineEngine::new()
     );
     let dedup = Arc::new(quorum_ingest::TwoLevelDedupEngine::new());
+    let hydrated_chunks = dedup.hydrate_from_storage(&storage).await?;
+    info!(
+        chunks = hydrated_chunks,
+        tracked_files = dedup.catalog().read().map(|c| c.len()).unwrap_or(0),
+        "Startup deduplication hydration completed from LanceDB storage"
+    );
 
     // 2. Ingest Config & Workers (defaults to all physical fixed drives when --watch-dir is omitted)
     let mut ingest_config = quorum_ingest::IngestConfig::default();
+    ingest_config.exclude_source_code = true;
+    ingest_config.max_file_size_bytes = 15 * 1024 * 1024; // 15MB cap skips monolithic raw dumps
     if let Some(ref watch_path) = cli.watch_dir {
         ingest_config.watch_paths.push(watch_path.clone());
     } else {
+        let mut priority_paths: Vec<std::path::PathBuf> = Vec::new();
+        for dir in [
+            r"D:\femi\Femi_Oyesanya_CV_2026.pdf",
+            r"D:\chatgpt3\ChatGPT_Restored_Data\Word_Conversations\AI Job Loss Alternatives.docx",
+            r"D:\chatgpt3\ChatGPT_Restored_Data\Word_Conversations\40 Affirmations for Angela.docx",
+            r"D:\chatgpt3\ChatGPT_Restored_Data\Word_Conversations\Cigna Coverage Dispute.docx",
+            r"D:\chatgpt3\ChatGPT_Restored_Data\Word_Conversations\Breath and Hierarchy.docx",
+            r"D:\chatgpt3\ChatGPT_Restored_Data\Word_Conversations\Mineral Wealth in Ukraine.docx",
+            r"D:\chatgpt3\ChatGPT_Restored_Data\Word_Conversations",
+            r"D:\school",
+            r"D:\femi",
+            r"D:\articles",
+        ] {
+            let p = std::path::PathBuf::from(dir);
+            if p.exists() {
+                priority_paths.push(p);
+            }
+        }
         let physical_drives = quorum_ingest::IngestConfig::discover_physical_drives();
         info!(
             drives = ?physical_drives,
-            "No --watch-dir specified; defaulting to all fixed physical drives"
+            "No --watch-dir specified; defaulting to priority user document folders + fixed physical drives"
         );
-        ingest_config.watch_paths = physical_drives;
+        for d in physical_drives {
+            if !priority_paths.contains(&d) {
+                priority_paths.push(d);
+            }
+        }
+        ingest_config.watch_paths = priority_paths;
     }
 
     let reindex_worker = Arc::new(quorum_ingest::ReindexWorker::new(
@@ -186,6 +217,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         host: cli.host.clone(),
         data_dir: cli.data_dir.clone(),
         shutdown_notify: Arc::clone(&shutdown_notify),
+        in_flight_queries: Arc::new(crate::state::InFlightQueryRegistry::new()),
     });
 
     let app = server::build_router(Arc::clone(&app_state));
@@ -360,6 +392,7 @@ pub async fn run_standalone_reindex(
         quorum_contract::DeterministicOfflineEngine::new()
     );
     let dedup = Arc::new(quorum_ingest::TwoLevelDedupEngine::new());
+    let _ = dedup.hydrate_from_storage(&storage).await;
 
     let target_paths = path.map(|p| vec![p]).unwrap_or_else(|| {
         cli.watch_dir
@@ -376,8 +409,11 @@ pub async fn run_standalone_reindex(
         dry_run: false,
     };
 
+    let mut ingest_cfg = quorum_ingest::IngestConfig::default();
+    ingest_cfg.exclude_source_code = true;
+
     let worker = quorum_ingest::ReindexWorker::new(
-        quorum_ingest::IngestConfig::default(),
+        ingest_cfg,
         storage,
         classifier,
         embedder,
@@ -427,8 +463,10 @@ pub async fn run_standalone_fix_drift(
         quorum_contract::DeterministicOfflineEngine::new()
     );
     let dedup = Arc::new(quorum_ingest::TwoLevelDedupEngine::new());
+    let _ = dedup.hydrate_from_storage(&storage).await;
 
     let mut ingest_cfg = quorum_ingest::IngestConfig::default();
+    ingest_cfg.exclude_source_code = true;
     if let Some(ref w) = cli.watch_dir {
         ingest_cfg.watch_paths = vec![w.clone()];
     } else {

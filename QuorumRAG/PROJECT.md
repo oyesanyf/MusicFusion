@@ -74,6 +74,20 @@ QuorumRAG is a production-grade, local-first, peer-to-peer retrieval-augmented g
 | 41 | Fusion-Powered Google LangExtract (`langextract_fusion`) | Two-loop structured extraction powered by `LlmFusionConsensus` (adapted from `breakout_defense.rs` lines 3440-3697: Arm 1 SemanticSpanExtractor, Arm 2 SyntacticAstVerifier, Arm 3 CounterfactualJudge, Arm 4 LangGraph state calibration): (1) Ingestion-time grounded preprocessor with 100% `char_interval` verification (hallucination rejection) storing grounded entities/attributes in LanceDB + Tantivy, and (2) Query-time decomposition in `ClassifyIntent` -> `RetrieveMesh` scalar/lexical prefiltering; plus interactive HTML visualizer, `/api/langextract`, and Web UI `@extract` mode | M4, M5 | follow-up req |
 | 42 | Live IDE Execution & Production Code Generation Gate | Start compiled `quorumrag.exe` live in IDE, index real workspace files (`d:\harfile\QuorumRAG`), query live daemon API to verify it generates compilable production code with exact `[Peer:File:Lines]` citations & grounded `char_interval` spans, and auto-open ChatGPT Web UI in browser | M5, M6 | follow-up req |
 | 43 | Multi-Layer Caching & Re-Cache Subsystem (`recache`) | BLAKE3 QueryCache & EmbeddingCache, cache hit telemetry, `quorumrag recache [--clear] [--warm]`, `/api/cache/recache` & `/api/cache/stats`, auto-invalidation on reindex/fix-drift/watcher, and Web UI Re-Cache button & live stats | M5.5 | follow-up req |
+| 44 | Dedup Engine Startup Hydration | Hydrate `TwoLevelDedupEngine` (catalog & chunk cache) from LanceDB on startup (`hydrate_from_storage`) | M7 | follow-up (R1) |
+| 45 | Complete Physical Drive Discovery | Windows NTFS, ReFS, exFAT, FAT32 fixed volume support, dot-directory blind spot elimination | M7 | follow-up (R1) |
+| 46 | Fast-Path Binary/DLL/EXE Exclusion | Deterministic file extension filtering (.exe, .dll, .sys, .so, .dylib, .pdb, .obj, .class, etc.) prior to file I/O | M7 | follow-up (R1) |
+| 47 | Watcher Directory & Sharing Fault Resilience | Recursive directory creation/rename support in `watcher.rs` and retry on Windows sharing violations (Error 32) | M7 | follow-up (R1) |
+| 48 | Low-Latency Multi-Hop Query Execution & Relevance Precision | Pre-computed static chunk scoring, stack buffer reuse, multi-term entity matching & GENERIC_ATTRIBUTE_TERMS expansion, post-response sources, fast streaming (<=2s) | M8 | follow-up (R2) |
+| 49 | P2P Cryptographic Handshake & Anti-Replay | Enforce Ed25519 signature & timestamp (<60s) verification in `OsoosiMeshInboundHandler::handle_query` with sender pubkey validation | M8 | follow-up (R2) |
+| 50 | Byzantine Quorum Consensus Hardening | Bound per-peer voting influence in `RrfCombiner::fuse_rankings`, key on `blake3_hash`, clamp remote chunk tiers | M8 | follow-up (R2) |
+| 51 | Air-Gapped Offline Enforcement | Assert loopback address on local Ollama client, restrict swarm dialing to loopback/private subnets | M8 | follow-up (R2) |
+| 52 | Active Chat UI Stop Button & In-Flight Cancellation | AbortController, `POST /api/chat/cancel`, `tx.is_closed()` break in SSE word streaming, graph state cancellation | M9 | follow-up (R3) |
+| 53 | Monotonic Live Indexer Progress Reporting | Upfront total candidate counting across drive targets, eliminate 25% fake fallback, accurate chunk counts | M9 | follow-up (R3) |
+| 54 | Dynamic & Varied Thinking Phrases Engine | 60+ engaging phrase pool, ~650ms random cycle, non-repeating, non-freezing on telemetry before TokenDelta | M9 | follow-up req |
+| 55 | Deterministic 7-Metric Benchmark Suite & Fault Regressions | `tests/benchmarks_r4.rs` (latency, disk I/O, CPU, RSS memory, doc/image index, binary exclusion, consensus) & Byzantine regression tests | M10 | follow-up (R4) |
+| 56 | Solo Developer PR Shipping & Squash-Merge | Clean branch, atomic commits, automated test suite verification, PR with 7-metric table, self-review & merge into main | M10 | follow-up (R4) |
+| 57 | Source Code & Temp File Ingestion Exclusion & RAG Isolation | Ingestion strictly indexes documents and images while excluding FileCategory::Code, source code extensions, and temp/lock files (~*, .tmp, .bak); default exclude_source_code: true; purge/skip code/temp chunks in reindex/retrieval | M8.5 | follow-up req |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
@@ -85,6 +99,12 @@ QuorumRAG is a production-grade, local-first, peer-to-peer retrieval-augmented g
 | M5 | ChatGPT Web Interface, Synthesis & Single Executable | Axum web server, embedded UI, search mode toggle, SSE streaming with agentic & GLM telemetry, single `.exe`, reindex/drift triggers, LangExtract UI action, interactive HTML visualizer & `/api/langextract` endpoints, Live IDE Execution & Production Code Generation Verification Gate | M1, M2, M3, M4 | DONE |
 | M5.5 | Multi-Layer Caching & Re-Cache Subsystem (`recache`) | BLAKE3 QueryCache & EmbeddingCache, cache hit telemetry, `quorumrag recache [--clear] [--warm]`, `/api/cache/recache` & `/api/cache/stats`, auto-invalidation on reindex/fix-drift/watcher, and Web UI Re-Cache button & live stats | M1, M2, M3, M4, M5 | DONE |
 | M6 | Final Acceptance: 100% E2E Test Pass & Adversarial Hardening | Pass 100% of E2E test suite (Tiers 1-4) published by E2E Test Track, Live IDE run & production code generation verification, followed by Tier 5 adversarial audit | M5, M5.5, TEST_READY | DONE |
+| M7 | Zero-Overhead Ingestion Pipeline, Dedup Hydration & Binary Filtering | TwoLevelDedupEngine startup hydration from LanceDB, complete physical drive discovery (NTFS/ReFS/exFAT/FAT32), fast-path binary/DLL/EXE exclusion prior to I/O, watcher sharing violation resilience | none | DONE |
+| M8 | Low-Latency Query Execution, Consensus & P2P Security Hardening | Multi-hop RAG latency optimization, inbound Ed25519 signature & replay verification (`OsoosiMeshInboundHandler`), Byzantine consensus score stuffing prevention in `RrfCombiner`, strict offline air-gapping | none | DONE |
+| M8.5 | Source Code & Temp File Ingestion Exclusion & RAG Isolation | Filter source code extensions, FileCategory::Code, and Office lock/temp files (~*, .tmp, .bak) in Crawler/Router, default exclude_source_code: true in IngestConfig, purge/skip code/temp chunks in reindex/retrieval | M7, M8 | DONE |
+| M9 | UI Stop Button & Real-Time Monotonic Indexer Progress | Chat UI stop button with `AbortController`, `POST /api/chat/cancel`, CancellationToken in coordinator graph, monotonic candidate progress calculation, remove 25% fallback, 60+ dynamic thinking phrases engine | M7, M8, M8.5 | DONE |
+| M10 | Benchmarks, Byzantine/Fault Regressions & Solo PR Shipping | 7-metric deterministic benchmark suite (`tests/benchmarks_r4.rs`), Byzantine peer & fault regression suite, full test suite verification, solo PR shipping via `scripts/solo_pr_ship.ps1`, clean merge into main | M7, M8, M8.5, M9 | IN_PROGRESS |
+
 
 ## Interface Contracts
 
@@ -270,3 +290,13 @@ To leverage existing fusion intelligence from `d:\harfile\fusion`, QuorumRAG dir
 - **Hot-Swappable Configuration & Web UI Selector**:
   - `quorumrag.toml` defaults to `glm-4-9b-chat`.
   - The ChatGPT Web UI renders an interactive model pill selector (`GLM-4-9B`, `Qwen 2.5`, `Gemma 2/3`, `Auto-Fusion`), streaming active model family and selection rationale in SSE headers and response badges.
+
+
+## Source Code Ingestion Exclusion & RAG Document/Image Isolation (Milestone M8.5)
+
+### Core Invariants:
+1. **Documents & Images Only**: The ingestion pipeline (`quorum-ingest` / `ClassifierRouter` / `FilesystemCrawler`) strictly indexes documents, text/data files, and image assets (`.pdf`, `.docx`, `.doc`, `.odt`, `.rtf`, `.epub`, `.xlsx`, `.xls`, `.ods`, `.pptx`, `.ppt`, `.odp`, `.txt`, `.md`, `.csv`, `.tsv`, `.json`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp`, `.svg`, `.tiff`, etc.).
+2. **Deterministic Source Code Filtering**: Deterministically filter out `FileCategory::Code` and source code extensions (`.rs`, `.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.c`, `.cpp`, `.h`, `.hpp`, `.cc`, `.cs`, `.java`, `.go`, `.kt`, `.rb`, `.php`, `.swift`, `.scala`, `.sh`, `.bash`, `.ps1`, `.bat`, `.cmd`, `.sql`, `.css`, `.scss`, `.less`, `.vue`, `.svelte`, etc.) in addition to binary/DLL/EXE files.
+3. **Preserve Classifier Tests**: `FileTypeClassifier::classify_bytes` in `quorum-classifier` retains `FileCategory::Code` identification capability for classifier unit tests.
+4. **Configuration Default**: `IngestConfig::exclude_source_code` defaults to `true` unless a test or explicit flag overrides it.
+5. **RAG Search Isolation**: Any source code chunks in existing indexes are filtered/skipped during reindexing or retrieval so RAG queries return only user documents and images.

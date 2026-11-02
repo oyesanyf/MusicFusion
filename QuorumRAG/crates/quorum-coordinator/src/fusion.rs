@@ -17,37 +17,55 @@ impl RrfCombiner {
         k: f32,
         top_k: usize,
     ) -> Vec<ScoredChunk> {
-        // Map from chunk_id to (base_rrf_score, ScoredChunk, HashSet of distinct peer IDs)
+        // Map from cryptographic blake3_hash to (base_rrf_score, ScoredChunk, HashSet of distinct peer IDs)
         // Local is peer 0; remote peers are indexed 1..=N
         let mut rrf_map: HashMap<String, (f32, ScoredChunk, HashSet<usize>)> = HashMap::new();
 
         const LOCAL_PEER_ID: usize = 0;
 
-        // 1. Local chunk rankings
+        // 1. Local chunk rankings with intra-local deduplication
+        let mut seen_local_hashes: HashSet<String> = HashSet::new();
         for (rank_0, scored) in local_results.into_iter().enumerate() {
+            let hash = if scored.chunk.blake3_hash.is_empty() {
+                DocumentChunk::compute_blake3_hash(&scored.chunk.text_content)
+            } else {
+                scored.chunk.blake3_hash.clone()
+            };
+
+            if !seen_local_hashes.insert(hash.clone()) {
+                continue;
+            }
+
             let score = 1.0 / (k + (rank_0 + 1) as f32);
-            let chunk_id = scored.chunk.chunk_id.clone();
             let entry = rrf_map
-                .entry(chunk_id)
+                .entry(hash)
                 .or_insert_with(|| (0.0, scored, HashSet::new()));
             entry.0 += score;
             entry.2.insert(LOCAL_PEER_ID);
         }
 
-        // 2. Remote peer chunk rankings
+        // 2. Remote peer chunk rankings with intra-peer anti-stuffing protection
         for (remote_idx, list) in remote_peer_lists.into_iter().enumerate() {
             let remote_peer_id = remote_idx + 1;
+            let mut seen_peer_hashes: HashSet<String> = HashSet::new();
+
             for (rank_0, candidate) in list.into_iter().enumerate() {
+                let content_hash = DocumentChunk::compute_blake3_hash(&candidate.content);
+
+                // Byzantine consensus hardening: a remote peer contributes at most ONCE per unique chunk content
+                if !seen_peer_hashes.insert(content_hash.clone()) {
+                    continue;
+                }
+
                 let score = 1.0 / (k + (rank_0 + 1) as f32);
-                let chunk_id = candidate.chunk_id.clone();
-                let entry = rrf_map.entry(chunk_id).or_insert_with(|| {
+                let entry = rrf_map.entry(content_hash.clone()).or_insert_with(|| {
                     let doc_chunk = DocumentChunk {
                         chunk_id: candidate.chunk_id.clone(),
                         document_id: "remote_doc".to_string(),
                         file_path: candidate.file_path,
                         line_start: candidate.line_start,
                         line_end: candidate.line_end,
-                        blake3_hash: DocumentChunk::compute_blake3_hash(&candidate.content),
+                        blake3_hash: content_hash,
                         access_tier: candidate.access_tier,
                         vector: vec![0.0; 768],
                         text_content: candidate.content,
@@ -64,7 +82,7 @@ impl RrfCombiner {
         // 3. Finalize scores with 1.25x multi-peer consensus boost for chunks seen across >= 2 peers
         let mut fused: Vec<ScoredChunk> = rrf_map
             .into_iter()
-            .map(|(_id, (base_score, mut chunk, peers))| {
+            .map(|(_hash, (base_score, mut chunk, peers))| {
                 let final_score = if peers.len() >= 2 {
                     base_score * 1.25
                 } else {

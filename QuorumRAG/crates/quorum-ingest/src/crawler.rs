@@ -106,6 +106,7 @@ impl FilesystemCrawler {
         let crawler = Arc::clone(&self);
 
         let handle = tokio::task::spawn_blocking(move || {
+            crate::throttling::set_background_thread_priority();
             crawler.run_crawl_blocking(tx)
         });
 
@@ -124,6 +125,7 @@ impl FilesystemCrawler {
         let crawler = Arc::clone(&self);
 
         let handle = tokio::task::spawn_blocking(move || {
+            crate::throttling::set_background_thread_priority();
             let start = Instant::now();
             let stats = Arc::new(AtomicCrawlerStats::new());
             crawler.crawl_single_root(&root, &tx, &stats)?;
@@ -203,7 +205,8 @@ impl FilesystemCrawler {
             .same_file_system(self.config.same_file_system)
             .max_filesize(Some(self.config.max_file_size_bytes));
 
-        builder.filter_entry(|entry| {
+        let exclude_source_code = self.config.exclude_source_code;
+        builder.filter_entry(move |entry| {
             if entry.depth() == 0 {
                 return true;
             }
@@ -243,8 +246,26 @@ impl FilesystemCrawler {
                     ) {
                         return false;
                     }
-                } else if lower.starts_with("~$")
+                    if exclude_source_code
+                        && matches!(
+                            lower.as_str(),
+                            "harfile"
+                                | "python311"
+                                | "tools"
+                                | "yara"
+                                | "rules"
+                                | "db"
+                                | "dataset"
+                                | "restored_attachments"
+                        )
+                    {
+                        return false;
+                    }
+                } else if lower.starts_with('~')
                     || lower.starts_with(".~lock")
+                    || lower.ends_with(".tmp")
+                    || lower.ends_with(".bak")
+                    || lower.ends_with(".wbk")
                     || matches!(
                         lower.as_str(),
                         "cargo.lock"
@@ -255,8 +276,25 @@ impl FilesystemCrawler {
                             | "composer.lock"
                             | "gemfile.lock"
                     )
+                    || std::path::Path::new(&lower)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(quorum_classifier::is_binary_executable_extension)
+                        .unwrap_or(false)
                 {
                     return false;
+                } else if exclude_source_code {
+                    const EXCLUDED_SOURCE_EXTS: &[&str] = &[
+                        ".rs", ".py", ".js", ".ts", ".jsx", ".tsx", ".c", ".cpp", ".h", ".hpp",
+                        ".cc", ".cs", ".java", ".go", ".kt", ".rb", ".php", ".swift", ".scala",
+                        ".sh", ".bash", ".ps1", ".bat", ".cmd", ".sql", ".css", ".scss", ".less",
+                        ".vue", ".svelte", ".toml", ".yaml", ".yml", ".lock", ".dat", ".log",
+                        ".json", ".jsonl", ".xml", ".html", ".htm", ".tex", ".aux", ".bbl",
+                        ".blg", ".out", ".toc", ".synctex", ".crt", ".pem", ".key",
+                    ];
+                    if EXCLUDED_SOURCE_EXTS.iter().any(|ext| lower.ends_with(ext)) {
+                        return false;
+                    }
                 }
             }
             true

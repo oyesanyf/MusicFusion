@@ -1,14 +1,16 @@
-# BRIEFING — 2026-10-31T16:34:30Z
+# BRIEFING — 2026-11-02T04:56:00Z
 
 ## Mission
-Orchestrate execution of QuorumRAG: a local-first peer-to-peer retrieval-augmented generation daemon with embedded LanceDB, Gemma embedding contract, rust-libp2p networking, Google Magika file identification, single .exe launcher, ChatGPT-like web UI, LangGraph-style Rust Agentic State Graph, full Search Modes + Image Indexing, dedicated Reindex & All-Drift Healing (`fix-drift`), and Multi-Model Adaptive Intent + Hardware Fusion Router (GLM-4-9B, Qwen 2.5, Gemma 2/3).
+Orchestrate execution of QuorumRAG zero-overhead performance, indexing blind-spot elimination, filesystem race condition prevention, deterministic binary/DLL/EXE filtering, mandatory source code & Office temporary file exclusion (documents & images only), strict RAG-only synthesis (no ungrounded LLM synthesis), multi-term entity precision, sources strictly after full response, UI welcome banner removal, low-latency live streaming (1-2s), P2P mesh hardening, UI stop button & rich thinking phrases, and solo PR merge into main.
 
 ## 🔒 My Identity
 - Archetype: sentinel
 - Working directory: d:\harfile\QuorumRAG\.agents\teamwork
-- Orchestrator: e13403c5-b0e6-48a4-a1ec-a1f096f9f53e
+- Orchestrator: facfe77d-94d3-44be-95df-eec2b9dfe368
 - Victory Auditor: to be spawned on victory claim
-- Victory Auditor ID: 8de85959-3129-4a9d-a673-52ce02e5c5d1
+- Victory Auditor ID: to be determined upon victory claim
+- Active Sentinel Conversation ID: dc0b066f-390f-46a5-bd85-361145ac6afd
+- Task Interviewer ID: e80c4513-0c74-40d9-a68f-297dfcb26c15 (retired)
 
 ## 🔒 Key Constraints
 - No technical decisions — relay only
@@ -42,22 +44,49 @@ Orchestrate execution of QuorumRAG: a local-first peer-to-peer retrieval-augment
 - `LlmFusionConsensus` Multi-Arm Architecture (adapted from `breakout_defense.rs` lines 3440–3697): Arm 1 SemanticSpanExtractor, Arm 2 SyntacticAstVerifier, Arm 3 CounterfactualJudge, and Arm 4 LangGraph calibration evaluating `confidence_bp` across local GLM-4-9B, Qwen 2.5, Gemma 3 setup
 - Live IDE Execution & Production Code Generation Gate: Once compiled in Milestone 5, start `quorumrag.exe` live in IDE against workspace, execute live coding query generating compilable production code with exact `[Peer:File:Lines]` citations & grounded `char_interval` spans, and auto-open ChatGPT Web UI in browser
 - First-Class Caching & Re-Cache (`recache`): Multi-layer BLAKE3 QueryCache & EmbeddingCache, cache hit telemetry (`/api/chat`, `/api/query`, `/api/health`, `GET /api/cache/stats`), CLI `quorumrag recache [--clear] [--warm]`, REST `POST /api/cache/recache`, automatic cache coherence on reindex/fix-drift/watcher, and ChatGPT Web UI "Re-Cache" button & live stats indicator
+- Zero noticeable I/O, CPU, or memory overhead to host systems or local storage operations
+- Strictly offline operation with zero external internet search requests
+- Startup TwoLevelDedupEngine hydration from existing storage chunks (LanceDB)
+- Accurate file estimation and real-time live indexer progress reporting
+- Ingestion strictly indexes all target documents and image assets across available physical drives
+- Deterministically filter out compiled binaries, system libraries, and executables (EXE, DLL) prior to content parsing or embedding
+- Eliminate exploitable P2P vulnerabilities across mesh routing, quorum consensus, and data verification handshakes
+- Keep on-disk index storage schemas, physical drive mount interfaces, cryptographic chunk attestation and ACL payloads, lexical/vector ranking semantics, legitimate host disk throughput, and public Rust APIs unchanged
+- Active stop button on chat interface for immediate query cancellation
+- Solo developer process: clean branch, atomic commits, automated test suite with zero regressions, PR with before/after metrics, self-review, clean merge into main
+- Milestone M9 UI Thinking Phrases: Expand THINKING_PHRASES in crates/quorum-ui/assets/app.js to a 60+ pool of varied, engaging status phrases, start on a random phrase and cycle rapidly (~650ms) without repeating twice consecutively until TokenDelta arrives, and never freeze the interval on intermediate telemetry events
+- Mandatory Source Code Exclusion: The ingestion pipeline must strictly index only documents, text/data documents, and image assets, and deterministically EXCLUDE source code files (FileCategory::Code and source code extensions such as .rs, .py, .js, .ts, .c, .cpp, .java, .go, .sh, etc.) in addition to compiled binaries and executables. Exclude source code by default in IngestConfig (exclude_source_code: true) while preserving FileCategory::Code classification in quorum-classifier. Also purge/skip indexed source code chunks during reindexing and retrieval so RAG returns only documents and images
+- Semantic Precision & Anti-Hallucination: Expand GENERIC_ATTRIBUTE_TERMS in offline_engine.rs/retrieve.rs; enforce multi-term entity matching (document chunk must match at least (N+1)/2 distinct terms with at least 1 non-generic primary subject term) rejecting single-word accidental matches on multi-word queries; never output "Retrieved Grounded Evidence (N matching chunks)"
+- Sources Listed Strictly After Full Response: All responses must render/emit Sources (citations) at the bottom after streaming is complete (never above response text). Always include source attribution even for 0-document general questions ("Local Neural Model (Air-Gapped Ollama)")
+- Fast Local Streaming Latency: query_local_ollama_chat must stream TokenDelta within 1-2s using compact prompts (top 4 chunks <=900 chars, num_predict: 600, num_ctx: 2048) and avoid hanging on synthesis status
+- End-to-End Live Token Streaming Order: telemetry_tx must be forwarded from agentic/mod.rs into SynthesizeWithCitationsNode::execute and DeterministicOfflineSynthesisEngine::synthesize_with_history so query_local_ollama_chat streams real TokenDelta events immediately (~1s); all fallback/cache paths must emit TokenDelta before CitationEmitted; citations must strictly emit after full response tokens; chat.rs must remove post-hoc word loops; entity matching in offline_engine.rs must enforce alphanumeric word boundaries
+- Office/Word Temporary & Autosave File Exclusion: In offline_engine.rs, retrieve.rs, and quorum-ingest (ClassifierRouter / FilesystemCrawler), deterministically filter out Office/Word temporary lock and autosave files (file_name.starts_with('~'), *.tmp, *.bak) alongside source code files (FileCategory::Code) and compiled binaries
+- Strict RAG-Only Synthesis: Removed default_model_citation and ungrounded LLM synthesis. Responses are synthesized 100% deterministically from retrieved RAG chunks with ### 📄 <filename> headers and real local file Sources at bottom; returns "No matching documents were found in your local RAG index for **<prompt>**." when empty
+- UI Clean Layout: Welcome banner and quick-prompt chips permanently removed from UI
 
 ## User Context
-- **Last user request**: "the code needs to have caching and re cache" (Multi-layer BLAKE3 QueryCache/EmbeddingCache, recache CLI, /api/cache/recache & /api/cache/stats endpoints, automatic cache coherence, and Web UI Re-Cache button & live stats)
+- **Last user request**: 
+  1. Strict RAG-Only Synthesis: Responses synthesized 100% deterministically from retrieved RAG chunks (`matched_chunks`), ungrounded LLM synthesis and default model citations removed; when 0 chunks match, returns "No matching documents were found in your local RAG index for **<prompt>**." with empty citations.
+  2. Source Code, Dump & Temporary File Exclusion: exclude_source_code in IngestConfig (true in daemon), excluding FileCategory::Code, code/config/dump extensions, and Office temporary lock files (~$*, .~lock*, *.tmp, *.bak, *.wbk).
+  3. UI Welcome Banner Removal: Permanently removed welcome banner and prompt chips from index.html, app.js, and styles.css.
 - **Pending clarifications**: none
 - **Delivered results**: none
 
 ## Project Status
-- **Phase**: complete
+- **Phase**: in progress (Milestones M7, M8, M8.5, M9 Gated PASS; Milestone M10 In Progress)
 - **Route**: General path (`teamwork_orchestrator`)
-- **Active Orchestrator**: e13403c5-b0e6-48a4-a1ec-a1f096f9f53e
+- **Active Orchestrator**: facfe77d-94d3-44be-95df-eec2b9dfe368
+- **Milestone Status**:
+  - M7 (Zero-Overhead Ingestion Pipeline & Binary Filtering): Gated PASS
+  - M8 (Low-Latency Query Execution, Consensus & P2P Security Hardening): Gated PASS
+  - M8.5 (Source Code & Temporary File Ingestion Exclusion & RAG Isolation): Gated PASS
+  - M9 (UI Stop Button, Dynamic Thinking Phrases & Real-Time Monotonic Indexer Progress): Gated PASS
+  - M10 (7-Metric Benchmarks, Fault Regressions & Solo PR Shipping): In Progress
 
-## Victory Audit Status
-- **Triggered**: yes
-- **Verdict**: VICTORY CONFIRMED
+## Victory Auditor Status
+- **Triggered**: no
+- **Verdict**: pending
 - **Retry count**: 0
 
 ## Artifact Index
-- .agents/teamwork/ORIGINAL_REQUEST.md — Approved task prompt and follow-up requirements
-- PROJECT.md — Architecture, features, agentic state graph, search modes, image indexing, reindex & drift healing, multi-model fusion router
+- .agents/teamwork/ORIGINAL_REQUEST.md — Authoritative record of requests and approved task prompts

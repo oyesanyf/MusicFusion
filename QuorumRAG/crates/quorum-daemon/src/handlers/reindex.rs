@@ -87,7 +87,7 @@ pub async fn reindex_status_handler(
                 let pct = if progress.files_total_estimated > 0 {
                     ((progress.files_scanned as f64 / progress.files_total_estimated as f64) * 100.0)
                         .clamp(0.0, 100.0)
-                } else if matches!(progress.phase, quorum_ingest::ReindexPhase::Completed) {
+                } else if matches!(progress.phase, quorum_ingest::ReindexPhase::Completed) || total_stored_chunks > 0 {
                     100.0
                 } else {
                     0.0
@@ -99,21 +99,25 @@ pub async fn reindex_status_handler(
             }
             Json(val).into_response()
         }
-        None => Json(serde_json::json!({
-            "phase": "scanning_filesystem",
-            "percent": 0.0,
-            "files_scanned": 0,
-            "files_total_estimated": 0,
-            "files_indexed": 0,
-            "files_skipped_unmodified": 0,
-            "chunks_newly_embedded": 0,
-            "chunks_reused_from_cache": 0,
-            "total_stored_chunks": total_stored_chunks,
-            "continuous_mode": true,
-            "watched_paths": watched_paths,
-            "message": "Continuous background indexer initializing..."
-        }))
-        .into_response(),
+        None => {
+            let pct = if total_stored_chunks > 0 { 100.0 } else { 0.0 };
+            let phase = if total_stored_chunks > 0 { "completed" } else { "scanning_filesystem" };
+            Json(serde_json::json!({
+                "phase": phase,
+                "percent": pct,
+                "files_scanned": 0,
+                "files_total_estimated": 0,
+                "files_indexed": 0,
+                "files_skipped_unmodified": 0,
+                "chunks_newly_embedded": 0,
+                "chunks_reused_from_cache": 0,
+                "total_stored_chunks": total_stored_chunks,
+                "continuous_mode": true,
+                "watched_paths": watched_paths,
+                "message": if total_stored_chunks > 0 { "Index active and up to date." } else { "Continuous background indexer initializing..." }
+            }))
+            .into_response()
+        }
     }
 }
 

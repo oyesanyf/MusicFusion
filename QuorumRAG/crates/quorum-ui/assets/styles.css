@@ -458,49 +458,23 @@ body {
 
 .welcome-banner {
   text-align: center;
-  padding: 40px 10px;
+  padding: 40px 20px 24px 20px;
 }
 
-.welcome-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
+.welcome-logo {
+  font-size: 44px;
+  margin-bottom: 10px;
 }
 
-.welcome-banner h2 {
-  font-size: 26px;
-  margin-bottom: 8px;
+.welcome-banner h1 {
+  font-size: 28px;
   font-weight: 700;
+  margin-bottom: 6px;
 }
 
-.welcome-banner p {
-  color: var(--text-muted);
-  font-size: 14px;
-  margin-bottom: 24px;
-}
-
-.quick-prompts {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 480px;
-  margin: 0 auto;
-}
-
+.quick-prompts,
 .prompt-chip {
-  background-color: var(--bg-surface);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px 14px;
-  color: var(--text-primary);
-  font-size: 13px;
-  cursor: pointer;
-  text-align: left;
-  transition: all 0.15s ease;
-}
-
-.prompt-chip:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
+  display: none !important;
 }
 
 /* CHAT MESSAGES */
@@ -664,6 +638,30 @@ body {
 .btn-send:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+.btn-stop {
+  background-color: var(--danger, #ef4444);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.btn-stop:hover {
+  background-color: #dc2626;
+  transform: translateY(-1px);
+}
+
+.btn-stop:active {
+  transform: translateY(0);
 }
 
 .input-footer {

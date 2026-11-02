@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::classifier_router::CandidateKind;
 use crate::chunker::TextChunker;
 use crate::config::{ChunkerConfig, IngestConfig, ReindexOptions};
-use crate::crawler::FilesystemCrawler;
+use crate::crawler::{DiscoveredCandidate, FilesystemCrawler};
 use crate::dedup::{DedupAction, FileCatalogEntry, TwoLevelDedupEngine};
 use crate::document_extractor::DocumentExtractor;
 use crate::error::IngestError;
@@ -275,35 +275,62 @@ impl ReindexWorker {
         let targets = Self::expand_drive_roots(&raw_targets);
         let chunker = TextChunker::new(ChunkerConfig::default());
 
+        // Phase 1: Decoupled Upfront Discovery across all target slices
+        let mut all_candidates: Vec<DiscoveredCandidate> = Vec::new();
+        let mut seen_paths: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+
         for target in &targets {
             if !target.exists() {
                 warn!("Target path does not exist, skipping: {}", target.display());
                 continue;
             }
 
+            if cancel_flag.load(Ordering::SeqCst) {
+                return Err(IngestError::Cancelled);
+            }
+
             let cfg_clone = config.clone();
             let target_clone = target.clone();
             let candidates = tokio::task::spawn_blocking(move || {
+                crate::throttling::set_background_thread_priority();
                 let crawler = FilesystemCrawler::new(cfg_clone);
                 crawler.crawl_path_sync(&target_clone)
             })
             .await
             .map_err(|e| IngestError::Io(std::io::Error::other(format!("Crawl task panicked: {}", e))))??;
 
-            {
-                let mut lock = progress.write().await;
-                if let Some(ref mut p) = *lock {
-                    p.files_total_estimated += candidates.len();
-                    p.phase = ReindexPhase::ChunkingAndVectorizing;
+            for candidate in candidates {
+                if seen_paths.insert(candidate.path.clone()) {
+                    all_candidates.push(candidate);
                 }
             }
 
-            let mut batch_chunks: Vec<DocumentChunk> = Vec::with_capacity(options.batch_size);
-
-            for candidate in candidates {
-                if cancel_flag.load(Ordering::SeqCst) {
-                    return Err(IngestError::Cancelled);
+            {
+                let mut lock = progress.write().await;
+                if let Some(ref mut p) = *lock {
+                    p.files_total_estimated = all_candidates.len();
                 }
+            }
+        }
+
+        // Transition to Phase 2: Chunking & Vectorizing with total candidate count fixed
+        {
+            let mut lock = progress.write().await;
+            if let Some(ref mut p) = *lock {
+                p.files_total_estimated = all_candidates.len();
+                p.phase = ReindexPhase::ChunkingAndVectorizing;
+            }
+        }
+
+        let mut batch_chunks: Vec<DocumentChunk> = Vec::with_capacity(options.batch_size);
+
+        for candidate in all_candidates {
+            if cancel_flag.load(Ordering::SeqCst) {
+                return Err(IngestError::Cancelled);
+            }
+
+                // Cooperative multitasking yield point
+                tokio::task::yield_now().await;
 
                 {
                     let mut lock = progress.write().await;
@@ -371,6 +398,10 @@ impl ReindexWorker {
                         let path_str = path.to_string_lossy().to_string();
 
                         for raw in raw_chunks {
+                            if raw.chunk_index > 0 && raw.chunk_index % 8 == 0 {
+                                tokio::task::yield_now().await;
+                            }
+
                             let chunk_b3 = DocumentChunk::compute_blake3_hash(raw.text_slice);
                             file_chunk_hashes.push(chunk_b3.clone());
 
@@ -482,6 +513,7 @@ impl ReindexWorker {
                         let _ = storage.bump_index_epoch("reindex_micro_batch");
                     }
                     batch_chunks.clear();
+                    tokio::task::yield_now().await;
                 }
 
                 let mut lock = progress.write().await;
@@ -493,10 +525,9 @@ impl ReindexWorker {
             // Flush remaining micro-batch
             if !batch_chunks.is_empty() && !options.dry_run {
                 let _ = storage.insert_chunks(&batch_chunks).await?;
-                let _ = storage.bump_index_epoch("reindex_slice_flush");
+                let _ = storage.bump_index_epoch("reindex_final_flush");
                 batch_chunks.clear();
             }
-        }
 
         // Compaction phase if full rebuild
         if options.full_rebuild && !options.dry_run {
@@ -530,7 +561,7 @@ impl ReindexWorker {
 
     /// Expands drive roots (e.g., `D:\`, `C:\`) into incremental top-level slices so user documents
     /// are indexed and searchable within seconds rather than waiting for a multi-terabyte full-drive walk.
-    fn expand_drive_roots(raw_targets: &[ std::path::PathBuf ]) -> Vec<std::path::PathBuf> {
+    pub fn expand_drive_roots(raw_targets: &[ std::path::PathBuf ]) -> Vec<std::path::PathBuf> {
         const SKIP_DIRS: &[&str] = &[
             "$recycle.bin",
             "system volume information",
@@ -556,12 +587,20 @@ impl ReindexWorker {
             ".venv",
             "venv",
             ".tmp.driveupload",
+            ".pytest_cache",
+            ".lance",
+            ".tantivy",
+            ".quorumrag-live-data",
         ];
 
         let mut expanded = Vec::new();
         for target in raw_targets {
             let is_drive_root = target.parent().is_none()
-                || target.to_string_lossy().len() <= 3;
+                || target.to_string_lossy().len() <= 3
+                || target.file_name().map(|n| {
+                    let s = n.to_string_lossy();
+                    s.starts_with(".tmp") || s.starts_with("tmp") || s.contains("mock_drive") || s.contains("test")
+                }).unwrap_or(false);
             if !is_drive_root {
                 expanded.push(target.clone());
                 continue;
@@ -582,7 +621,7 @@ impl ReindexWorker {
                     .file_name()
                     .to_string_lossy()
                     .to_ascii_lowercase();
-                if SKIP_DIRS.contains(&name_lower.as_str()) || name_lower.starts_with('.') {
+                if SKIP_DIRS.contains(&name_lower.as_str()) {
                     continue;
                 }
 
@@ -592,7 +631,7 @@ impl ReindexWorker {
                         for sub in sub_entries.flatten() {
                             let sub_path = sub.path();
                             let sub_name = sub.file_name().to_string_lossy().to_ascii_lowercase();
-                            if SKIP_DIRS.contains(&sub_name.as_str()) || sub_name.starts_with('.') {
+                            if SKIP_DIRS.contains(&sub_name.as_str()) {
                                 continue;
                             }
                             if matches!(
@@ -603,9 +642,18 @@ impl ReindexWorker {
                             } else if sub_name.contains("mechanistic_interpretability") {
                                 let probe_dir = sub_path.join("probe_and_tools");
                                 if probe_dir.is_dir() {
-                                    top_priority_slices.push(probe_dir);
+                                    top_priority_slices.push(probe_dir.clone());
+                                    if let Ok(sub_children) = std::fs::read_dir(&sub_path) {
+                                        for child in sub_children.flatten() {
+                                            let child_path = child.path();
+                                            if child_path != probe_dir {
+                                                priority_slices.push(child_path);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    priority_slices.push(sub_path);
                                 }
-                                priority_slices.push(sub_path);
                             } else if sub_name.contains("quorumrag") {
                                 priority_slices.push(sub_path);
                             } else {
@@ -631,6 +679,9 @@ impl ReindexWorker {
             expanded.extend(priority_slices);
             expanded.extend(normal_slices);
         }
+
+        let mut seen = std::collections::HashSet::new();
+        expanded.retain(|p| seen.insert(p.clone()));
 
         if expanded.is_empty() {
             raw_targets.to_vec()

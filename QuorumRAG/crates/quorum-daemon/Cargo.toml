@@ -48,3 +48,7 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[[test]]
+name = "benchmarks_r4"
+path = "../../tests/benchmarks_r4.rs"

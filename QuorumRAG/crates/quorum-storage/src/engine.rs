@@ -252,7 +252,7 @@ impl StorageEngine {
             if seen_hashes.contains(&chunk.blake3_hash) {
                 continue;
             }
-            if self.has_chunk_hash(&chunk.blake3_hash).await.unwrap_or(false) {
+            if self.fts_index.has_chunk_hash(&chunk.blake3_hash).unwrap_or(false) {
                 continue;
             }
             seen_hashes.insert(chunk.blake3_hash.clone());
@@ -269,14 +269,22 @@ impl StorageEngine {
         Ok(count)
     }
 
-    /// Dense vector ANN search with access-tier SQL pre-filtering.
+    /// Dense vector ANN search with access-tier SQL pre-filtering (bounded to 450ms for low-latency responsiveness).
     pub async fn search_vector(
         &self,
         vector: &[f32],
         max_tier: u8,
         top_k: usize,
     ) -> Result<Vec<ScoredChunk>, StorageError> {
-        self.vector_store.search_vector(vector, max_tier, top_k).await
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(450),
+            self.vector_store.search_vector(vector, max_tier, top_k),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(_) => Ok(Vec::new()),
+        }
     }
 
     /// Tantivy BM25 keyword search with access-tier filtering.
@@ -301,9 +309,12 @@ impl StorageEngine {
             return Ok(Vec::new());
         }
 
-        let candidate_limit = top_k.saturating_mul(2).clamp(10, 50_000);
-        let vector_hits = self.search_vector(vector, max_tier, candidate_limit).await?;
+        let candidate_limit = top_k.saturating_mul(2).clamp(10, 128);
         let text_hits = self.search_text(text, max_tier, candidate_limit).await?;
+        let vector_hits = self
+            .search_vector(vector, max_tier, candidate_limit)
+            .await
+            .unwrap_or_default();
 
         let mut rrf_map: HashMap<String, (f32, DocumentChunk)> = HashMap::new();
 

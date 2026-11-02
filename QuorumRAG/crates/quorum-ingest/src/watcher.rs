@@ -114,6 +114,42 @@ impl FilesystemWatcher {
         Ok((rx, handle))
     }
 
+    /// Helper to safely dispatch events with QueueOverflow emission on channel saturation.
+    fn send_event(tx: &mpsc::Sender<WatcherEvent>, event: WatcherEvent, fallback_root: &Path) {
+        if let Err(e) = tx.try_send(event) {
+            warn!(path = %fallback_root.display(), error = %e, "Watcher event channel full; emitting QueueOverflow");
+            if tx.try_send(WatcherEvent::QueueOverflow {
+                root: fallback_root.to_path_buf(),
+                details: format!("Internal channel capacity saturated: {}", e),
+            }).is_err() {
+                let tx_clone = tx.clone();
+                let root_buf = fallback_root.to_path_buf();
+                let details = format!("Internal channel saturated: {}", e);
+                std::thread::spawn(move || {
+                    let _ = tx_clone.blocking_send(WatcherEvent::QueueOverflow {
+                        root: root_buf,
+                        details,
+                    });
+                });
+            }
+        }
+    }
+
+    /// Recursively emits individual file events for a directory.
+    fn dispatch_dir_files<F>(dir: &Path, tx: &mpsc::Sender<WatcherEvent>, constructor: F)
+    where
+        F: Fn(PathBuf) -> WatcherEvent,
+    {
+        for entry in walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_file() {
+                Self::send_event(tx, constructor(entry.into_path()), dir);
+            }
+        }
+    }
+
     /// Maps native `DebouncedEvent` into QuorumRAG `WatcherEvent`.
     fn dispatch_debounced_event(event: &DebouncedEvent, tx: &mpsc::Sender<WatcherEvent>) {
         use notify::event::ModifyKind;
@@ -122,7 +158,9 @@ impl FilesystemWatcher {
             EventKind::Create(_) => {
                 for path in &event.paths {
                     if path.is_file() {
-                        let _ = tx.try_send(WatcherEvent::Create(path.clone()));
+                        Self::send_event(tx, WatcherEvent::Create(path.clone()), path);
+                    } else if path.is_dir() {
+                        Self::dispatch_dir_files(path, tx, WatcherEvent::Create);
                     }
                 }
             }
@@ -131,26 +169,32 @@ impl FilesystemWatcher {
                 if event.paths.len() >= 2 {
                     let from = event.paths[0].clone();
                     let to = event.paths[1].clone();
-                    let _ = tx.try_send(WatcherEvent::Rename { from, to });
+                    Self::send_event(tx, WatcherEvent::Rename { from, to }, &event.paths[0]);
                 } else if let Some(path) = event.paths.first() {
                     // Single-path rename (e.g. rename from outside watch dir)
                     if path.exists() {
-                        let _ = tx.try_send(WatcherEvent::Create(path.clone()));
+                        if path.is_file() {
+                            Self::send_event(tx, WatcherEvent::Create(path.clone()), path);
+                        } else if path.is_dir() {
+                            Self::dispatch_dir_files(path, tx, WatcherEvent::Create);
+                        }
                     } else {
-                        let _ = tx.try_send(WatcherEvent::Remove(path.clone()));
+                        Self::send_event(tx, WatcherEvent::Remove(path.clone()), path);
                     }
                 }
             }
             EventKind::Modify(_) => {
                 for path in &event.paths {
                     if path.is_file() {
-                        let _ = tx.try_send(WatcherEvent::Modify(path.clone()));
+                        Self::send_event(tx, WatcherEvent::Modify(path.clone()), path);
+                    } else if path.is_dir() {
+                        Self::dispatch_dir_files(path, tx, WatcherEvent::Modify);
                     }
                 }
             }
             EventKind::Remove(_) => {
                 for path in &event.paths {
-                    let _ = tx.try_send(WatcherEvent::Remove(path.clone()));
+                    Self::send_event(tx, WatcherEvent::Remove(path.clone()), path);
                 }
             }
             EventKind::Other => {

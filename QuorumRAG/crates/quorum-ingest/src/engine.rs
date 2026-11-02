@@ -249,24 +249,65 @@ impl IngestEngine {
             }
             WatcherEvent::Remove(path) => {
                 let path_str = path.to_string_lossy().to_string();
-                let count = self.storage.delete_by_file_path(&path_str).await?;
+                let mut count = self.storage.delete_by_file_path(&path_str).await?;
                 self.dedup.remove_file(&path);
+
+                // Handle directory deletion: purge all tracked children under path
+                let tracked = self.dedup.get_all_tracked_files();
+                for tracked_file in tracked {
+                    if tracked_file.starts_with(&path) {
+                        let tracked_str = tracked_file.to_string_lossy().to_string();
+                        let c = self.storage.delete_by_file_path(&tracked_str).await.unwrap_or(0);
+                        self.dedup.remove_file(&tracked_file);
+                        count += c;
+                    }
+                }
+
                 if count > 0 {
                     storage_mutated = true;
                 }
-                debug!(path = %path.display(), "Removed deleted file from storage and catalog");
+                debug!(path = %path.display(), count, "Removed deleted file or directory from storage and catalog");
             }
             WatcherEvent::Rename { from, to } => {
-                let from_str = from.to_string_lossy().to_string();
-                let count = self.storage.delete_by_file_path(&from_str).await?;
-                self.dedup.remove_file(&from);
-                if count > 0 {
-                    storage_mutated = true;
-                }
-                if to.is_file() {
-                    if let Some(chunks) = self.ingest_file(&to).await? {
-                        if !chunks.is_empty() {
-                            storage_mutated = true;
+                if to.is_dir() {
+                    // Directory Rename:
+                    // 1. Delete all chunks and catalog entries with old path prefix
+                    let tracked = self.dedup.get_all_tracked_files();
+                    for tracked_file in tracked {
+                        if tracked_file.starts_with(&from) {
+                            let old_str = tracked_file.to_string_lossy().to_string();
+                            let c = self.storage.delete_by_file_path(&old_str).await.unwrap_or(0);
+                            self.dedup.remove_file(&tracked_file);
+                            if c > 0 {
+                                storage_mutated = true;
+                            }
+                        }
+                    }
+
+                    // 2. Recursively index all files under the new directory path
+                    for entry in walkdir::WalkDir::new(&to).into_iter().filter_map(|e| e.ok()) {
+                        if entry.file_type().is_file() {
+                            let new_file_path = entry.into_path();
+                            if let Some(chunks) = self.ingest_file(&new_file_path).await? {
+                                if !chunks.is_empty() {
+                                    storage_mutated = true;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Single File Rename:
+                    let from_str = from.to_string_lossy().to_string();
+                    let count = self.storage.delete_by_file_path(&from_str).await?;
+                    self.dedup.remove_file(&from);
+                    if count > 0 {
+                        storage_mutated = true;
+                    }
+                    if to.is_file() {
+                        if let Some(chunks) = self.ingest_file(&to).await? {
+                            if !chunks.is_empty() {
+                                storage_mutated = true;
+                            }
                         }
                     }
                 }

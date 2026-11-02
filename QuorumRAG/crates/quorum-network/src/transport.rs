@@ -99,3 +99,85 @@ pub fn build_swarm(
 
     Ok(swarm)
 }
+
+use std::net::{Ipv4Addr, Ipv6Addr};
+use libp2p::multiaddr::Protocol;
+
+/// Mathematically validates if an IPv4 address is loopback or private RFC1918 / link-local.
+pub fn is_private_or_loopback_ip4(ip: &Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    // Loopback: 127.0.0.0/8
+    if octets[0] == 127 {
+        return true;
+    }
+    // RFC1918:
+    // 10.0.0.0/8
+    if octets[0] == 10 {
+        return true;
+    }
+    // 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+    if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+        return true;
+    }
+    // 192.168.0.0/16
+    if octets[0] == 192 && octets[1] == 168 {
+        return true;
+    }
+    // Link-local: 169.254.0.0/16
+    if octets[0] == 169 && octets[1] == 254 {
+        return true;
+    }
+    // Unspecified: 0.0.0.0
+    if ip.is_unspecified() {
+        return true;
+    }
+    false
+}
+
+/// Mathematically validates if an IPv6 address is loopback or private / unique-local / link-local.
+pub fn is_private_or_loopback_ip6(ip: &Ipv6Addr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() {
+        return true;
+    }
+    let segments = ip.segments();
+    // Unique local address: fc00::/7
+    if (segments[0] & 0xfe00) == 0xfc00 {
+        return true;
+    }
+    // Link-local unicast: fe80::/10
+    if (segments[0] & 0xffc0) == 0xfe80 {
+        return true;
+    }
+    // IPv4-mapped IPv6 (::ffff:0:0/96)
+    if let Some(ip4) = ip.to_ipv4() {
+        return is_private_or_loopback_ip4(&ip4);
+    }
+    false
+}
+
+/// Air-gapped offline dial address gate: restricts swarm dialing to loopback and private subnets (RFC1918).
+/// Rejects public WAN addresses and arbitrary internet DNS names.
+pub fn is_allowed_dial_address(addr: &libp2p::Multiaddr) -> bool {
+    for protocol in addr.iter() {
+        match protocol {
+            Protocol::Ip4(ip) => {
+                if !is_private_or_loopback_ip4(&ip) {
+                    return false;
+                }
+            }
+            Protocol::Ip6(ip) => {
+                if !is_private_or_loopback_ip6(&ip) {
+                    return false;
+                }
+            }
+            Protocol::Dns(host) | Protocol::Dns4(host) | Protocol::Dns6(host) | Protocol::Dnsaddr(host) => {
+                let host_str = host.as_ref();
+                if host_str != "localhost" && !host_str.ends_with(".local") {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    true
+}
