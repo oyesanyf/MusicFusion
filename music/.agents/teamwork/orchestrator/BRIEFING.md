@@ -57,12 +57,18 @@ Build, test, and ship the 20-file Reference WAV Importer, Multi-File RVQ Tokeniz
 | explorer_m8_1 | teamwork_explorer | Survey WebUI & REST server for 1-20 WAV upload | completed | a4cebeec-7380-48e4-ae62-c9120ec0674b |
 | explorer_m8_2 | teamwork_explorer | Survey DSP feature extraction, RVQ codebook & AudioBuffer | completed | e10410b0-80c8-4515-bbc4-92f190cf2c38 |
 | spec_miner_m8 | teamwork_spec_miner | Survey RL Policy (PPO/Bandit+DPO), Composite Reward & Originality Guard specs | completed | a1d8352d-6b90-4ec7-8739-20114e257fd6 |
-| worker_m8 | teamwork_worker | Milestone 8 Implementation (WAV Importer, RVQ, RL & Originality Guard) | in-progress | 74d7d47e-5503-45b7-9e3a-36fe0eafa454 |
+| worker_m8 | teamwork_worker | Milestone 8 Implementation (WAV Importer, RVQ, RL & Originality Guard) | completed | 74d7d47e-5503-45b7-9e3a-36fe0eafa454 |
+| reviewer_m8_1 | teamwork_reviewer | Review DSP & RVQ Tokenizer | completed | 5147d80a-a7d4-41c8-92c4-3ed58f2dcbd5 |
+| reviewer_m8_2 | teamwork_reviewer | Review RL, Originality Guard, REST & WebUI | completed | aee09b36-efb1-4145-aa57-192cb19bdf29 |
+| challenger_m8_1 | teamwork_challenger | Empirical Challenge: DSP, RVQ & Originality Guard | completed | c3ea442a-5a17-4cc5-90a9-db3e0d94bf61 |
+| challenger_m8_2 | teamwork_challenger | Empirical Challenge: REST, 20-File Cap, SSRF & RL Benchmark | completed | bc2968ff-e4fa-4312-9279-73ecb74e068e |
+| auditor_m8 | teamwork_auditor | Forensic Integrity Audit (Zero Mocks, Bridgeport & ELVIS Safeguards) | completed | 6c28891e-2715-4b4b-a617-f0c8d16f8bab |
+| worker_m8_ship | teamwork_worker | Milestone 8 Shipper & Live Server Deployer | in-progress | 3d677b92-37cc-4232-a578-ecfa06581432 |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 4 / 16 (Milestone 8 generation)
-- Pending subagents: 74d7d47e-5503-45b7-9e3a-36fe0eafa454
+- Spawn count: 10 / 16 (Milestone 8 generation)
+- Pending subagents: 3d677b92-37cc-4232-a578-ecfa06581432
 - Predecessor: none
 - Successor: not yet spawned
 
