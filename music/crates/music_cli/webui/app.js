@@ -13,37 +13,37 @@
   // Sample Song Lyrics Definitions (Full Multi-Section English Lyrics)
   // ==========================================================================
   const SAMPLE_LYRICS_REGGAE_V1 = `[Intro]
-Yeah man, roots rock reggae from the heart of Kingston town, feel the rhythm in the morning sun.
+(Continuous hypnotic fingerpicked steel-string acoustic guitar riff with bright hammer-ons and warm open A Major chords at 104 BPM, supported by deep fingerstyle fretless bass)
+Pack the old suitcase by the kitchen door, city lights fading on the fourth-story floor.
 
 [Verse 1]
-Walking down the trenchtown avenue early morning light,
-Guiding all the children through the struggles of the night.
-Hear the sweet Nyabinghi drums rolling down the street,
-Every heavy burden falls before the one drop beat.
+Got a ticket in my coat and a dollar in my hand,
+Tracing every highway line across this restless land.
+You said keep the promise burning when the night gets cold,
+Every mile we travel is a story being told.
 
 [Chorus]
-One love, one heart, let us get together and feel alright.
-Give thanks and praises to the highest light,
-One love, one heart, we are standing tall through the darkest night.
+One love shining through the canyon rain!
+Carried on the rhythm of a midnight westbound train!
+From the wooden porch steps to the California sea,
+One love shining over you and me!
 
 [Verse 2]
-Rasta man vibration spreading joy across the land,
-Healing every brother with a helping open hand.
-Hypnotic bass is pumping deep inside the chest,
-Singing out for freedom and eternal peace and rest.
-
-[Guitar Solo]
-(Soaring psychedelic wah-wah guitar echoes through the hills of Zion)
+Dashboard glowing amber as the border towns roll by,
+Dawn is breaking crimson on the edge of the sky.
+We built our shelter out of honesty and grace,
+Found a quiet harbor in this wide-open space.
 
 [Bridge]
-Brothers and sisters don't you worry now,
-The truth will shine like thunder through the heavy clouds.
-Love is the answer, love is the righteous way,
-Lighting up tomorrow from the dawn of yesterday.
+Hear the slide guitar crying down the open line,
+Every crossroads leading back to yours and mine!
+
+[Guitar Solo]
+(16-bar melodic woody acoustic slide guitar solo with expressive bottleneck glissandos, warm open-string resonance, and Wurlitzer harmonic blooms)
 
 [Outro]
-One love, one heart, let the music play on and on,
-Jah guide and protect us till the morning dawn, yeah!`;
+One love shining, roll on down the line,
+Acoustic strings and tender souls forever intertwined.`;
 
   const SAMPLE_LYRICS_REGGAE_V2 = `[Intro]
 Turn up the wah guitar, feel that 80 BPM accelerated groove, Kingston heavy tape saturation!
@@ -3466,10 +3466,16 @@ Grace and love shining forevermore!`
     if (btnGenerateRl) {
       btnGenerateRl.addEventListener('click', async () => {
         btnGenerateRl.disabled = true;
-        btnGenerateRl.textContent = '⚡ Synthesizing with RL & Legal Guard...';
+        btnGenerateRl.textContent = '⚡ Synthesizing Brand-New Song with RL & Reference Style...';
 
         try {
-          const prompt = DOM.chatInputTextarea ? DOM.chatInputTextarea.value.trim() : '';
+          const refPromptInput = document.getElementById('ref-rl-prompt-input');
+          const heroPromptInput = document.getElementById('new-song-nl-prompt');
+          const chatVal = DOM.chatInputTextarea ? DOM.chatInputTextarea.value.trim() : '';
+          const refVal = refPromptInput ? refPromptInput.value.trim() : '';
+          const heroVal = heroPromptInput ? heroPromptInput.value.trim() : '';
+          const prompt = chatVal || refVal || heroVal;
+
           const res = await fetch('/api/reference-wavs/generate-rl', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3495,16 +3501,25 @@ Grace and love shining forevermore!`
             dpoStatusMsg.textContent = `RL Generation complete (Version ${data.version}). Click Keep or Revert to train DPO policy.`;
           }
 
-          // Switch active song audio to generated version
+          // Switch active song audio, title, prompt & lyrics to the newly generated song
           if (data.song_id) {
             const newId = data.song_id;
-            const newBpm = data.bpm || 96;
-            const newKey = data.key_signature || 'C Major';
-            const newTitle = `RL Ensemble Mix (${newBpm} BPM • ${newKey})`;
+            const newBpm = data.bpm || 104;
+            const newKey = data.key_signature || 'A Major';
+            const newTitle = data.title || `RL Ensemble Mix (${newBpm} BPM • ${newKey})`;
+            const newGenre = data.genre || '1988 Acoustic Folk & Soul Ballad';
+            const newLyrics = data.lyrics || SAMPLE_LYRICS_REGGAE_V1;
+            const usedPrompt = data.prompt || prompt || newTitle;
+
+            const promptBubble = document.getElementById('active-user-prompt');
+            if (promptBubble) {
+              promptBubble.textContent = usedPrompt;
+            }
+
             State.songs[newId] = {
               id: newId,
               title: newTitle,
-              genre: 'RL Ensemble Blend',
+              genre: newGenre,
               versions: {
                 [data.version || 1]: buildSongVersionRecord(
                   newId,
@@ -3512,15 +3527,25 @@ Grace and love shining forevermore!`
                   newTitle,
                   newBpm,
                   newKey,
-                  `Generated via RL Policy & Legal Originality Guard (${data.originality_report ? data.originality_report.originality_score_pct.toFixed(1) : '100.0'}% original).`,
-                  9.7
+                  `Generated via RL Policy & Legal Originality Guard (${data.originality_report ? data.originality_report.originality_score_pct.toFixed(1) : '100.0'}% original): ${usedPrompt}`,
+                  9.8,
+                  newLyrics
                 )
               }
             };
-            addSongCardToSidebar(newId, newTitle, 'RL Ensemble Blend', newBpm, newKey, 1);
+            addSongCardToSidebar(newId, newTitle, newGenre, newBpm, newKey, 1);
             State.activeSongId = newId;
             State.activeVersion = data.version || 1;
             switchVersion(data.version || 1, true);
+
+            const bust = Date.now();
+            if (DOM.masterAudio) {
+              DOM.masterAudio.src = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?t=${bust}`;
+              DOM.masterAudio.muted = false;
+              DOM.masterAudio.volume = 0.95;
+              DOM.masterAudio.load();
+              DOM.masterAudio.play().catch(() => {});
+            }
             if (rlBannerTitle) {
               rlBannerTitle.textContent = `${newTitle} (v${data.version || 1})`;
             }
@@ -3528,12 +3553,13 @@ Grace and love shining forevermore!`
               rlBannerMeta.innerHTML = `${newBpm} BPM • ${newKey} • Originality: ${data.originality_report ? data.originality_report.originality_score_pct.toFixed(1) : '100.0'}% • Saved at: <code>D:\\music\\GENERATED_RL_SAMPLE_SONG.wav</code>`;
             }
             if (rlBannerDownload) {
-              rlBannerDownload.href = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?download=1`;
+              rlBannerDownload.href = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?download=1&t=${bust}`;
             }
             if (rlBannerAudio) {
-              rlBannerAudio.src = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?t=${Date.now()}`;
+              rlBannerAudio.src = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?t=${bust}`;
+              rlBannerAudio.muted = false;
+              rlBannerAudio.volume = 0.95;
               rlBannerAudio.load();
-              rlBannerAudio.play().catch(() => {});
             }
           }
         } catch (e) {

@@ -10,6 +10,7 @@ pub mod error;
 pub mod groove_synth;
 pub mod guitar_wah;
 pub mod melodic_singing;
+pub mod reference_rl_synth;
 pub mod rvq;
 pub mod tape_mastering;
 pub mod telemetry_calc;
@@ -22,6 +23,7 @@ pub use error::DspError;
 pub use melodic_singing::{
     MelodicSingingSynthesizer, StudioVocalReverb, MAJOR_PENTATONIC_RATIOS,
 };
+pub use reference_rl_synth::{ReferenceRlSongOutput, ReferenceRlSynthesizer};
 pub use rvq::{
     RvqTokenizer, RvqTokenSequence, DEFAULT_CODEBOOK_DIM, DEFAULT_CODEBOOK_SIZE,
     DEFAULT_RVQ_STAGES,

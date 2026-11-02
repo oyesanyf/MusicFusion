@@ -281,32 +281,35 @@
                 <label for="new-song-nl-prompt" style="font-size:12px; font-weight:600; color:var(--text-secondary);">💬 NATURAL LANGUAGE SONG PROMPT (VOCALS + ALL INSTRUMENTS + PRODUCTION):</label>
                 <span style="font-size:11.5px; color:var(--text-muted);">Editable • Synced with Chat Bar</span>
               </div>
-              <textarea id="new-song-nl-prompt" class="chatgpt-nl-textarea" rows="7" spellcheck="false">Create a 1977 Roots Reggae &amp; Soul Fusion Anthem ("One Love Shining") at 76 BPM in A Major:
-• LEAD &amp; BACKING VOCALS: Soulful raspy Jamaican male tenor lead vocal singing clear articulated English lyrics right from the start, supported by a 3-part female gospel backing choir in call-and-response harmony on every Chorus and Outro.
-• DRUMS &amp; PERCUSSION: Hypnotic 1977 one-drop drum groove dropping on beat 3, crisp cross-stick rimshot, syncopated Nyabinghi burru hand-drum rolls in Verse 2, and shimmering hi-hat triplets.
-• BASS FOUNDATION: Deep analog Fender Precision sub-bass walking line (55–90 Hz) with +3.0 dB warm Studer tape saturation.
-• GUITARS (RHYTHM &amp; LEAD SOLO): Crisp offbeat rhythm guitar skank on the "and" of each beat, plus a 16-bar soaring psychedelic blues-rock wah-wah electric guitar solo.
-• KEYBOARDS, ORGAN &amp; BRASS: Warm Hammond B3 rotary organ bubble, Clavinet stabs, and uplifting tenor saxophone &amp; trombone horn swells.
-• MASTERING: 1977 Kingston Studer A800 48 kHz 16-bit PCM Stereo analog tape master with vocal-priority ducking so vocals shine clearly on top.</textarea>
+              <textarea id="new-song-nl-prompt" class="chatgpt-nl-textarea" rows="7" spellcheck="false">Create a 1988 Acoustic Folk and Soul Ballad titled "One Love Shining" at 104 BPM in A Major.
+For the lead and backing vocals, feature a soulful, warm, and slightly smoky contralto or raspy acoustic tenor lead vocal singing clear, articulated English storytelling lyrics right from the start. Support the lead with subtle, intimate dual harmony backing vocals that swell gently in call and response during every chorus and outro.
+For the guitars, which serve as the rhythm and lead foundation, anchor the track with a continuous, hypnotic fingerpicked steel string acoustic guitar riff that loops throughout the song, blending bright hammer ons with warm open chords. Replace the electric solo with a sixteen bar melodic, woody acoustic slide guitar solo during the bridge that captures a sense of longing and motion.
+For the drums and percussion, begin with an intimate, stripped back arrangement in the first verse using only a subtle shaker and soft woodblock. Build into the chorus and second verse with a tight, dry studio drum kit featuring a crisp cross stick rimshot, brushed snare swells, and driving sixteenth note hi hat accents that push the narrative forward.
+For the bass foundation, lay down a deep, melodic fretless bass line played with warm fingerstyle articulation in the 55 to 90 Hz range, recorded with subtle analog tape saturation to give the low end a rounded, woody resonance beneath the acoustic guitar.
+For the keyboards and atmospheric layers, replace the heavy brass and funk keys with a whisper quiet, sustained Hammond B3 organ pad tucked low in the mix, accompanied by delicate Wurlitzer electric piano chords and yearning pedal steel guitar swells that bloom softly during the transitions.
+For the mastering, apply a 1988 Los Angeles analog studio Studer A800 48 kHz 16 bit PCM stereo tape master with natural dynamic range and vocal priority compression so the intimate storytelling vocals and acoustic strings sit right at the front of the mix.</textarea>
 
               <!-- Sung Lyrics Box (Directly drives Lead & Choir Vocal Synthesis) -->
               <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-subtle);">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                  <label for="new-song-lyrics-input" style="font-size:12px; font-weight:600; color:var(--text-secondary);">🎤 SUNG ENGLISH LYRICS (LEAD TENOR + GOSPEL BACKING CHOIR):</label>
+                  <label for="new-song-lyrics-input" style="font-size:12px; font-weight:600; color:var(--text-secondary);">🎤 SUNG ENGLISH STORYTELLING LYRICS (CONTRALTO / TENOR LEAD + DUAL HARMONY):</label>
                   <span style="font-size:11.5px; color:var(--text-muted);">Synthesized into yue_vocals.wav &amp; raspy_tenor_vocals.wav</span>
                 </div>
                 <textarea id="new-song-lyrics-input" class="chatgpt-nl-textarea" rows="5" style="min-height:105px; font-size:13px;" spellcheck="false">[Verse 1]
-One love! One heart! Let us get together and feel all right!
-Hear the children crying, give thanks and praise to the Most High!
-Walking through the valley with a burning light, standing up for what is right!
+Got a ticket in my coat and a dollar in my hand,
+Tracing every highway line across this restless land.
+You said keep the promise burning when the night gets cold,
+Every mile we travel is a story being told.
 
 [Chorus]
-One love shining, rising in the morning sun!
-Unity and brotherhood for everyone!
-Let compassion shine upon every soul tonight!
+One love shining through the canyon rain!
+Carried on the rhythm of a midnight westbound train!
+From the wooden porch steps to the California sea,
+One love shining over you and me!
 
 [Outro]
-One love, one heart, shining forever in harmony!</textarea>
+One love shining, roll on down the line,
+Acoustic strings and tender souls forever intertwined.</textarea>
               </div>
 
               <!-- Dedicated ModelFusion Text-to-Voice (TTS) Section -->
@@ -453,6 +456,21 @@ One love, one heart, shining forever in harmony!</textarea>
               </div>
             </div>
 
+            <!-- RL Prompt Box & Generation Button Bar -->
+            <div style="margin-top: 12px; padding: 12px 14px; border-radius: 10px; background: var(--bg-card-subtle); border: 1px solid var(--border-color);">
+              <label for="ref-rl-prompt-input" style="font-size: 12.5px; font-weight: 700; color: var(--text-primary); display: block; margin-bottom: 6px;">
+                ✨ Describe the Brand-New Song to Generate from Your Reference WAVs (Style, Instruments &amp; Vocal Feel):
+              </label>
+              <textarea
+                id="ref-rl-prompt-input"
+                class="chatgpt-nl-textarea"
+                rows="3"
+                style="width: 100%; font-size: 13px; padding: 9px 12px; min-height: 72px;"
+                placeholder="Paste any song prompt here..."
+                spellcheck="false"
+              >Create a 1988 Acoustic Folk and Soul Ballad titled "One Love Shining" at 104 BPM in A Major. Feature a soulful, warm contralto or raspy acoustic tenor lead vocal with intimate dual harmony call-and-response in the chorus and outro, a continuous hypnotic fingerpicked steel-string acoustic guitar riff with bright hammer-ons and open chords, a 16-bar melodic woody acoustic slide guitar solo during the bridge, stripped-back Verse 1 shaker and woodblock building into tight dry studio cross-stick rimshot and brushed snare swells with driving 16th-note hi-hats, a deep 55–90 Hz fingerstyle fretless bass line with woody tape saturation, whisper-quiet Hammond B3 pad with delicate Wurlitzer electric piano chords and yearning pedal steel swells, mastered on a 1988 LA Studer A800 48 kHz 16-bit PCM stereo tape master with vocal-priority compression.</textarea>
+            </div>
+
             <!-- RL Generation Button Bar -->
             <div class="ref-generation-bar">
               <div class="ref-gen-left">
@@ -569,7 +587,7 @@ One love, one heart, shining forever in harmony!</textarea>
               <span class="bubble-timestamp">10:45 AM</span>
             </div>
             <div class="bubble-content" id="active-user-prompt">
-              Create a 1977 roots reggae anthem with soulful raspy Jamaican male tenor vocals, spiritual and uplifting, 76 BPM, hypnotic one drop master drumming with complex polyrhythmic snare rolls and deep sub bass, virtuosic soaring psychedelic blues rock electric guitar solos, warm analog tape production, and lush gospel backing choir.
+              Warm acoustic &amp; roots groove with clear upfront lead vocals and soaring Dire Straits-style guitar solo
             </div>
           </div>
 
@@ -579,7 +597,7 @@ One love, one heart, shining forever in harmony!</textarea>
               <span class="bubble-avatar assistant-avatar">🎵</span>
               <span class="bubble-author">Universal Music Producer</span>
               <span class="bubble-timestamp">10:46 AM</span>
-              <span class="bubble-quality-badge success">✓ Quality Passed (Score 9.4/10)</span>
+              <span class="bubble-quality-badge success">✓ Quality Passed (Score 9.8/10)</span>
             </div>
 
             <!-- THE INTERACTIVE SONG CARD -->
@@ -587,8 +605,8 @@ One love, one heart, shining forever in harmony!</textarea>
               <!-- Card Header -->
               <div class="song-card-header">
                 <div class="song-card-title-group">
-                  <div class="song-card-title" id="card-song-title">D:\music Reference RL Showcase</div>
-                  <div class="song-card-subtitle" id="card-song-meta">RL Ensemble Blend • 107 BPM • A Minor • 48 kHz Stereo WAV</div>
+                  <div class="song-card-title" id="card-song-title">Midnight Highway Strings (107 BPM • A Minor)</div>
+                  <div class="song-card-subtitle" id="card-song-meta">Acoustic Roots &amp; Dire Straits Guitar Fusion • 107 BPM • A Minor • 48 kHz Stereo WAV</div>
                 </div>
                 <div class="song-card-actions" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                   <span class="version-tag" id="card-version-tag">v1 Master</span>
@@ -929,35 +947,35 @@ One love, one heart, shining forever in harmony!</textarea>
                   <div class="lyrics-pane active" id="pane-lyrics-formatted">
                     <div class="lyrics-section-card" data-section="intro">
                       <span class="section-bracket-tag">[Intro]</span>
-                      <p class="section-lines">(Deep bassline walks in, hypnotic one drop kick and rimshot on the three, rhythm guitar chops with light wah, soulful vocal ad-libs)<br>Yeah, man... Hear the calling of the drum... Let love guide your heart...</p>
+                      <p class="section-lines">(Continuous hypnotic fingerpicked steel-string acoustic guitar riff with bright hammer-ons and warm open A Major chords at 104 BPM, supported by deep fingerstyle fretless bass)<br>Pack the old suitcase by the kitchen door, city lights fading on the fourth-story floor.</p>
                     </div>
                     <div class="lyrics-section-card" data-section="verse1">
                       <span class="section-bracket-tag">[Verse 1]</span>
-                      <p class="section-lines">Sun rises over Zion hill, burning through the morning haze<br>Brothers and sisters walking proud through the darkest maze<br>No weapon formed against our spirit shall ever conquer peace<br>When compassion flows like a river, all the wicked wars must cease.</p>
+                      <p class="section-lines">Got a ticket in my coat and a dollar in my hand,<br>Tracing every highway line across this restless land.<br>You said keep the promise burning when the night gets cold,<br>Every mile we travel is a story being told.</p>
                     </div>
                     <div class="lyrics-section-card" data-section="chorus">
                       <span class="section-bracket-tag">[Chorus]</span>
-                      <p class="section-lines">One love, one heart, one universal destiny!<br>Feel the sacred rhythm calling you and calling me!<br>From the deepest valley to the highest mountain peak,<br>One voice for the humble, one strength for the weak!</p>
+                      <p class="section-lines">One love shining through the canyon rain! (Harmony: Shining through the rain!)<br>Carried on the rhythm of a midnight westbound train!<br>From the wooden porch steps to the California sea,<br>One love shining over you and me!</p>
                     </div>
                     <div class="lyrics-section-card" data-section="interlude">
                       <span class="section-bracket-tag">[Instrumental Interlude]</span>
-                      <p class="section-lines">(16-bar soaring psychedelic blues-rock electric guitar solo with deep wah-filter sweep and nyabinghi snare rolls)</p>
+                      <p class="section-lines">(Tight dry studio drum kit with crisp cross-stick rimshot, brushed snare swells, and driving 16th-note hi-hat accents)</p>
                     </div>
                     <div class="lyrics-section-card" data-section="verse2">
                       <span class="section-bracket-tag">[Verse 2]</span>
-                      <p class="section-lines">Babylon builds their towers high upon the shifting sand<br>While righteousness and love divine cover all the land<br>Dry your tears, my children, wipe the sorrow from your eyes<br>Underneath the rainbow canopy, the truthful soul shall rise!</p>
+                      <p class="section-lines">Dashboard glowing amber as the border towns roll by,<br>Dawn is breaking crimson on the edge of the sky.<br>We built our shelter out of honesty and grace,<br>Found a quiet harbor in this wide-open space.</p>
                     </div>
                     <div class="lyrics-section-card" data-section="bridge">
                       <span class="section-bracket-tag">[Bridge]</span>
-                      <p class="section-lines">(Drum drops to nyabinghi heartbeat pulse; gospel backing choir harmonizes)<br>Love will conquer sorrow, truth will light tomorrow...<br>Lift up your head and stand strong!</p>
+                      <p class="section-lines">(Yearning pedal steel guitar swells bloom softly into a 16-bar melodic, woody acoustic slide guitar solo capturing longing and motion)<br>Hear the slide guitar crying down the open line,<br>Every crossroads leading back to yours and mine!</p>
                     </div>
                     <div class="lyrics-section-card" data-section="solo">
                       <span class="section-bracket-tag">[Guitar Solo]</span>
-                      <p class="section-lines">(Virtuosic blues-rock pentatonic solo climaxes with weeping bends, analog tape sustain, and Hammond B3 chord swells)</p>
+                      <p class="section-lines">(16-bar melodic woody acoustic slide guitar solo with expressive bottleneck glissandos, warm open-string resonance, and Wurlitzer harmonic blooms)</p>
                     </div>
                     <div class="lyrics-section-card" data-section="outro">
                       <span class="section-bracket-tag">[Outro]</span>
-                      <p class="section-lines">One love... One heart... Forever and ever...<br>(Bass and one-drop groove echoes and fades into warm tape analog saturation)</p>
+                      <p class="section-lines">One love shining, roll on down the line,<br>Acoustic strings and tender souls forever intertwined.<br>(Intimate dual harmony call-and-response swells gently over the looping fingerpicked steel-string acoustic riff and warm 1988 LA Studer A800 tape fade)</p>
                     </div>
                   </div>
 

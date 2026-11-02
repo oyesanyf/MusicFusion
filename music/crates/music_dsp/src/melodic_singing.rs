@@ -42,6 +42,19 @@ const VOCAL_MELODY_RATIOS: [f32; 9] = [
     2.0,        // 8: Octave (A4 = 440.00 Hz)
 ];
 
+/// Natural Minor / Roots-Folk vocal melody scale ratios (E3, G3, A3, B3, C4, D4, E4, F4, G4/A4).
+const VOCAL_MINOR_MELODY_RATIOS: [f32; 9] = [
+    0.749_154,  // 0: Low 5th (E3 = 164.81 Hz)
+    0.890_899,  // 1: Low b7th (G3 = 196.00 Hz)
+    1.0,        // 2: Tonic (A3 = 220.00 Hz)
+    1.122_462,  // 3: Maj 2nd (B3 = 246.94 Hz)
+    1.189_207,  // 4: Min 3rd (C4 = 261.63 Hz)
+    1.334_840,  // 5: Perf 4th (D4 = 293.66 Hz)
+    1.498_307,  // 6: Perf 5th (E4 = 329.63 Hz)
+    1.587_401,  // 7: Min 6th (F4 = 349.23 Hz)
+    1.781_797,  // 8: Min 7th (G4 = 392.00 Hz)
+];
+
 /// Detected glottal closure epoch (pitch mark) for single-impulse TD-PSOLA grain extraction.
 #[derive(Debug, Clone, Copy)]
 struct PsolaPitchMark {
@@ -491,6 +504,57 @@ impl MelodicSingingSynthesizer {
         [chorus, verse, bridge]
     }
 
+    /// Composes novel reference-conditioned 4-bar vocal melodies for Acoustic/Roots/Folk-Rock
+    /// in Minor/Dorian or Major keys, parameterized by `seed` so each RL generation produces a
+    /// distinct, expressive vocal contour.
+    fn compose_reference_phrases(seed: u64) -> [Vec<VocalPhraseNote>; 3] {
+        let shift = (seed as usize) % 3;
+        // Phrase 1: Warm Acoustic & Roots Narrative Hook (ascending minor/dorian arch)
+        let verse_hook = vec![
+            VocalPhraseNote { start_beat: 0.0,  duration_beats: 1.5,  scale_idx: 2 + (shift % 2), has_backing_harmony: false, is_phrase_end: false },
+            VocalPhraseNote { start_beat: 1.5,  duration_beats: 1.0,  scale_idx: 4, has_backing_harmony: false, is_phrase_end: false },
+            VocalPhraseNote { start_beat: 2.5,  duration_beats: 1.5,  scale_idx: 5, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 4.0,  duration_beats: 1.25, scale_idx: 6, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 5.25, duration_beats: 1.25, scale_idx: 4, has_backing_harmony: false, is_phrase_end: false },
+            VocalPhraseNote { start_beat: 6.5,  duration_beats: 1.5,  scale_idx: 3, has_backing_harmony: false, is_phrase_end: true  },
+            VocalPhraseNote { start_beat: 8.0,  duration_beats: 1.5,  scale_idx: 4, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 9.5,  duration_beats: 1.0,  scale_idx: 6, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 10.5, duration_beats: 1.5,  scale_idx: 7, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 12.0, duration_beats: 1.5,  scale_idx: 6, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 13.5, duration_beats: 2.5,  scale_idx: 2, has_backing_harmony: true,  is_phrase_end: true  },
+        ];
+
+        // Phrase 2: Soaring Chorus Anthem (high register 5th -> b7th -> 5th -> 3rd -> tonic)
+        let chorus_hook = vec![
+            VocalPhraseNote { start_beat: 0.0,  duration_beats: 1.5,  scale_idx: 6, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 1.5,  duration_beats: 1.5,  scale_idx: 8, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 3.0,  duration_beats: 1.0,  scale_idx: 7, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 4.0,  duration_beats: 2.0,  scale_idx: 6, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 6.0,  duration_beats: 2.0,  scale_idx: 4, has_backing_harmony: true,  is_phrase_end: true  },
+            VocalPhraseNote { start_beat: 8.0,  duration_beats: 1.25, scale_idx: 5, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 9.25, duration_beats: 1.25, scale_idx: 6, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 10.5, duration_beats: 1.5,  scale_idx: 4, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 12.0, duration_beats: 1.5,  scale_idx: 3, has_backing_harmony: false, is_phrase_end: false },
+            VocalPhraseNote { start_beat: 13.5, duration_beats: 2.5,  scale_idx: 2, has_backing_harmony: true,  is_phrase_end: true  },
+        ];
+
+        // Phrase 3: Intimate Roots StorytellingCadence (low 5th pickup -> tonic -> 4th -> 5th)
+        let roots_bridge = vec![
+            VocalPhraseNote { start_beat: 0.0,  duration_beats: 1.0,  scale_idx: 0, has_backing_harmony: false, is_phrase_end: false },
+            VocalPhraseNote { start_beat: 1.0,  duration_beats: 1.5,  scale_idx: 2, has_backing_harmony: false, is_phrase_end: false },
+            VocalPhraseNote { start_beat: 2.5,  duration_beats: 1.5,  scale_idx: 4, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 4.0,  duration_beats: 2.0,  scale_idx: 5, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 6.0,  duration_beats: 2.0,  scale_idx: 4, has_backing_harmony: false, is_phrase_end: true  },
+            VocalPhraseNote { start_beat: 8.0,  duration_beats: 1.5,  scale_idx: 6, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 9.5,  duration_beats: 1.5,  scale_idx: 5, has_backing_harmony: true,  is_phrase_end: false },
+            VocalPhraseNote { start_beat: 11.0, duration_beats: 1.5,  scale_idx: 4, has_backing_harmony: false, is_phrase_end: false },
+            VocalPhraseNote { start_beat: 12.5, duration_beats: 1.0,  scale_idx: 1, has_backing_harmony: false, is_phrase_end: false },
+            VocalPhraseNote { start_beat: 13.5, duration_beats: 2.5,  scale_idx: 2, has_backing_harmony: true,  is_phrase_end: true  },
+        ];
+
+        [verse_hook, chorus_hook, roots_bridge]
+    }
+
     /// Single-Impulse Asymmetric Glottal Grain Overlap-Add (`[-48, +112]` around `mark.center_idx`).
     /// Total window width is 160 samples (3.33 ms at 48 kHz), which is strictly < 75% of a single
     /// source pitch period so ZERO neighboring glottal pulses ever enter the grain!
@@ -537,6 +601,33 @@ impl MelodicSingingSynthesizer {
         key_root_hz: f32,
         lyrics: &str,
     ) -> AudioBuffer {
+        self.synthesize_reference_conditioned_vocal_track(
+            duration_secs,
+            bpm,
+            key_root_hz,
+            false,
+            lyrics,
+            0,
+            false,
+            None,
+        )
+    }
+
+    /// Reference-Ensemble & RL Conditioned Vocal Synthesizer:
+    /// Supports Natural Minor / Dorian scale modes, seed-steered novel melodic contours,
+    /// and dynamic instrumental guitar-solo spotlight bars where vocals step back for the lead solo.
+    #[allow(clippy::too_many_arguments)]
+    pub fn synthesize_reference_conditioned_vocal_track(
+        &self,
+        duration_secs: f32,
+        bpm: f32,
+        key_root_hz: f32,
+        is_minor: bool,
+        lyrics: &str,
+        melodic_seed: u64,
+        use_reference_phrases: bool,
+        solo_beat_window: Option<(f32, f32)>,
+    ) -> AudioBuffer {
         let sr = self.sample_rate as f32;
         let frames = (duration_secs * sr).round() as usize;
         let mut buffer = AudioBuffer::new(self.sample_rate, 2, duration_secs);
@@ -548,7 +639,17 @@ impl MelodicSingingSynthesizer {
         let safe_bpm = bpm.clamp(40.0, 220.0);
         let beat_duration = 60.0 / safe_bpm;
         let vocal_root = Self::normalize_human_vocal_root(key_root_hz);
-        let phrases = Self::compose_4bar_phrases();
+        let phrases = if use_reference_phrases {
+            Self::compose_reference_phrases(melodic_seed)
+        } else {
+            Self::compose_4bar_phrases()
+        };
+        let scale_ratios = if is_minor {
+            &VOCAL_MINOR_MELODY_RATIOS
+        } else {
+            &VOCAL_MELODY_RATIOS
+        };
+        let third_harmony_ratio = if is_minor { 1.189_207 } else { 1.259_921 };
 
         let mut psola_l = vec![0.0f32; frames];
         let mut psola_r = vec![0.0f32; frames];
@@ -564,6 +665,12 @@ impl MelodicSingingSynthesizer {
                 let f_idx = synth_pos as usize;
                 let t = f_idx as f32 / sr;
                 let total_beats = t / beat_duration;
+                if let Some((solo_start, solo_end)) = solo_beat_window {
+                    if total_beats >= solo_start && total_beats < solo_end {
+                        synth_pos += 180.0;
+                        continue;
+                    }
+                }
                 let cycle_idx = (total_beats / 16.0).floor() as usize;
                 let beat_in_cycle = total_beats % 16.0;
                 let phrase = &phrases[cycle_idx % phrases.len()];
@@ -578,7 +685,7 @@ impl MelodicSingingSynthesizer {
                 }
 
                 if let Some((note, note_progress)) = active_note {
-                    let ratio = VOCAL_MELODY_RATIOS[note.scale_idx % VOCAL_MELODY_RATIOS.len()];
+                    let ratio = scale_ratios[note.scale_idx % scale_ratios.len()];
                     let base_target_hz = vocal_root * ratio;
                     let note_elapsed_sec = note_progress * note.duration_beats * beat_duration;
                     let note_total_sec = note.duration_beats * beat_duration;
@@ -655,21 +762,26 @@ impl MelodicSingingSynthesizer {
         for i in 0..frames {
             let t = i as f32 / sr;
             let total_beats = t / beat_duration;
+            let in_solo = solo_beat_window
+                .map(|(s, e)| total_beats >= s && total_beats < e)
+                .unwrap_or(false);
             let cycle_idx = (total_beats / 16.0).floor() as usize;
             let beat_in_cycle = total_beats % 16.0;
             let phrase = &phrases[cycle_idx % phrases.len()];
 
             let mut active_note: Option<(usize, &VocalPhraseNote, f32)> = None;
-            for (n_idx, note) in phrase.iter().enumerate() {
-                if beat_in_cycle >= note.start_beat && beat_in_cycle < (note.start_beat + note.duration_beats) {
-                    let note_progress = (beat_in_cycle - note.start_beat) / note.duration_beats;
-                    active_note = Some((n_idx, note, note_progress));
-                    break;
+            if !in_solo {
+                for (n_idx, note) in phrase.iter().enumerate() {
+                    if beat_in_cycle >= note.start_beat && beat_in_cycle < (note.start_beat + note.duration_beats) {
+                        let note_progress = (beat_in_cycle - note.start_beat) / note.duration_beats;
+                        active_note = Some((n_idx, note, note_progress));
+                        break;
+                    }
                 }
             }
 
             if let Some((n_idx, note, note_progress)) = active_note {
-                let ratio = VOCAL_MELODY_RATIOS[note.scale_idx % VOCAL_MELODY_RATIOS.len()];
+                let ratio = scale_ratios[note.scale_idx % scale_ratios.len()];
                 let base_target_hz = vocal_root * ratio;
                 let note_elapsed_sec = note_progress * note.duration_beats * beat_duration;
                 let note_total_sec = note.duration_beats * beat_duration;
@@ -705,7 +817,7 @@ impl MelodicSingingSynthesizer {
 
                 let (mut harm_l, mut harm_r) = (0.0f32, 0.0f32);
                 if note.has_backing_harmony {
-                    let high_hz = smoothed_lead_freq * 1.259_921 * 1.0015;
+                    let high_hz = smoothed_lead_freq * third_harmony_ratio * 1.0015;
                     let low_hz = smoothed_lead_freq * 0.749_154 * 0.9985;
                     harm_high_phase = (harm_high_phase + high_hz / sr).fract();
                     harm_low_phase = (harm_low_phase + low_hz / sr).fract();
