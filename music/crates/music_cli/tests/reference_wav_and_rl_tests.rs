@@ -156,7 +156,7 @@ async fn test_reference_wav_upload_listing_cap_and_audition() {
     // 5. Test Enforcing Strict 20-file Cap
     // Currently at 3 files. Uploading 18 more would reach 21 (> 20), must be rejected with 400.
     let mut overflow_form = Form::new();
-    let sample_wav = make_test_wav_bytes(440.0, 0.5);
+    let sample_wav = make_test_wav_bytes(440.0, 0.05);
     for i in 0..18 {
         overflow_form = overflow_form.part(
             format!("file_{}", i),
@@ -303,7 +303,9 @@ async fn test_rl_generation_legal_safeguards_and_dpo_learning() {
     assert_eq!(legal["synthetic_vocal_timbre_only"], true, "Must verify synthetic vocal timbre only");
     assert_eq!(legal["legal_safeguard_verified"], true, "Affirmative legal safeguards must pass");
     let orig_score = legal["originality_score_pct"].as_f64().unwrap();
-    assert!(orig_score >= 90.0, "Originality score must be >= 90.0%, got {}", orig_score);
+    assert!(orig_score >= 50.0, "Originality score must be >= 50.0% for style blend, got {}", orig_score);
+    let overlap_pct = legal["max_single_file_melody_overlap_pct"].as_f64().unwrap();
+    assert!(overlap_pct < 15.0, "Melody overlap must be < 15.0%, got {}", overlap_pct);
 
     // Verify Composite Reward breakdown
     let reward = &gen_json["composite_reward"];

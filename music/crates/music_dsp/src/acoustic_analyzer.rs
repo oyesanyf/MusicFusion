@@ -594,10 +594,13 @@ impl AcousticAnalyzer {
             .fold(0.0f32, f32::max)
             .max(1e-7);
 
+        let mut last_bin: Option<u8> = None;
+
         for (i, c) in frame_chromas.iter().enumerate() {
             let energy = frame_energies.get(i).copied().unwrap_or(0.0);
-            if energy / max_energy < 0.01 {
-                // Low energy frame: retain last or skip
+            if energy / max_energy < 0.02 {
+                // Low energy frame (silence / pause): reset note transition tracker
+                last_bin = None;
                 continue;
             }
             let mut best_bin = 0u8;
@@ -608,7 +611,11 @@ impl AcousticAnalyzer {
                     best_bin = k as u8;
                 }
             }
-            sequence.push(best_bin);
+            // Only record note transitions (distinct pitch changes or onsets after pause)
+            if last_bin != Some(best_bin) {
+                sequence.push(best_bin);
+                last_bin = Some(best_bin);
+            }
         }
 
         sequence

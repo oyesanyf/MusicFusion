@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Multipart, Path as AxumPath, Query, State},
+    extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -1857,6 +1857,8 @@ pub async fn handle_upload_reference_wavs(
     Json(serde_json::json!({
         "status": "ok",
         "uploaded": uploaded_metas,
+        "uploaded_count": uploaded_metas.len(),
+        "reference_wavs": uploaded_metas,
         "total_count": total_count,
     })).into_response()
 }
@@ -2136,6 +2138,7 @@ pub async fn handle_clear_reference_wavs(State(state): State<AppState>) -> Respo
         "status": "ok",
         "message": "All reference WAVs cleared",
         "count": 0,
+        "remaining_count": 0,
     })).into_response()
 }
 
@@ -2475,6 +2478,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/styles.css", get(handle_styles))
         .route("/app.js", get(handle_app_js))
         .layer(CorsLayer::permissive())
+        .layer(DefaultBodyLimit::max(128 * 1024 * 1024))
         .with_state(state)
 }
 
