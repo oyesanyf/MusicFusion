@@ -389,7 +389,7 @@ impl TantivyFtsIndex {
         // Over-fetch when the index is large so monolithic dumps (chat.html, conversations-*.json)
         // or source code files never crowd out real PDF/DOCX documents before top_k truncation.
         let fetch_limit = if num_docs > 500 {
-            top_k.saturating_mul(8).max(400).min(num_docs.max(1))
+            top_k.saturating_mul(3).max(96).min(180).min(num_docs.max(1))
         } else {
             top_k.min(num_docs.max(1))
         };

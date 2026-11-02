@@ -62,6 +62,13 @@ impl RetrieveMeshNode {
             None
         };
 
+        let (corrected_q, _) = crate::offline_engine::DeterministicOfflineSynthesisEngine::correct_query_spelling(
+            &state.current_query,
+            false,
+        );
+        if !corrected_q.trim().is_empty() {
+            state.current_query = corrected_q;
+        }
         let q_low = state.current_query.to_ascii_lowercase();
         let search_query = if q_low.contains("school")
             || q_low.contains("college")
@@ -74,8 +81,11 @@ impl RetrieveMeshNode {
                 "{} education university college master bachelor degree certifications",
                 state.current_query
             )
-        } else if q_low.contains("about ")
-            || q_low.contains("who is")
+        } else if q_low.contains("who is")
+            || q_low.contains("resume")
+            || q_low.contains("cv")
+            || q_low.contains("femi")
+            || q_low.contains("oyesanya")
             || q_low.contains("work")
             || q_low.contains("experience")
             || q_low.contains("career")
@@ -155,7 +165,7 @@ impl RetrieveMeshNode {
             let entity_kw_query = prelim_entities.join(" ");
             let entity_hits = engine
                 .local_storage
-                .search_text(&entity_kw_query, access_tier, 512)
+                .search_text(&entity_kw_query, access_tier, 72)
                 .await;
             let mut seen_ids: std::collections::HashSet<String> =
                 chunks.iter().map(|c| c.chunk.chunk_id.clone()).collect();
@@ -355,6 +365,25 @@ impl RetrieveMeshNode {
                 }
 
                 let mut intent_bonus = 0i32;
+
+                // Boost chunks whose filename directly matches query terms (e.g. "African Churches and Gang Violence.docx")
+                let file_tokens: std::collections::HashSet<&str> = file_name_l
+                    .split(|ch: char| !ch.is_alphanumeric())
+                    .filter(|w| !w.is_empty())
+                    .collect();
+                let file_term_hits = query_terms
+                    .iter()
+                    .filter(|t| {
+                        file_tokens.contains(t.as_str())
+                            || (t.len() >= 4
+                                && (file_tokens.contains(format!("{}s", t).as_str())
+                                    || file_tokens.contains(format!("{}es", t).as_str())))
+                    })
+                    .count();
+                if file_term_hits > 0 {
+                    intent_bonus += (file_term_hits as i32) * 180;
+                    weighted_hits += file_term_hits * 25;
+                }
 
                 // Google LangExtract: Boost document reference targets +200
                 let matches_target_doc = !doc_targets.is_empty()

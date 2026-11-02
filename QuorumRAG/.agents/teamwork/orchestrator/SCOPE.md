@@ -26,7 +26,7 @@ QuorumRAG adaptation adds Google LangExtract candidate extraction and 4-arm cons
 | M12 | WebUI Clean Interface, Dynamic Spellcheck & Action Buttons | Features 60, 61, 62: Clean UI (suppress prompt chips, keep logo), dynamic debounced chat spellcheck, response action buttons (Copy, Regenerate, Read Aloud, Thumbs), `server.rs:115` `bypass_cache: false`, zero line numbers | none | DONE |
 | M13 | OshoosiClaw Mesh Configuration UI & TPM Hardware Identity | Features 63, 64, 65: TPM 2.0 hardware inspection, attestation-tier gating in `PeerAclManager`, daemon REST endpoints, Mesh UI in Settings modal | M11, M12 | DONE |
 | M13.5 | Live Testing Feedback: Action Buttons (Continue, Save File, Clear) & Q&A Grounding Calibration | Features 67, 68: Add Continue, Save File, Clear to `.response-actions-bar`, Q&A opening topic restatement, typo map & seed words, filename title match bonus, calibrated grounding accuracy (78%–99%), chunk boundary cleanup | M13 | DONE |
-| M14 | Final Verification, Port 3031 Hot-Restart Live Daemon & Solo PR Ship | Features 66, 69: Clean build with `$env:CARGO_INCREMENTAL = "0"`, all tests pass, hot-restart PID 80036 on port 3031, solo PR ship & merge to main | M11, M12, M13, M13.5 | IN_PROGRESS |
+| M14 | Final Verification, Port 3031 Hot-Restart Live Daemon & Solo PR Ship | Features 66, 69: Clean build with `$env:CARGO_INCREMENTAL = "0"`, all tests pass, hot-restart PID 80036 on port 3031, solo PR ship & merge to main | M11, M12, M13, M13.5 | DONE |
 
 ## Interface Contracts
 
