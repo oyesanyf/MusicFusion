@@ -81,6 +81,7 @@ pub struct AgenticGraphState {
     pub synthesized_response: Option<String>,
     pub citations: Vec<Citation>,
     pub query_metadata_filters: Option<std::collections::BTreeMap<String, String>>,
+    pub cached_vector_hits: Vec<ScoredChunk>,
 }
 
 impl AgenticGraphState {
@@ -106,6 +107,7 @@ impl AgenticGraphState {
             synthesized_response: None,
             citations: Vec::new(),
             query_metadata_filters: None,
+            cached_vector_hits: Vec::new(),
         }
     }
 
@@ -129,7 +131,7 @@ impl AgenticGraphState {
         }
         const PRONOUNS_AND_FOLLOWUPS: &[&str] = &[
             "he", "him", "his", "she", "her", "hers", "they", "them", "their", "theirs",
-            "it", "its", "there", "that", "this", "these", "those", "more", "else",
+            "it", "its", "that", "this", "these", "those", "more", "else",
             "also", "elaborate", "expand", "further", "detail", "details", "continue",
         ];
         const STOPWORDS: &[&str] = &[
@@ -137,7 +139,8 @@ impl AgenticGraphState {
             "is", "are", "was", "were", "the", "and", "for", "with", "from",
             "into", "about", "using", "have", "has", "had", "will", "would",
             "should", "could", "can", "you", "tell", "show", "please", "give",
-            "me", "on", "in", "of", "to", "a", "an",
+            "me", "on", "in", "of", "to", "a", "an", "there", "file", "files",
+            "document", "documents", "content", "contents", "folder", "folders",
         ];
 
         let words: Vec<String> = prompt
