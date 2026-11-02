@@ -103,7 +103,7 @@ QuorumRAG is a production-grade, local-first, peer-to-peer retrieval-augmented g
 | M8 | Low-Latency Query Execution, Consensus & P2P Security Hardening | Multi-hop RAG latency optimization, inbound Ed25519 signature & replay verification (`OsoosiMeshInboundHandler`), Byzantine consensus score stuffing prevention in `RrfCombiner`, strict offline air-gapping | none | DONE |
 | M8.5 | Source Code & Temp File Ingestion Exclusion & RAG Isolation | Filter source code extensions, FileCategory::Code, and Office lock/temp files (~*, .tmp, .bak) in Crawler/Router, default exclude_source_code: true in IngestConfig, purge/skip code/temp chunks in reindex/retrieval | M7, M8 | DONE |
 | M9 | UI Stop Button & Real-Time Monotonic Indexer Progress | Chat UI stop button with `AbortController`, `POST /api/chat/cancel`, CancellationToken in coordinator graph, monotonic candidate progress calculation, remove 25% fallback, 60+ dynamic thinking phrases engine | M7, M8, M8.5 | DONE |
-| M10 | Benchmarks, Byzantine/Fault Regressions & Solo PR Shipping | 7-metric deterministic benchmark suite (`tests/benchmarks_r4.rs`), Byzantine peer & fault regression suite, full test suite verification, solo PR shipping via `scripts/solo_pr_ship.ps1`, clean merge into main | M7, M8, M8.5, M9 | IN_PROGRESS |
+| M10 | Benchmarks, Byzantine/Fault Regressions & Solo PR Shipping | 7-metric deterministic benchmark suite (`tests/benchmarks_r4.rs`), Byzantine peer & fault regression suite, full test suite verification, solo PR shipping via `scripts/solo_pr_ship.ps1`, clean merge into main | M7, M8, M8.5, M9 | DONE |
 
 
 ## Interface Contracts

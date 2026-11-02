@@ -1,9 +1,8 @@
 # Progress — Orchestrator Gen 2
 
 ## Current Status
-Last visited: 2026-11-02T08:31:00Z
+Last visited: 2026-11-02T09:12:00Z
 - [x] Phase 0: Survey and Technical Exploration across R1-R4
-
   - [x] Explorer 1 (f5929a9a): Ingestion, Dedup Hydration & Binary Filtering survey report completed
   - [x] Explorer 2 (d0d9d295): Query Latency, P2P Security & Consensus survey report completed
   - [x] Explorer 3 (0fa091f9): UI Stop Button, Indexer Status & Benchmarks survey report completed
@@ -11,7 +10,7 @@ Last visited: 2026-11-02T08:31:00Z
   - [x] Defined Milestones M7, M8, M8.5, M9, M10 in `PROJECT.md`
   - [x] Updated Feature Inventory with Features 44-57
   - [x] Created `SCOPE.md` for Milestone M7 & M8
-- [/] Phase 2: Milestone Iterations
+- [x] Phase 2: Milestone Iterations
   - [x] Milestone M7: Zero-Overhead Ingestion Pipeline, Dedup Hydration & Binary Filtering
     - [x] Explorer M7_1 (dce1c334): Dedup hydration (`hydrate_from_storage`) plan completed
     - [x] Explorer M7_2 (54a2285b): Complete drive discovery & fast-path binary filtering plan completed
@@ -47,7 +46,7 @@ Last visited: 2026-11-02T08:31:00Z
     - [x] Challenger M8.5 2 (5b8cd336): Retrieval Stress Tests (3/3 passed): Verdict APPROVE
     - [x] Auditor M8.5 1 (6bd830c8): Forensic Integrity Audit: Verdict CLEAN
     - [x] Gate M8.5 Final Evaluation: PASS (Recorded in GATE_STATUS.md)
-  - [/] Milestone M9: UI Stop Button, Dynamic Thinking Phrases & Real-Time Monotonic Indexer Progress
+  - [x] Milestone M9: UI Stop Button, Dynamic Thinking Phrases & Real-Time Monotonic Indexer Progress
     - [x] Explorer M9 1 (a968cb6e): UI Stop Button & In-Flight Cancellation investigation (handoff completed)
     - [x] Explorer M9 2 (f43694ed): Dynamic Thinking Phrases Engine (72-item pool, ~650ms cycle, handoff completed)
     - [x] Explorer M9 3 (e39b1cff): Monotonic Live Indexer Progress Reporting (handoff completed)
@@ -58,17 +57,31 @@ Last visited: 2026-11-02T08:31:00Z
     - [x] Challenger M9 2 (75005ef1): Monotonic Progress Multi-Drive Simulation Stress Tests: Verdict APPROVE
     - [x] Auditor M9 1 (120def8e): Forensic Integrity Audit (M9 Features 52, 53, 54): Verdict CLEAN
     - [x] Gate M9 Final Evaluation: PASS (Unanimous APPROVE + CLEAN audit)
-  - [/] Milestone M10: 7-Metric Benchmarks, Fault Regressions & Solo PR Shipping
+  - [x] Milestone M10: 7-Metric Benchmarks, Fault Regressions & Solo PR Shipping
     - [x] Explorer M10 1 (bb1f8bf9): 7-Metric Benchmark Suite Architecture & Harness Design (completed)
     - [x] Explorer M10 2 (b321c4ad): Byzantine Peer Attacks & Invariant Fault Regressions Design (completed)
     - [x] Explorer M10 3 (183a7e5e): Solo PR Shipping & Git Pipeline Design (`scripts/solo_pr_ship.ps1`) (completed)
-    - [/] Worker M10 (f58b0a84): Implementation & Verification
-    - [ ] Reviewers & Challengers & Auditor Gating
-    - [ ] Gate M10 Final Evaluation
-- [ ] Phase 3: Solo PR Ship & Merge to main
+    - [x] Worker M10 (f58b0a84): Implementation, 7-metric benchmarks pass, 7 Byzantine regressions pass, solo PR shipping pipeline executed, PR #1 squash-merged to main (commit fd5a728)
+    - [x] Reviewers & Challengers & Auditor Gating:
+      - [x] Reviewer M10 1 (75162402): Verdict APPROVE (all 8 benchmark tests passed, all 7 criteria met)
+      - [x] Reviewer M10 2 (cad88c57): Verdict APPROVE (7/7 byzantine, 12/12 p2p, 6/6 latency, 4/4 exclusion, 2/2 progress passed)
+      - [x] Challenger M10 1 (92d332c1): Verdict APPROVE (5-iteration stress harness, empirical stability verified)
+      - [x] Challenger M10 2 (8cbc1149): Verdict APPROVE (Sybil flood neutralization, Ed25519 fail-closed, 400ms partition cutoff verified)
+      - [x] Auditor M10 1 (612ea646): Verdict CLEAN (Zero mocks, zero PATH mutation, clean builds/tests)
+    - [x] Gate M10 Final Evaluation: PASS (Unanimous APPROVE + CLEAN audit)
+- [x] Phase 3: Solo PR Ship & Merge to main (PR #1 squash-merged to main at commit fd5a728)
 
+## Retrospective Notes
+- **What Worked**:
+  - Parallel subagent swarming (3 Explorers -> 1 Worker -> 2 Reviewers, 2 Challengers, 1 Auditor) delivered thorough quality gates and caught subtle regressions.
+  - Windows 11 Smart App Control (SAC) Authenticode signing with developer certificate `CN=Oshoosi Developer` (`9A6D3B509500813058EC63183476464FAC8F015B`) allowed deterministic test execution without environment mutation.
+  - Process-scoped Git and Python PATH resolution respected the Universal Zero-Touch PATH Law.
+  - Direct execution of pre-built, signed test binaries in `target\debug\deps\` avoided file lock contention on `quorumrag.exe` (PID 3504) while providing instant empirical results.
+- **Lessons Learned**:
+  - When background services run during tests, Cargo package rebuilds can attempt to replace locked binaries. Manifest-isolated integration test packages or direct test binary invocation prevent OS error 5.
+  - Integer subtraction with overflow (`now - timestamp`) under adversarial inputs can panic in debug builds; `saturating_sub` provides defense-in-depth against extreme values like `i64::MIN`.
 
 ## Iteration Status
-Current iteration: 6 / 32
+Current iteration: 6 / 32 (All Milestones M7, M8, M8.5, M9, M10 Completed and Gated PASS)
 
 
