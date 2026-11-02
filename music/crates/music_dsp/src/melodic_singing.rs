@@ -78,7 +78,7 @@ pub struct MovementSection {
 /// Output of section-aligned vocal synthesis, returning the stereo vocal stem and the 7-movement arrangement timeline.
 pub struct SectionedVocalOutput {
     pub vocals: AudioBuffer,
-    pub movements: [MovementSection; 7],
+    pub movements: [MovementSection; 9],
     pub total_duration_secs: f32,
 }
 
@@ -903,26 +903,32 @@ impl MelodicSingingSynthesizer {
     }
 
     #[inline]
-    /// Dual-Head 30 ms (`1440-sample`) Hann Window Pitch-Contour & Singing Vibrato Processor.
+    /// Dual-Head 30 ms (`1440-sample`) Hann Window Time-Stretch, Pitch-Contour & Singing Vibrato Processor.
+    /// Smoothly elongates each poetic line into a lyrical `target_duration_secs` phrase (`~4.4s` inside each 6.0s 2-bar slot)
+    /// while applying a melodic pitch arch (`contour_semitones`) and natural vibrato with zero grain-chopping buzz.
     fn apply_smooth_30ms_pitch_and_vibrato(
         src: &[f32],
         sr: f32,
-        beat_sec: f32,
+        target_duration_secs: f32,
         contour_semitones: &[f32],
         vibrato_freq: f32,
         vibrato_depth: f32,
     ) -> Vec<f32> {
-        let n = src.len();
-        if n == 0 {
+        let n_in = src.len();
+        if n_in == 0 {
             return Vec::new();
         }
-        let mut out = vec![0.0f32; n];
+        let raw_secs = n_in as f32 / sr;
+        // Gently elongate spoken phrases (up to 1.28x slower) so each poetic line sings across its 2-bar phrase
+        let stretch = (target_duration_secs / raw_secs.max(0.5)).clamp(1.0, 1.28);
+        let n_out = ((n_in as f32) * stretch).round() as usize;
+        let mut out = vec![0.0f32; n_out];
         let win_size = 1440.0f64; // 30.0 ms at 48 kHz
         let mut delay_phase = 0.0f64;
         let mut smoothed_ratio = 1.0f64;
 
         let read_interp = |pos: f64| -> f32 {
-            if pos < 0.0 || pos >= (n - 1) as f64 {
+            if pos < 0.0 || pos >= (n_in - 1) as f64 {
                 0.0
             } else {
                 let idx = pos.floor() as usize;
@@ -931,80 +937,103 @@ impl MelodicSingingSynthesizer {
             }
         };
 
-        for i in 0..n {
+        for i in 0..n_out {
             let t = i as f32 / sr;
-            let beat = t / beat_sec.max(0.25);
-            let note_idx = (beat / 1.5).floor() as usize;
-            let st = contour_semitones[note_idx % contour_semitones.len()];
+            let prog = (i as f32) / (n_out.max(1) as f32);
+            let note_idx = ((prog * (contour_semitones.len() as f32)).floor() as usize)
+                .min(contour_semitones.len().saturating_sub(1));
+            let st = contour_semitones[note_idx];
+            // Vibrato blooms naturally on held syllables
             let vib = (2.0 * PI * vibrato_freq * t).sin() * vibrato_depth;
-            let target_ratio = (2.0f32.powf((st * 0.45) / 12.0) * (1.0 + vib)) as f64;
-            smoothed_ratio = smoothed_ratio * 0.9992 + target_ratio * 0.0008;
+            let pitch_ratio = (2.0f32.powf((st * 0.52) / 12.0) * (1.0 + vib)) as f64;
+            smoothed_ratio = smoothed_ratio * 0.9992 + pitch_ratio * 0.0008;
 
-            delay_phase = (delay_phase - (smoothed_ratio - 1.0)).rem_euclid(win_size);
+            let base_in = (i as f64) / (stretch as f64);
+            // Relative read rate = smoothed_ratio; center read position advances at 1/stretch
+            let rate_diff = smoothed_ratio - (1.0 / (stretch as f64));
+            delay_phase = (delay_phase - rate_diff).rem_euclid(win_size);
             let delay_a = delay_phase;
             let delay_b = (delay_phase + win_size * 0.5).rem_euclid(win_size);
 
             let win_a = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * delay_a / win_size).cos()) as f32;
             let win_b = 1.0 - win_a;
 
-            let sample_a = read_interp(i as f64 - delay_a);
-            let sample_b = read_interp(i as f64 - delay_b);
-            out[i] = sample_a * win_a + sample_b * win_b;
+            let sample_a = read_interp(base_in - delay_a);
+            let sample_b = read_interp(base_in - delay_b);
+            // Smooth 25 ms fade-in and 80 ms fade-out on each poetic phrase
+            let fade_in = (t / 0.025).min(1.0);
+            let rem_sec = ((n_out - 1 - i) as f32) / sr;
+            let fade_out = (rem_sec / 0.080).min(1.0);
+            out[i] = (sample_a * win_a + sample_b * win_b) * fade_in * fade_out;
         }
         out
     }
 
     #[cfg(windows)]
-    fn render_five_section_neural_phrases(&self, sections: &[String; 5]) -> Option<[Vec<f32>; 5]> {
+    fn render_thirteen_line_neural_phrases(&self, lines: &[String; 13]) -> Option<[Vec<f32>; 13]> {
         let pid = std::process::id();
         let base_dir = std::env::temp_dir();
-        let mut txt_paths = Vec::with_capacity(5);
-        let mut mp3_paths = Vec::with_capacity(5);
-        let mut wav_paths = Vec::with_capacity(5);
+        let mut txt_paths = Vec::with_capacity(13);
+        let mut mp3_paths = Vec::with_capacity(13);
+        let mut wav_paths = Vec::with_capacity(13);
 
-        for k in 0..5 {
-            let clean: String = sections[k]
+        for k in 0..13 {
+            let clean: String = lines[k]
                 .chars()
                 .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | ',' | '.' | '\'' | '-' | '!'))
-                .take(480)
+                .take(240)
                 .collect();
             let text = if clean.trim().is_empty() {
                 "Where watering kingdoms heal aching hearts.".to_string()
             } else {
                 clean
             };
-            let tp = base_dir.join(format!("music_sec_{}_{}.txt", pid, k));
-            let mp = base_dir.join(format!("music_sec_{}_{}.mp3", pid, k));
-            let wp = base_dir.join(format!("music_sec_{}_{}.wav", pid, k));
+            let tp = base_dir.join(format!("music_ln_{}_{}.txt", pid, k));
+            let mp = base_dir.join(format!("music_ln_{}_{}.mp3", pid, k));
+            let wp = base_dir.join(format!("music_ln_{}_{}.wav", pid, k));
             std::fs::write(&tp, &text).ok()?;
             txt_paths.push(tp);
             mp3_paths.push(mp);
             wav_paths.push(wp);
         }
 
+        let txt_list = txt_paths
+            .iter()
+            .map(|p| format!("r'{}'", p.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mp3_list = mp3_paths
+            .iter()
+            .map(|p| format!("r'{}'", p.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let wav_list = wav_paths
+            .iter()
+            .map(|p| format!("r'{}'", p.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join(", ");
+
         let py_script = format!(
             "import asyncio, edge_tts, glob, shutil, subprocess\n\
-             txts = [r'{}', r'{}', r'{}', r'{}', r'{}']\n\
-             mp3s = [r'{}', r'{}', r'{}', r'{}', r'{}']\n\
-             wavs = [r'{}', r'{}', r'{}', r'{}', r'{}']\n\
-             rates = ['-14%', '-10%', '-8%', '-14%', '-18%']\n\
-             pitches = ['+0Hz', '+2Hz', '+4Hz', '+0Hz', '-2Hz']\n\
+             txts = [{}]\n\
+             mp3s = [{}]\n\
+             wavs = [{}]\n\
+             rates = ['-18%', '-18%', '-18%', '-16%', '-12%', '-16%', '-14%', '-14%', '-14%', '-14%', '-18%', '-20%', '-22%']\n\
+             pitches = ['+0Hz', '+1Hz', '+0Hz', '+2Hz', '+3Hz', '+4Hz', '+5Hz', '+4Hz', '+5Hz', '+3Hz', '+0Hz', '-1Hz', '-2Hz']\n\
              async def one(i):\n\
              \x20   t = open(txts[i], 'r', encoding='utf-8').read()\n\
              \x20   c = edge_tts.Communicate(t, 'en-US-AvaNeural', rate=rates[i], pitch=pitches[i])\n\
              \x20   await c.save(mp3s[i])\n\
              async def main():\n\
-             \x20   await asyncio.gather(*(one(i) for i in range(5)))\n\
+             \x20   await asyncio.gather(*(one(i) for i in range(13)))\n\
              asyncio.run(main())\n\
              ff = shutil.which('ffmpeg')\n\
              if not ff:\n\
              \x20   cands = glob.glob(r'C:\\Users\\*\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg*\\*\\bin\\ffmpeg.exe')\n\
              \x20   ff = cands[0] if cands else 'ffmpeg'\n\
-             for i in range(5):\n\
+             for i in range(13):\n\
              \x20   subprocess.run([ff, '-y', '-i', mp3s[i], '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le', wavs[i]], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n",
-            txt_paths[0].to_string_lossy(), txt_paths[1].to_string_lossy(), txt_paths[2].to_string_lossy(), txt_paths[3].to_string_lossy(), txt_paths[4].to_string_lossy(),
-            mp3_paths[0].to_string_lossy(), mp3_paths[1].to_string_lossy(), mp3_paths[2].to_string_lossy(), mp3_paths[3].to_string_lossy(), mp3_paths[4].to_string_lossy(),
-            wav_paths[0].to_string_lossy(), wav_paths[1].to_string_lossy(), wav_paths[2].to_string_lossy(), wav_paths[3].to_string_lossy(), wav_paths[4].to_string_lossy(),
+            txt_list, mp3_list, wav_list
         );
 
         let mut py_cmd = std::process::Command::new("python");
@@ -1013,8 +1042,8 @@ impl MelodicSingingSynthesizer {
         py_cmd.args(["-c", &py_script]);
         let ok = py_cmd.status().map(|s| s.success()).unwrap_or(false);
 
-        let mut out: [Vec<f32>; 5] = Default::default();
-        for k in 0..5 {
+        let mut out: [Vec<f32>; 13] = Default::default();
+        for k in 0..13 {
             let _ = std::fs::remove_file(&txt_paths[k]);
             let _ = std::fs::remove_file(&mp3_paths[k]);
             if ok && wav_paths[k].exists() {
@@ -1023,7 +1052,7 @@ impl MelodicSingingSynthesizer {
                     let mut trimmed = Vec::with_capacity(buf.frame_count());
                     let mut env = 0.0f32;
                     let mut silent_frames = 0usize;
-                    let max_breath = (0.16 * self.sample_rate as f32) as usize;
+                    let max_breath = (0.14 * self.sample_rate as f32) as usize;
                     for f in 0..buf.frame_count() {
                         let s = buf.samples[f * ch];
                         env = 0.992 * env + 0.008 * s.abs();
@@ -1048,7 +1077,7 @@ impl MelodicSingingSynthesizer {
             let _ = std::fs::remove_file(&wav_paths[k]);
         }
 
-        if out.iter().all(|v| v.len() > 4800) {
+        if out.iter().all(|v| v.len() > 2400) {
             Some(out)
         } else {
             None
@@ -1056,14 +1085,24 @@ impl MelodicSingingSynthesizer {
     }
 
     #[cfg(not(windows))]
-    fn render_five_section_neural_phrases(&self, _sections: &[String; 5]) -> Option<[Vec<f32>; 5]> {
+    fn render_thirteen_line_neural_phrases(&self, _lines: &[String; 13]) -> Option<[Vec<f32>; 13]> {
         None
     }
 
-    /// Synthesizes a complete 7-Movement Section-Aligned Vocal Performance & Timeline.
+    /// Synthesizes a complete 3-Minute (`181.0s`), 9-Movement Section-Aligned Vocal Performance & Timeline
+    /// matching the exact Gemini/Lyria 80 BPM section-by-section production script:
+    /// - `0:00–0:12`: Opening Instrumental
+    /// - `0:12–0:36`: First Verse (4 poetic lines on 6.0s 2-bar musical phrases)
+    /// - `0:36–0:48`: Pre-Chorus Build (2 poetic lines on 6.0s 2-bar musical phrases)
+    /// - `0:48–1:12`: Main Chorus #1 (4 poetic lines with stereo-doubled soaring vocals & harmony)
+    /// - `1:12–1:36`: Second Verse Drop (4 poetic lines over intimate fingerpicked guitar)
+    /// - `1:36–2:00`: Main Chorus #2 (full chamber-pop return at 96 seconds)
+    /// - `2:00–2:24`: Wordless Orchestral Climax (24s expressive violins, cello, slide guitar & bass)
+    /// - `2:24–2:48`: Final Powerful Chorus #3 (at 144 seconds)
+    /// - `2:48–3:01`: Stripped-Back Outro (at 168 seconds: solo fingerpicked guitar, mournful cello, and whispered closing lines)
     pub fn synthesize_sectioned_poem_vocal_track(
         &self,
-        sections: &[String; 5],
+        poem_lines: &[String; 13],
         bpm: f32,
         key_root_hz: f32,
         is_minor: bool,
@@ -1071,59 +1110,80 @@ impl MelodicSingingSynthesizer {
     ) -> SectionedVocalOutput {
         let sr = self.sample_rate as f32;
         let safe_bpm = bpm.clamp(50.0, 180.0);
-        let beat_sec = 60.0 / safe_bpm;
         let vocal_root = Self::normalize_human_vocal_root(key_root_hz);
         let third_st = if is_minor { 3.0f32 } else { 4.0f32 };
 
-        if let Some(parts) = self.render_five_section_neural_phrases(sections) {
-            let verse_contour = [0.0f32, 2.0, third_st, 2.0, 0.0, -2.0, 0.0, 2.0];
-            let pre_contour = [2.0f32, third_st, 5.0, 7.0, 5.0, third_st, 5.0, 7.0];
-            let chorus_contour = [7.0f32, 5.0, third_st, 7.0, 9.0, 7.0, 5.0, 0.0];
-            let outro_contour = [third_st, 2.0, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0];
+        // Exact 3-minute (181.0s) 9-movement section boundaries matching the 80 BPM production script
+        let movements = [
+            MovementSection { kind: SongMovementKind::OpeningInstrumental, start_sec: 0.0,   end_sec: 12.0  },
+            MovementSection { kind: SongMovementKind::IntimateVerse1,      start_sec: 12.0,  end_sec: 36.0  },
+            MovementSection { kind: SongMovementKind::PreChorusBuild,      start_sec: 36.0,  end_sec: 48.0  },
+            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 48.0,  end_sec: 72.0  },
+            MovementSection { kind: SongMovementKind::QuietVerse2Drop,     start_sec: 72.0,  end_sec: 96.0  },
+            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 96.0,  end_sec: 120.0 },
+            MovementSection { kind: SongMovementKind::OrchestralClimax,    start_sec: 120.0, end_sec: 144.0 },
+            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 144.0, end_sec: 168.0 },
+            MovementSection { kind: SongMovementKind::StrippedBackOutro,   start_sec: 168.0, end_sec: 181.0 },
+        ];
+        let total_dur = 181.0f32;
 
-            let v1_pitched = Self::apply_smooth_30ms_pitch_and_vibrato(&parts[0], sr, beat_sec, &verse_contour, 5.3, 0.0085);
-            let pre_pitched = Self::apply_smooth_30ms_pitch_and_vibrato(&parts[1], sr, beat_sec, &pre_contour, 5.5, 0.0105);
-            let ch_pitched = Self::apply_smooth_30ms_pitch_and_vibrato(&parts[2], sr, beat_sec, &chorus_contour, 5.7, 0.0125);
-            let ch_harm_contour = [7.0 + third_st, 5.0 + third_st, 7.0, 7.0 + third_st, 12.0, 7.0 + third_st, 7.0, third_st];
-            let ch_harm = Self::apply_smooth_30ms_pitch_and_vibrato(&parts[2], sr, beat_sec, &ch_harm_contour, 5.9, 0.011);
-            let v2_pitched = Self::apply_smooth_30ms_pitch_and_vibrato(&parts[3], sr, beat_sec, &verse_contour, 5.3, 0.0085);
-            let out_pitched = Self::apply_smooth_30ms_pitch_and_vibrato(&parts[4], sr, beat_sec, &outro_contour, 5.0, 0.0065);
+        if let Some(raw_lines) = self.render_thirteen_line_neural_phrases(poem_lines) {
+            // Melodic pitch contours (in semitones) per 2-bar (6.0s) poetic line
+            let c_verse_a = [0.0f32, 2.0, third_st, 5.0, third_st, 2.0];
+            let c_verse_b = [2.0f32, third_st, 2.0, 0.0, -2.0, 0.0];
+            let c_pre_a   = [2.0f32, third_st, 5.0, 7.0, 5.0, third_st];
+            let c_pre_b   = [third_st, 5.0, 7.0, 9.0, 7.0, 7.0];
+            let c_chor_1  = [7.0f32, 9.0, 7.0, 5.0, third_st, 5.0];
+            let c_chor_2  = [5.0f32, 7.0, 5.0, third_st, 2.0, third_st];
+            let c_chor_3  = [7.0f32, 9.0, 12.0, 9.0, 7.0, 5.0];
+            let c_chor_4  = [5.0f32, third_st, 2.0, 0.0, 2.0, 0.0];
+            let c_outro   = [third_st, 2.0, 0.0, -2.0, 0.0, 0.0];
 
-            let quantize_beats = |secs: f32, min_beats: f32| -> f32 {
-                let raw_beats = (secs / beat_sec).ceil().max(min_beats);
-                let bars_of_2 = (raw_beats / 2.0).ceil() * 2.0;
-                bars_of_2 * beat_sec
-            };
+            let mut pitched_lead: [Vec<f32>; 13] = Default::default();
+            let mut pitched_harm: [Vec<f32>; 4] = Default::default();
 
-            let d_intro = (8.0 * beat_sec).clamp(5.5, 9.0);
-            let d_v1 = quantize_beats(v1_pitched.len() as f32 / sr + 0.9, 10.0);
-            let d_pre = quantize_beats(pre_pitched.len() as f32 / sr + 0.8, 8.0);
-            let d_ch = quantize_beats(ch_pitched.len() as f32 / sr + 1.1, 12.0);
-            let d_v2 = quantize_beats(v2_pitched.len() as f32 / sr + 0.9, 10.0);
-            let d_climax = (14.0 * beat_sec).clamp(9.0, 13.0);
-            let d_outro = quantize_beats(out_pitched.len() as f32 / sr + 4.2, 12.0);
+            // Verse 1 lines (0..4)
+            pitched_lead[0] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[0], sr, 4.6, &c_verse_a, 5.2, 0.0085);
+            pitched_lead[1] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[1], sr, 4.4, &c_verse_b, 5.2, 0.0085);
+            pitched_lead[2] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[2], sr, 4.5, &c_verse_a, 5.3, 0.0085);
+            pitched_lead[3] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[3], sr, 4.4, &c_verse_b, 5.3, 0.0090);
 
-            let t0 = 0.0f32;
-            let t1 = t0 + d_intro;
-            let t2 = t1 + d_v1;
-            let t3 = t2 + d_pre;
-            let t4 = t3 + d_ch;
-            let t5 = t4 + d_v2;
-            let t6 = t5 + d_climax;
-            let t7 = t6 + d_outro;
+            // Pre-Chorus lines (4..6)
+            pitched_lead[4] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[4], sr, 4.8, &c_pre_a, 5.5, 0.0100);
+            pitched_lead[5] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[5], sr, 4.2, &c_pre_b, 5.6, 0.0110);
 
-            let movements = [
-                MovementSection { kind: SongMovementKind::OpeningInstrumental, start_sec: t0, end_sec: t1 },
-                MovementSection { kind: SongMovementKind::IntimateVerse1,      start_sec: t1, end_sec: t2 },
-                MovementSection { kind: SongMovementKind::PreChorusBuild,      start_sec: t2, end_sec: t3 },
-                MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: t3, end_sec: t4 },
-                MovementSection { kind: SongMovementKind::QuietVerse2Drop,     start_sec: t4, end_sec: t5 },
-                MovementSection { kind: SongMovementKind::OrchestralClimax,    start_sec: t5, end_sec: t6 },
-                MovementSection { kind: SongMovementKind::StrippedBackOutro,   start_sec: t6, end_sec: t7 },
-            ];
+            // Chorus lines (6..10) + Upper 3rd Harmony
+            let chor_contours = [&c_chor_1, &c_chor_2, &c_chor_3, &c_chor_4];
+            for k in 0..4 {
+                pitched_lead[6 + k] = Self::apply_smooth_30ms_pitch_and_vibrato(
+                    &raw_lines[6 + k],
+                    sr,
+                    4.7,
+                    chor_contours[k],
+                    5.7,
+                    0.0120,
+                );
+                let mut h_c = [0.0f32; 6];
+                for m in 0..6 {
+                    h_c[m] = chor_contours[k][m] + third_st;
+                }
+                pitched_harm[k] = Self::apply_smooth_30ms_pitch_and_vibrato(
+                    &raw_lines[6 + k],
+                    sr,
+                    4.7,
+                    &h_c,
+                    5.9,
+                    0.0110,
+                );
+            }
 
-            let total_frames = (t7 * sr).round() as usize;
-            let mut vocals = AudioBuffer::new(self.sample_rate, 2, t7);
+            // Verse 2 & Outro lines (10..13)
+            pitched_lead[10] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[10], sr, 4.4, &c_verse_a, 5.2, 0.0085);
+            pitched_lead[11] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[11], sr, 4.7, &c_verse_b, 5.2, 0.0085);
+            pitched_lead[12] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[12], sr, 4.5, &c_outro, 5.0, 0.0070);
+
+            let total_frames = (total_dur * sr).round() as usize;
+            let mut vocals = AudioBuffer::new(self.sample_rate, 2, total_dur);
             let mut dry_l = vec![0.0f32; total_frames];
             let mut dry_r = vec![0.0f32; total_frames];
 
@@ -1138,52 +1198,82 @@ impl MelodicSingingSynthesizer {
                 }
             };
 
-            place_mono_close_mic(&v1_pitched, t1 + 0.25, 0.96, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&pre_pitched, t2 + 0.20, 0.98, &mut dry_l, &mut dry_r);
-            {
-                let s_frame = ((t3 + 0.20) * sr).round() as usize;
+            let place_chorus_stereo_doubled = |lead: &[f32], harm: &[f32], start_sec: f32, gain: f32, dl: &mut [f32], dr: &mut [f32]| {
+                let s_frame = (start_sec * sr).round() as usize;
                 let haas_l = (0.014 * sr) as usize;
                 let haas_r = (0.019 * sr) as usize;
-                for k in 0..ch_pitched.len() {
+                for k in 0..lead.len() {
                     let dst = s_frame + k;
-                    if dst < total_frames {
-                        let lead = ch_pitched[k] * 0.88;
-                        let dbl_l = if k >= haas_l { ch_pitched[k - haas_l] * 0.36 } else { 0.0 };
-                        let dbl_r = if k >= haas_r { ch_pitched[k - haas_r] * 0.36 } else { 0.0 };
-                        let harm = ch_harm.get(k).copied().unwrap_or(0.0) * 0.24;
-                        dry_l[dst] += lead + dbl_l + harm * 0.85;
-                        dry_r[dst] += lead + dbl_r + harm * 1.15;
+                    if dst < dl.len() {
+                        let l_val = lead[k] * 0.86 * gain;
+                        let dbl_l = if k >= haas_l { lead[k - haas_l] * 0.36 * gain } else { 0.0 };
+                        let dbl_r = if k >= haas_r { lead[k - haas_r] * 0.36 * gain } else { 0.0 };
+                        let h_val = harm.get(k).copied().unwrap_or(0.0) * 0.25 * gain;
+                        dl[dst] += l_val + dbl_l + h_val * 0.85;
+                        dr[dst] += l_val + dbl_r + h_val * 1.15;
                     }
                 }
-            }
-            place_mono_close_mic(&v2_pitched, t4 + 0.25, 0.95, &mut dry_l, &mut dry_r);
+            };
 
-            {
-                let s_frame = (t5 * sr).round() as usize;
-                let e_frame = (t6 * sr).round() as usize;
-                let mut f1 = BandpassFormantResonator::new();
-                let mut f2 = BandpassFormantResonator::new();
-                let mut ph_root = 0.0f32;
-                let mut ph_fifth = 0.0f32;
-                for f in s_frame..e_frame.min(total_frames) {
-                    let prog = (f - s_frame) as f32 / (e_frame.saturating_sub(s_frame).max(1) as f32);
-                    let swell = (prog * PI).sin();
-                    let t = f as f32 / sr;
-                    let vib = 1.0 + 0.008 * (2.0 * PI * 5.4 * t).sin();
-                    let hz_r = vocal_root * 2.0 * vib;
-                    let hz_5 = vocal_root * 2.0 * 1.498_307 * vib;
-                    ph_root = (ph_root + hz_r / sr).fract();
-                    ph_fifth = (ph_fifth + hz_5 / sr).fract();
-                    let c_r = Self::harmonic_singing_carrier(ph_root, hz_r);
-                    let c_5 = Self::harmonic_singing_carrier(ph_fifth, hz_5);
-                    let choir_l = f1.process(c_r, 720.0, 90.0, sr) * 0.04 * swell;
-                    let choir_r = f2.process(c_5, 1220.0, 110.0, sr) * 0.04 * swell;
-                    dry_l[f] += choir_l * 0.8 + choir_r * 0.4;
-                    dry_r[f] += choir_r * 0.8 + choir_l * 0.4;
-                }
+            // 1. First Verse (0:12 – 0:36): 4 lines placed on 2-bar (6.0s) boundaries
+            place_mono_close_mic(&pitched_lead[0], 12.2, 0.96, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[1], 18.2, 0.96, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[2], 24.2, 0.96, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[3], 30.2, 0.96, &mut dry_l, &mut dry_r);
+
+            // 2. Pre-Chorus Build (0:36 – 0:48): 2 lines on 2-bar (6.0s) boundaries
+            place_mono_close_mic(&pitched_lead[4], 36.2, 0.98, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[5], 42.2, 1.00, &mut dry_l, &mut dry_r);
+
+            // 3. Main Chorus #1 (0:48 – 1:12): 4 Chorus lines on 2-bar (6.0s) boundaries
+            for k in 0..4 {
+                place_chorus_stereo_doubled(
+                    &pitched_lead[6 + k],
+                    &pitched_harm[k],
+                    48.2 + (k as f32) * 6.0,
+                    1.00,
+                    &mut dry_l,
+                    &mut dry_r,
+                );
             }
 
-            place_mono_close_mic(&out_pitched, t6 + 0.30, 0.84, &mut dry_l, &mut dry_r);
+            // 4. Second Verse Drop (1:12 – 1:36): Lines 10, 11, 12, and Line 0 reprise building into Chorus #2
+            place_mono_close_mic(&pitched_lead[10], 72.2, 0.95, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[11], 78.2, 0.95, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[12], 84.2, 0.95, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[0],  90.2, 0.98, &mut dry_l, &mut dry_r);
+
+            // 5. Main Chorus #2 (1:36 – 2:00): Full chamber-pop Chorus return at 96 seconds
+            for k in 0..4 {
+                place_chorus_stereo_doubled(
+                    &pitched_lead[6 + k],
+                    &pitched_harm[k],
+                    96.2 + (k as f32) * 6.0,
+                    1.02,
+                    &mut dry_l,
+                    &mut dry_r,
+                );
+            }
+
+            // (6. 2:00 – 2:24 is the 24-second Wordless Orchestral Climax — 100% pure orchestral strings, acoustic slide guitar & fluid bass)
+
+            // 7. Final Powerful Chorus #3 (2:24 – 2:48): Peak vocal & orchestral climax at 144 seconds
+            for k in 0..4 {
+                place_chorus_stereo_doubled(
+                    &pitched_lead[6 + k],
+                    &pitched_harm[k],
+                    144.2 + (k as f32) * 6.0,
+                    1.05,
+                    &mut dry_l,
+                    &mut dry_r,
+                );
+            }
+
+            // 8. Stripped-Back Outro (2:48 – 3:01): Soft, whispered vocal delivery repeating the closing lines
+            let outro_l1 = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[11], sr, 4.8, &c_outro, 4.8, 0.0055);
+            let outro_l2 = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[12], sr, 4.8, &c_outro, 4.8, 0.0055);
+            place_mono_close_mic(&outro_l1, 168.3, 0.80, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&outro_l2, 173.6, 0.76, &mut dry_l, &mut dry_r);
 
             let mut warmth_eq = BiquadFilter::peaking_eq(230.0, 0.9, 1.8, 2);
             let mut air_eq = BiquadFilter::peaking_eq(3400.0, 1.0, 2.4, 2);
@@ -1193,10 +1283,12 @@ impl MelodicSingingSynthesizer {
 
             for i in 0..total_frames {
                 let t = i as f32 / sr;
-                let in_chorus_or_climax = (t >= t3 && t < t4) || (t >= t5 && t < t6);
+                let in_chorus = (t >= 48.0 && t < 72.0)
+                    || (t >= 96.0 && t < 120.0)
+                    || (t >= 144.0 && t < 168.0);
                 let (rl_c, rr_c) = close_reverb.process_stereo(dry_l[i], dry_r[i]);
                 let (rl_l, rr_l) = lush_reverb.process_stereo(dry_l[i], dry_r[i]);
-                let (rev_l, rev_r) = if in_chorus_or_climax {
+                let (rev_l, rev_r) = if in_chorus {
                     (rl_l, rr_l)
                 } else {
                     (rl_c, rr_c)
@@ -1210,35 +1302,25 @@ impl MelodicSingingSynthesizer {
             return SectionedVocalOutput {
                 vocals,
                 movements,
-                total_duration_secs: t7,
+                total_duration_secs: total_dur,
             };
         }
 
-        let fallback_dur = 64.0f32;
-        let combined = sections.join(" ");
+        let combined = poem_lines.join(" ");
         let vocals = self.synthesize_reference_conditioned_vocal_track(
-            fallback_dur,
+            total_dur,
             safe_bpm,
             vocal_root,
             is_minor,
             &combined,
             melodic_seed,
             true,
-            Some((36.0, 48.0)),
+            Some((120.0, 144.0)),
         );
-        let movements = [
-            MovementSection { kind: SongMovementKind::OpeningInstrumental, start_sec: 0.0,  end_sec: 6.0  },
-            MovementSection { kind: SongMovementKind::IntimateVerse1,      start_sec: 6.0,  end_sec: 16.0 },
-            MovementSection { kind: SongMovementKind::PreChorusBuild,      start_sec: 16.0, end_sec: 24.0 },
-            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 24.0, end_sec: 36.0 },
-            MovementSection { kind: SongMovementKind::QuietVerse2Drop,     start_sec: 36.0, end_sec: 45.0 },
-            MovementSection { kind: SongMovementKind::OrchestralClimax,    start_sec: 45.0, end_sec: 54.0 },
-            MovementSection { kind: SongMovementKind::StrippedBackOutro,   start_sec: 54.0, end_sec: 64.0 },
-        ];
         SectionedVocalOutput {
             vocals,
             movements,
-            total_duration_secs: fallback_dur,
+            total_duration_secs: total_dur,
         }
     }
 

@@ -240,18 +240,28 @@ impl ReferenceRlSynthesizer {
         (title, genre_label, lyrics)
     }
 
-    /// Parses structured or raw poem lyrics into the 5 sung movement phrases:
-    /// `[Verse 1, Pre-Chorus, Chorus, Verse 2, Outro]`.
-    fn extract_five_movement_lyrics(structured_lyrics: &str) -> [String; 5] {
+    /// Parses structured or raw poem lyrics into the 13 individual poetic lines for
+    /// 2-bar (`6.0-second`) musical phrase alignment across the full 3-minute arrangement.
+    fn extract_thirteen_poem_lines(structured_lyrics: &str) -> [String; 13] {
+        let default_lines = [
+            "If these blackening skies would pass, in the grasslands we can play,".to_string(),
+            "Singing happy songs to the traveling flamingos.".to_string(),
+            "Holding friendly whispers, when soothing passions flock.".to_string(),
+            "When cupid starts a fire to the drying shrub,".to_string(),
+            "Sparks of thousand cajoles, chasing lovers like cheetah after hare.".to_string(),
+            "And, once the moon comes shining,".to_string(),
+            "Stare east of the grasslands, hope is nearer by the moment.".to_string(),
+            "Stare west of the grasslands, a face of the rainbow.".to_string(),
+            "Stare north of the grasslands, flowers ready to bloom.".to_string(),
+            "Stare south of the grasslands, nettles and thorns of yesterdays.".to_string(),
+            "The season of drought ridden passion will end.".to_string(),
+            "And we migrate with the savannah, gazing the new grass of the east,".to_string(),
+            "Where watering kingdoms heal aching hearts.".to_string(),
+        ];
+
         let lower = structured_lyrics.to_ascii_lowercase();
         if lower.contains("blackening skies") || lower.contains("traveling flamingos") || lower.contains("watering kingdoms") {
-            return [
-                "If these blackening skies would pass, in the grasslands we can play, Singing happy songs to the traveling flamingos. Holding friendly whispers, when soothing passions flock.".to_string(),
-                "When cupid starts a fire to the drying shrub, Sparks of thousand cajoles, chasing lovers like cheetah after hare. And, once the moon comes shining,".to_string(),
-                "Stare east of the grasslands, hope is nearer by the moment. Stare west of the grasslands, a face of the rainbow. Stare north of the grasslands, flowers ready to bloom. Stare south of the grasslands, nettles and thorns of yesterdays.".to_string(),
-                "The season of drought ridden passion will end. And we migrate with the savannah, gazing the new grass of the east.".to_string(),
-                "And we migrate with the savannah, gazing the new grass of the east, Where watering kingdoms heal aching hearts.".to_string(),
-            ];
+            return default_lines;
         }
 
         let mut sung_lines = Vec::new();
@@ -263,33 +273,20 @@ impl ReferenceRlSynthesizer {
             sung_lines.push(trimmed.to_string());
         }
 
-        if sung_lines.len() >= 5 {
-            let n = sung_lines.len();
-            let c0 = (n / 5).max(1);
-            let c1 = ((n * 2) / 5).max(c0 + 1).min(n);
-            let c2 = ((n * 3) / 5).max(c1 + 1).min(n);
-            let c3 = ((n * 4) / 5).max(c2 + 1).min(n);
-            [
-                sung_lines[0..c0].join(" "),
-                sung_lines[c0..c1].join(" "),
-                sung_lines[c1..c2].join(" "),
-                sung_lines[c2..c3].join(" "),
-                sung_lines[c3..n].join(" "),
-            ]
+        if sung_lines.len() >= 6 {
+            let mut out: [String; 13] = Default::default();
+            for k in 0..13 {
+                out[k] = sung_lines[k % sung_lines.len()].clone();
+            }
+            out
         } else {
-            [
-                "If these blackening skies would pass, in the grasslands we can play, Singing happy songs to the traveling flamingos. Holding friendly whispers, when soothing passions flock.".to_string(),
-                "When cupid starts a fire to the drying shrub, Sparks of thousand cajoles, chasing lovers like cheetah after hare. And, once the moon comes shining,".to_string(),
-                "Stare east of the grasslands, hope is nearer by the moment. Stare west of the grasslands, a face of the rainbow. Stare north of the grasslands, flowers ready to bloom. Stare south of the grasslands, nettles and thorns of yesterdays.".to_string(),
-                "The season of drought ridden passion will end. And we migrate with the savannah, gazing the new grass of the east.".to_string(),
-                "And we migrate with the savannah, gazing the new grass of the east, Where watering kingdoms heal aching hearts.".to_string(),
-            ]
+            default_lines
         }
     }
 
     /// Resolves the active `SongMovementKind` and normalized `0.0..1.0` movement progress at time `t`.
     #[inline]
-    fn movement_at_time(t: f32, movements: &[MovementSection; 7]) -> (SongMovementKind, f32) {
+    fn movement_at_time(t: f32, movements: &[MovementSection]) -> (SongMovementKind, f32) {
         for m in movements {
             if t >= m.start_sec && t < m.end_sec {
                 let dur = (m.end_sec - m.start_sec).max(0.01);
@@ -374,7 +371,7 @@ impl ReferenceRlSynthesizer {
         duration_secs: f32,
         bpm: f32,
         chords: &[ChordVoicing; 8],
-        movements: &[MovementSection; 7],
+        movements: &[MovementSection],
         seed: u64,
     ) -> AudioBuffer {
         let sr = SAMPLE_RATE;
@@ -538,7 +535,7 @@ impl ReferenceRlSynthesizer {
         is_acoustic_slide: bool,
         guitar_drive: f32,
         melodic_seed: u64,
-        movements: &[MovementSection; 7],
+        movements: &[MovementSection],
     ) -> AudioBuffer {
         let sr = SAMPLE_RATE as f32;
         let frames = (duration_secs * sr).round() as usize;
@@ -694,7 +691,7 @@ impl ReferenceRlSynthesizer {
         duration_secs: f32,
         bpm: f32,
         drum_punch: f32,
-        movements: &[MovementSection; 7],
+        movements: &[MovementSection],
         seed: u64,
     ) -> (AudioBuffer, AudioBuffer) {
         let sr = SAMPLE_RATE as f32;
@@ -854,7 +851,7 @@ impl ReferenceRlSynthesizer {
         duration_secs: f32,
         bpm: f32,
         chords: &[ChordVoicing; 8],
-        movements: &[MovementSection; 7],
+        movements: &[MovementSection],
         bass_warmth_db: f32,
     ) -> AudioBuffer {
         let sr = SAMPLE_RATE as f32;
@@ -969,7 +966,7 @@ impl ReferenceRlSynthesizer {
         duration_secs: f32,
         bpm: f32,
         chords: &[ChordVoicing; 8],
-        movements: &[MovementSection; 7],
+        movements: &[MovementSection],
     ) -> AudioBuffer {
         let sr = SAMPLE_RATE as f32;
         let frames = (duration_secs * sr).round() as usize;
@@ -983,26 +980,28 @@ impl ReferenceRlSynthesizer {
         let mut smoothed_cello_hz = chords[0].root_hz;
         let mut rng = DspRng::new(6152);
 
-        // 3-Mode Wooden Body Formant Filters + Warm Velvet Low-Pass Filters for Cello & Violins
+        // 3-Mode Wooden Body Formant Filters + True Cascaded 2-Pole Velvet Low-Pass Filters for Cello & Violins
         let mut cello_body_1 = BiquadFilter::peaking_eq(195.0, 1.2, 3.6, 2);
-        let mut cello_body_2 = BiquadFilter::peaking_eq(480.0, 1.1, 2.8, 2);
-        let mut cello_warm_lp = BiquadFilter::peaking_eq(1800.0, 0.5, -10.0, 2);
+        let mut cello_body_2 = BiquadFilter::peaking_eq(460.0, 1.1, 2.6, 2);
         let mut vln_body_1 = BiquadFilter::peaking_eq(285.0, 1.1, 2.6, 2);
-        let mut vln_body_2 = BiquadFilter::peaking_eq(540.0, 1.1, 3.2, 2);
-        let mut vln_bridge_eq = BiquadFilter::peaking_eq(2450.0, 1.2, 1.6, 2);
-        let mut vln_warm_lp = BiquadFilter::peaking_eq(3200.0, 0.6, -8.5, 2);
+        let mut vln_body_2 = BiquadFilter::peaking_eq(520.0, 1.1, 3.0, 2);
         let mut hall_reverb = StudioVocalReverb::new(SAMPLE_RATE, 0.28);
 
-        // Helper: 6-harmonic warm Helmholtz bowed string waveform (1/k^1.90 dark woody rolloff + subtle rosin)
+        let mut cello_lp1 = 0.0f32;
+        let mut cello_lp2 = 0.0f32;
+        let mut vln_lp1_l = 0.0f32;
+        let mut vln_lp2_l = 0.0f32;
+        let mut vln_lp1_r = 0.0f32;
+        let mut vln_lp2_r = 0.0f32;
+
+        // Warm 4-harmonic acoustic bowed string (fundamental + soft octave & twelfth, zero harsh sawtooth buzz)
         let helmholtz_bowed = |phase: f32, rosin: f32| -> f32 {
             let w = 2.0 * PI * phase;
-            let mut s = 0.0f32;
-            for k in 1..=6 {
-                let kf = k as f32;
-                let sign = if k % 2 == 0 { -1.0 } else { 1.0 };
-                s += sign * (kf * w).sin() / kf.powf(1.90);
-            }
-            s * 0.48 + rosin * 0.015
+            let s = w.sin() * 0.68
+                - (2.0 * w).sin() * 0.22
+                + (3.0 * w).sin() * 0.08
+                - (4.0 * w).sin() * 0.03;
+            s + rosin * 0.008
         };
 
         for i in 0..frames {
@@ -1013,89 +1012,72 @@ impl ReferenceRlSynthesizer {
             let bar_idx = ((t / bar_sec).floor() as usize) % chords.len();
             let chord = chords[bar_idx];
 
-            // Expressive string vibrato (5.5 Hz for cello, 5.8 Hz for violins)
-            let cello_vib = 1.0 + 0.0055 * (2.0 * PI * 5.4 * t).sin();
-            let vln_vib = 1.0 + 0.0065 * (2.0 * PI * 5.8 * t + 0.7).sin();
+            // Expressive string vibrato (5.3 Hz for cello, 5.6 Hz for violins)
+            let cello_vib = 1.0 + 0.0048 * (2.0 * PI * 5.3 * t).sin();
+            let vln_vib = 1.0 + 0.0055 * (2.0 * PI * 5.6 * t + 0.7).sin();
 
-            // Select melodic counter-melody targets based on the active movement!
+            // Select slow, lyrical 2-bar legato counter-melodies in the warm 196–587 Hz register
             let (target_cello_hz, target_vln_hz, cello_gain, vln_gain) = match mov {
                 SongMovementKind::OpeningInstrumental => {
-                    // Swirling violins & warm cello establish the pastoral scene
-                    let v_target = if beat_in_bar < 2.0 { chord.fifth_hz * 2.0 } else { chord.seventh_hz * 2.0 };
-                    (chord.root_hz, v_target, 0.48, 0.44)
+                    let v_target = if beat_in_bar < 2.0 { chord.fifth_hz * 1.5 } else { chord.third_hz * 2.0 };
+                    (chord.root_hz, v_target.clamp(220.0, 520.0), 0.44, 0.36)
                 }
                 SongMovementKind::IntimateVerse1 | SongMovementKind::QuietVerse2Drop => {
                     // Strings drop way back so the close-mic voice sits in clean, uncluttered space!
-                    (chord.root_hz, chord.third_hz * 2.0, 0.08, 0.0)
+                    (chord.root_hz, chord.third_hz * 1.5, 0.08, 0.0)
                 }
                 SongMovementKind::PreChorusBuild => {
-                    // Rising counter-melodies building momentum into the Chorus!
-                    let step_4 = (beat_in_bar.floor() as usize) % 4;
-                    let rising_tones = [
-                        chord.root_hz * 2.0,
-                        chord.third_hz * 2.0,
-                        chord.fifth_hz * 2.0,
-                        chord.seventh_hz * 2.0,
-                    ];
-                    let g = 0.32 + 0.38 * mov_prog;
-                    (chord.third_hz, rising_tones[step_4], g * 0.85, g)
+                    // Smooth rising counter-melodies building momentum into the Chorus
+                    let v_rise = if beat_in_bar < 2.0 { chord.third_hz * 1.5 } else { chord.fifth_hz * 1.5 };
+                    let g = 0.28 + 0.32 * mov_prog;
+                    (chord.third_hz, v_rise.clamp(220.0, 520.0), g * 0.85, g * 0.80)
                 }
                 SongMovementKind::ChamberPopChorus => {
-                    // Multi-layered orchestral string explosion
-                    let v_mel = if beat_in_bar < 1.5 {
-                        chord.seventh_hz * 2.0
-                    } else if beat_in_bar < 3.0 {
+                    let v_mel = if beat_in_bar < 2.0 { chord.fifth_hz * 1.5 } else { chord.third_hz * 2.0 };
+                    (chord.root_hz, v_mel.clamp(240.0, 540.0), 0.50, 0.48)
+                }
+                SongMovementKind::OrchestralClimax => {
+                    // Sweeping 24-second wordless orchestral climax in warm chamber register (G3..D5)
+                    let v_climax = if beat_in_bar < 2.0 {
                         chord.fifth_hz * 2.0
                     } else {
                         chord.third_hz * 2.0
                     };
-                    (chord.root_hz, v_mel, 0.58, 0.64)
-                }
-                SongMovementKind::OrchestralClimax => {
-                    // Expressive wordless orchestral climax with soaring high violins
-                    let v_climax = match (beat_in_bar.floor() as usize) % 4 {
-                        0 => chord.fifth_hz * 4.0,
-                        1 => chord.seventh_hz * 2.0,
-                        2 => chord.third_hz * 4.0,
-                        _ => chord.fifth_hz * 2.0,
-                    };
-                    (chord.third_hz, v_climax.clamp(220.0, 1320.0), 0.66, 0.76)
+                    (chord.third_hz, v_climax.clamp(260.0, 587.0), 0.58, 0.56)
                 }
                 SongMovementKind::StrippedBackOutro => {
                     // Stripped-Back Outro: ONLY a mournful solo cello singing a slow counter-melody!
                     let mournful_cello = if beat_in_bar < 2.0 {
                         chord.third_hz
-                    } else if beat_in_bar < 3.0 {
-                        chord.fifth_hz
                     } else {
                         chord.root_hz
                     };
-                    (mournful_cello, chord.third_hz * 2.0, 0.64, 0.0)
+                    (mournful_cello.clamp(130.0, 294.0), chord.third_hz * 1.5, 0.52, 0.0)
                 }
             };
 
-            smoothed_cello_hz = smoothed_cello_hz * 0.9985 + target_cello_hz * 0.0015;
-            smoothed_vln_hz = smoothed_vln_hz * 0.9982 + target_vln_hz * 0.0018;
+            smoothed_cello_hz = smoothed_cello_hz * 0.9990 + target_cello_hz * 0.0010;
+            smoothed_vln_hz = smoothed_vln_hz * 0.9990 + target_vln_hz * 0.0010;
 
-            let bow_swell = 0.42 + 0.58 * ((beat_in_bar * 0.25).fract() * PI).sin();
+            let bow_swell = 0.45 + 0.55 * ((beat_in_bar * 0.25).fract() * PI).sin();
             let rosin_noise = rng.next_f32();
             cello_phase = (cello_phase + (smoothed_cello_hz * cello_vib) / sr).fract();
             let raw_cello = helmholtz_bowed(cello_phase, rosin_noise) * cello_gain * bow_swell;
-            let woody_cello = cello_warm_lp.process_sample(
-                0,
-                cello_body_2.process_sample(0, cello_body_1.process_sample(0, raw_cello)),
-            );
+            let body_cello = cello_body_2.process_sample(0, cello_body_1.process_sample(0, raw_cello));
+            // True 2-pole low-pass filter at 440 Hz (`alpha = 0.055`) for dark, velvet solo cello
+            cello_lp1 += 0.055 * (body_cello - cello_lp1);
+            cello_lp2 += 0.055 * (cello_lp1 - cello_lp2);
+            let woody_cello = cello_lp2;
 
             let mut vln_l = 0.0f32;
             let mut vln_r = 0.0f32;
             if vln_gain > 0.001 {
-                // 4-player stereo violin section with slight ensemble detuning (`±3.5 cents`)
-                let detunes = [0.9980f32, 1.0018, 0.9991, 1.0028];
-                let ratios = [1.0f32, 1.0, 0.749_154, 1.259_921]; // Lead + 4th & 3rd orchestral harmony
+                let detunes = [0.9984f32, 1.0015, 0.9992, 1.0022];
+                let ratios = [1.0f32, 1.0, 0.749_154, 1.259_921];
                 for p in 0..4 {
                     let hz = smoothed_vln_hz * ratios[p] * detunes[p] * vln_vib;
                     vln_phases[p] = (vln_phases[p] + hz / sr).fract();
-                    let sig = helmholtz_bowed(vln_phases[p], rosin_noise) * 0.28 * vln_gain * bow_swell;
+                    let sig = helmholtz_bowed(vln_phases[p], rosin_noise) * 0.25 * vln_gain * bow_swell;
                     if p % 2 == 0 {
                         vln_l += sig * 0.85;
                         vln_r += sig * 0.35;
@@ -1106,14 +1088,15 @@ impl ReferenceRlSynthesizer {
                 }
             }
 
-            let eq_vln_l = vln_warm_lp.process_sample(
-                0,
-                vln_bridge_eq.process_sample(0, vln_body_2.process_sample(0, vln_body_1.process_sample(0, vln_l))),
-            );
-            let eq_vln_r = vln_warm_lp.process_sample(
-                1,
-                vln_bridge_eq.process_sample(1, vln_body_2.process_sample(1, vln_body_1.process_sample(1, vln_r))),
-            );
+            let body_vln_l = vln_body_2.process_sample(0, vln_body_1.process_sample(0, vln_l));
+            let body_vln_r = vln_body_2.process_sample(1, vln_body_1.process_sample(1, vln_r));
+            // True 2-pole low-pass filter at 880 Hz (`alpha = 0.105`) for lush, warm chamber violins
+            vln_lp1_l += 0.105 * (body_vln_l - vln_lp1_l);
+            vln_lp2_l += 0.105 * (vln_lp1_l - vln_lp2_l);
+            vln_lp1_r += 0.105 * (body_vln_r - vln_lp1_r);
+            vln_lp2_r += 0.105 * (vln_lp1_r - vln_lp2_r);
+            let eq_vln_l = vln_lp2_l;
+            let eq_vln_r = vln_lp2_r;
 
             let dry_l = woody_cello * 0.85 + eq_vln_l;
             let dry_r = woody_cello * 0.95 + eq_vln_r;
@@ -1167,16 +1150,16 @@ impl ReferenceRlSynthesizer {
             Some(l) if !l.trim().is_empty() && !Self::is_stale_default_reggae_lyrics(l) => l.to_string(),
             _ => auto_lyrics,
         };
-        let five_sections = Self::extract_five_movement_lyrics(&structured_lyrics);
+        let thirteen_lines = Self::extract_thirteen_poem_lines(&structured_lyrics);
 
         let (root_hz, is_minor) = Self::parse_key_root_and_mode(&key_signature);
         let chords = Self::build_8bar_chord_progression(root_hz, is_minor);
 
-        // 1. Synthesize the 7-Movement Section-Aligned Neural Alto Vocal Track FIRST
+        // 1. Synthesize the 9-Movement (3-Minute, 181.0s) Section-Aligned Neural Alto Vocal Track FIRST
         //    so every instrument stem locks to the exact sample-accurate movement boundaries!
         let vocal_synth = MelodicSingingSynthesizer::new(SAMPLE_RATE);
         let sectioned = vocal_synth.synthesize_sectioned_poem_vocal_track(
-            &five_sections,
+            &thirteen_lines,
             bpm as f32,
             root_hz * 2.0,
             is_minor,
