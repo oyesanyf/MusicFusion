@@ -59,14 +59,22 @@ impl DeterministicOfflineSynthesisEngine {
         };
 
         for line in raw.lines() {
-            let trimmed = line.trim();
+            let pua_stripped: String = line
+                .chars()
+                .filter(|&ch| !('\u{E000}'..='\u{F8FF}').contains(&ch))
+                .collect();
+            let trimmed = pua_stripped.trim();
             if trimmed.is_empty() {
                 continue;
             }
             let lower = trimmed.to_ascii_lowercase();
-            // Strip PDF extractor metadata headers and page markers
+            // Strip PDF extractor metadata headers, page markers, and ChatGPT export navlist/citation artifacts
             if lower.starts_with("[pdf metadata]")
                 || (lower.starts_with("[page ") && lower.ends_with(']'))
+                || lower.contains("navlist")
+                || lower.contains("turn0news")
+                || lower.contains("turn0search")
+                || lower.contains("fileciteturn0file0")
                 || lower == "v"
                 || lower == "t"
             {
@@ -599,10 +607,10 @@ impl DeterministicOfflineSynthesisEngine {
                 })
         });
 
-        // Keep top 4 deduplicated RAG chunks
+        // Keep top 8 deduplicated RAG chunks for comprehensive multi-paragraph synthesis
         let matched_chunks: Vec<&ScoredChunk> = scored_matches
             .into_iter()
-            .take(4)
+            .take(8)
             .map(|(c, _, _, _)| c)
             .collect();
 
@@ -616,7 +624,7 @@ impl DeterministicOfflineSynthesisEngine {
                     cit.snippet = cleaned.chars().take(240).collect();
                     let rank_decay = (idx as u32).min(5) * 4;
                     let calibrated = (98u32.saturating_sub(rank_decay)).clamp(78, 99) as f32 / 100.0;
-                    if cit.score < 0.70 {
+                    if !(0.70..=1.0).contains(&cit.score) {
                         cit.score = calibrated;
                     }
                     cit
@@ -1142,9 +1150,9 @@ impl DeterministicOfflineSynthesisEngine {
             _ => "qwen2.5:1.5b",
         };
 
-        let temp = ui.sampling_temperature.clamp(0.0, 0.4);
-        let num_predict = 380usize;
-        let num_ctx = 3072usize;
+        let temp = ui.sampling_temperature.clamp(0.05, 0.20);
+        let num_predict = 1600usize;
+        let num_ctx = 16384usize;
 
         let voice_directive = if ui.natural_human_voice {
             " Write in a clear, natural human voice with zero robotic filler."
@@ -1153,18 +1161,18 @@ impl DeterministicOfflineSynthesisEngine {
         };
 
         let mut messages: Vec<serde_json::Value> = Vec::new();
+        let expected_prefix = Self::format_question_restated_prefix(prompt);
 
-        let base_system = "You are QuorumRAG, an air-gapped local Retrieval-Augmented Generation (RAG) orchestrator. \
-            Your ONLY role is to orchestrate a direct, clear, well-structured Markdown answer to the user's question \
-            using strictly the Retrieved Local Documents provided below (and prior conversation turns to resolve follow-up pronouns like 'it', 'he', 'she', 'they', 'that'). \
+        let base_system = "You are QuorumRAG, an exhaustive, strictly factual research synthesis engine. \
+            Your ONLY task is to write a comprehensive, deeply detailed, multi-paragraph Markdown response answering ONLY the user's question \
+            using strictly the provided `<context>` source documents below. \
             \n\
-            MANDATORY INVARIANTS:\n\
-            1. QUESTION-RESTATING: You must orchestrate answers ONLY to questions using the retrieved RAG chunks. ALWAYS begin your answer by directly restating the question into an affirmative statement grounded in the retrieved documents (for example, \"Who is femi\" must begin with \"Femi is [or Femi Oyesanya is] ...\"; \"What is RedactX\" must begin with \"RedactX is ...\"; \"Where did Femi study\" must begin with \"Femi studied at ...\").\n\
-            2. ZERO META-FILLER: Never begin with robotic meta-announcements, greetings, or conversational filler (e.g. NEVER say \"Based on the documents provided...\", \"According to the resume...\", \"Sure, here is...\", or \"As an AI...\"). Jump straight into the affirmative restated answer.\n\
-            3. STRICT GROUNDING: Ground all claims strictly and exclusively in the provided Retrieved Local Documents (such as ResumeSec-AI-FemiOyesanya2025.pdf, Femi_Oyesanya_Enhanced_Resume_v3.docx, Femi_Oyesanya_CV_2026.pdf, Resume2026.pdf). NEVER invent, hallucinate, or extrapolate facts outside the provided documents.\n\
-            4. INLINE CITATIONS: Cite specific facts inline using `[1]`, `[2]`, etc. matching the numbered Retrieved Local Documents.\n\
-            5. CLEAN PROSE: Answer in coherent prose and bullet points using `###` section headings where helpful. NEVER dump raw file headers, line numbers `(Lines X-Y)`, or ChatGPT export artifacts (`fileciteturn0file0`, `sandbox:/mnt/data/...`).\n\
-            6. SOURCES AT END: Document links, URLs, and accuracy scores belong strictly at the very end of the response in a dedicated Sources & Document Links block.";
+            Follow these strict rules:\n\
+            1. QUESTION-RESTATING OPENING: Always begin your answer immediately by repeating/restating the user's question or topic into an affirmative statement grounded in the provided documents. Never answer any question other than the user's question.\n\
+            2. ZERO META-FILLER: Never begin with greetings or meta-announcements (never say \"Based on the documents provided...\", \"According to the text...\", or \"Sure, here is...\").\n\
+            3. EXHAUSTIVENESS & STRICT GROUNDING: Include every relevant historical event, date, name, statistic, quote, and argument present in the `<context>` documents. Never invent facts or extrapolate beyond the provided documents.\n\
+            4. INLINE CITATIONS: Every factual claim and paragraph must cite its source document index in brackets, such as `[1]`, `[2]`, etc., matching `<document index=\"...\">`.\n\
+            5. CLEAN STRUCTURE: Organize your response into thorough, flowing paragraphs and `###` section headings where helpful. Never include line numbers `(Lines X-Y)`.";
 
         let system_prompt = format!("{}{}", base_system, voice_directive);
 
@@ -1199,21 +1207,23 @@ impl DeterministicOfflineSynthesisEngine {
                     .and_then(|n| n.to_str())
                     .unwrap_or(&c.chunk.file_path);
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
-                let compact_text: String = cleaned.chars().take(850).collect();
+                let compact_text: String = cleaned.chars().take(1800).collect();
                 format!(
-                    "[{}] Source Document: {}\n{}",
+                    "<document index=\"{}\" source=\"{}\">\n{}\n</document>",
                     i + 1,
                     file_name,
                     compact_text.trim()
                 )
             })
             .collect::<Vec<_>>()
-            .join("\n\n---\n\n");
+            .join("\n\n");
 
         let user_content = format!(
-            "### Retrieved Local Documents:\n{}\n\n### User Question:\n{}\n\n\
-            INSTRUCTION: Orchestrate a direct, well-structured Markdown answer to the User Question strictly grounded in the Retrieved Local Documents above. Begin immediately with an affirmative restatement of the question (e.g., 'Who is femi' -> 'Femi is ...'). Include inline [1], [2] citations. Do not include line numbers or introductory fluff.",
-            context_blocks, prompt
+            "<context>\n{}\n</context>\n\nUser Question: {}\n\n\
+            INSTRUCTION: Provide a complete, exhaustive, and fully cited multi-paragraph analysis answering ONLY the User Question above based strictly on `<context>`. Begin your response immediately with `{}` and include inline `[1]`, `[2]` citations. Do not include line numbers.",
+            context_blocks,
+            prompt,
+            expected_prefix.trim()
         );
 
         messages.push(serde_json::json!({
@@ -1239,7 +1249,7 @@ impl DeterministicOfflineSynthesisEngine {
                     "num_ctx": num_ctx,
                     "num_thread": 16,
                     "top_p": 0.9,
-                    "repeat_penalty": 1.1
+                    "repeat_penalty": 1.15
                 }
             })
             .to_string();
