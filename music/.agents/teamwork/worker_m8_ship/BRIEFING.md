@@ -28,22 +28,27 @@ Ship remaining Milestone 8 tests via solo PR script, compile release `music_cli`
 - **Code layout**: standard cargo workspace in `d:\harfile\music`
 
 ## Key Decisions Made
-- Initializing task execution
+- Executed and passed both challenger test suites: `crates/music_fusion/tests/challenger_m8_empirical_tests.rs` (12/12) and `crates/music_cli/tests/challenger_m8_2_empirical_tests.rs` (5/5).
+- Created `scripts/solo_pr_ship.ps1` and shipped PR #2 to `origin/main` with automatic squash-merge.
+- Built release binary `target/release/music_cli.exe` via `cargo build --release -p music_cli`.
+- Refined `is_port_free_across_interfaces` to test TCP connection and bind directly, eliminating false-positive conflicts with system UDP sockets on 0.0.0.0.
+- Launched release server with `-WindowStyle Hidden` on port 5050 and verified 200 OK on both `/api/health` and `/index.html`.
 
 ## Artifact Index
 - `d:\harfile\music\.agents\teamwork\worker_m8_ship\DISPATCH.md` — Dispatch instructions
 - `d:\harfile\music\.agents\teamwork\worker_m8_ship\progress.md` — Progress tracker and heartbeat
 - `d:\harfile\music\.agents\teamwork\worker_m8_ship\handoff.md` — Final handoff report
+- `d:\harfile\music\scripts\solo_pr_ship.ps1` — Solo PR shipping automation script
 
 ## Change Tracker
-- **Files modified**: None yet
-- **Build status**: Pending
+- **Files modified**: `crates/music_cli/src/rest_server.rs`, `scripts/solo_pr_ship.ps1`
+- **Build status**: Release build passed; all tests passed
 - **Pending issues**: None
 
 ## Quality Status
-- **Build/test result**: Pending
+- **Build/test result**: All 17 challenger empirical tests passing; release build passing
 - **Lint status**: Clean
-- **Tests added/modified**: Pending
+- **Tests added/modified**: `challenger_m8_empirical_tests.rs`, `challenger_m8_2_empirical_tests.rs`
 
 ## Loaded Skills
 None

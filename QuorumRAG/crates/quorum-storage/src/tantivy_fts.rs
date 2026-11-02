@@ -387,7 +387,7 @@ impl TantivyFtsIndex {
         // Over-fetch when the index is large so monolithic dumps (chat.html, conversations-*.json)
         // or source code files never crowd out real PDF/DOCX documents before top_k truncation.
         let fetch_limit = if num_docs > 500 {
-            (top_k * 8).max(400).min(num_docs.max(1))
+            top_k.saturating_mul(8).max(400).min(num_docs.max(1))
         } else {
             top_k.min(num_docs.max(1))
         };
@@ -395,7 +395,7 @@ impl TantivyFtsIndex {
             .search(&combined, &TopDocs::with_limit(fetch_limit).order_by_score())
             .map_err(|e| StorageError::Tantivy(format!("Search execution failed: {}", e)))?;
 
-        let mut primary_chunks = Vec::with_capacity(top_k);
+        let mut primary_chunks = Vec::with_capacity(top_k.min(top_docs.len()));
         let mut fallback_chunks = Vec::new();
         for (score, doc_address) in top_docs {
             let doc: TantivyDocument = searcher

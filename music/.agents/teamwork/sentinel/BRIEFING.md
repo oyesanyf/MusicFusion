@@ -1,4 +1,4 @@
-# BRIEFING — 2026-11-02T16:07:30Z
+# BRIEFING — 2026-11-02T16:53:00Z
 
 ## Mission
 Coordinate implementation and independent audit of 20-file Reference WAV Importer, URL-to-WAV Conversion, and RL Pipeline with built-in Legal Originality / Anti-Plagiarism Guard in d:\harfile\music.
@@ -28,14 +28,16 @@ Coordinate implementation and independent audit of 20-file Reference WAV Importe
   - URL-to-WAV extraction pipeline (yt-dlp / ffmpeg / direct download)
   - Mix storage persistence, inline preview player, download link
   - Automatic Stage 1 feature & RVQ analysis within 20-file limit
+- Background Process Invariant:
+  - Never spawn visible console windows on user desktop (strictly `-WindowStyle Hidden`)
 
 ## User Context
-- **Last user request**: Milestone 8 implementation + legal safeguards + URL conversion
+- **Last user request**: Enforce `-WindowStyle Hidden` on any desktop process launch
 - **Pending clarifications**: none
-- **Delivered results**: worker_m8 completed; 5 independent gate verification agents dispatched (reviewers, challengers, forensic auditor)
+- **Delivered results**: Appended to ORIGINAL_REQUEST.md, forwarded to orchestrator
 
 ## Project Status
-- **Phase**: in progress (Milestone 8 Phase 3: Gate Verification)
+- **Phase**: in progress (Milestone 8 Phase 4: PR Ship & Deployment)
 
 ## Victory Audit Status
 - **Triggered**: no

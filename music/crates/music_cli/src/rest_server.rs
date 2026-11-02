@@ -2487,17 +2487,13 @@ pub async fn bind_server(start_port: u16, end_port: u16) -> anyhow::Result<(toki
     bind_server_on_host("127.0.0.1", start_port, end_port).await
 }
 
-/// Checks whether `port` is completely free across loopback, all-interfaces TCP (`0.0.0.0`),
-/// and UDP (`0.0.0.0`) so we never collide with another service on `127.0.0.1`, `10.0.0.3`, or `0.0.0.0`.
+/// Checks whether `port` is free for TCP binding on `host`.
 fn is_port_free_across_interfaces(host: &str, port: u16) -> bool {
-    let loopback = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    if std::net::TcpStream::connect_timeout(&loopback, std::time::Duration::from_millis(40)).is_ok() {
-        return false;
-    }
-    if std::net::TcpListener::bind(("0.0.0.0", port)).is_err() {
-        return false;
-    }
-    if std::net::UdpSocket::bind(("0.0.0.0", port)).is_err() {
+    let target_addr: std::net::SocketAddr = match format!("{}:{}", host, port).parse() {
+        Ok(a) => a,
+        Err(_) => std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+    };
+    if std::net::TcpStream::connect_timeout(&target_addr, std::time::Duration::from_millis(40)).is_ok() {
         return false;
     }
     std::net::TcpListener::bind((host, port)).is_ok()

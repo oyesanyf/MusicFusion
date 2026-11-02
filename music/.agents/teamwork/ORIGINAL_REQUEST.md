@@ -65,3 +65,8 @@ Add the **"Convert URL to WAV & Add to Current Mix"** workflow right alongside t
    - **Automatic Stage 1 Feature & RVQ Analysis**: Immediately analyze the converted `.wav` (BPM, Krumhansl-Schmuckler key/chroma vector, spectral timbre envelope, 1–4 kHz vocal presence target, and RVQ discrete tokens) and add it to the ensemble style blend (enforcing the 20-file cap).
 3. **Full Legal & Anti-Plagiarism Safeguards**:
    - Apply the exact same `LegalOriginalityGuard` (`zero_waveform_sampling: true`, maximum melodic N-gram similarity ceiling, and `synthetic_vocal_timbre_only: true` ELVIS Act compliance) to URL-converted reference WAVs so only uncopyrightable musical building blocks (tempo, key/scale, groove, mix balance) guide the RL synthesis.
+
+## Follow-up — 2026-11-02T16:52:22Z
+
+ENVIRONMENT & PROCESS CONSTRAINTS FROM USER:
+Ensure no background worker or deployer spawns visible console windows on the user's desktop. When launching background processes like `music_cli.exe`, always use `-WindowStyle Hidden` (never unhidden `Start-Process`) so no black console window pops up on the desktop. The live server must run silently in the background.

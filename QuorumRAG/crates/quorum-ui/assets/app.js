@@ -660,8 +660,10 @@
     let cleanedRaw = String(raw).split(/###\s*Supporting Evidence & Citations/i)[0].trim();
     // Strip ChatGPT export artifacts and file citation tokens
     cleanedRaw = cleanedRaw.replace(/fileciteturn\d+file\d+/gi, '').replace(/sandbox:\/mnt\/data\/\S*/gi, '');
-    // Strip line number references e.g. (Lines 35–39), (Lines 1-10), :35-39 from prose body
-    cleanedRaw = cleanedRaw.replace(/\(Lines?\s*\d+\s*[–-]\s*\d+\)/gi, '').replace(/:(\d+)-(\d+)/g, '');
+    // Strip line number references e.g. (Lines 35–39), (Lines 1-10), (Line 42), :35-39 from prose body
+    cleanedRaw = cleanedRaw
+      .replace(/\(Lines?\s*\d+(\s*[–—\-]\s*\d+)?\)/gi, '')
+      .replace(/:(\d+)\s*[–—\-]\s*(\d+)/g, '');
     // Strip raw markdown file headers e.g. ### 📄 filename
     cleanedRaw = cleanedRaw.replace(/^###?\s*📄.*$/gm, '');
     const lines = cleanedRaw.split(/\r?\n/);
@@ -721,8 +723,12 @@
   }
 
   function appendCitation(citationsEl, cit) {
-    if (!citationsEl.querySelector('.sources-heading')) {
+    if (!citationsEl || !cit) return;
+    if (!citationsEl._seenFiles) {
       citationsEl._seenFiles = new Set();
+    }
+    if (!citationsEl._hasSourcesHeading && !citationsEl.querySelector('.sources-heading')) {
+      citationsEl._hasSourcesHeading = true;
       citationsEl.style.marginTop = '12px';
       citationsEl.style.paddingTop = '10px';
       citationsEl.style.borderTop = '1px solid var(--border-color, rgba(128,128,128,0.25))';
@@ -732,11 +738,12 @@
       label.textContent = 'Sources';
       citationsEl.appendChild(label);
     }
-    if (!citationsEl._seenFiles) {
-      citationsEl._seenFiles = new Set();
-    }
     const fileName = String(cit.file_path || '').split(/[\\/]/).pop() || cit.file_path;
-    const cleanFileName = fileName.trim();
+    let cleanFileName = fileName.trim();
+    cleanFileName = cleanFileName
+      .replace(/\(Lines?\s*\d+(\s*[–—\-]\s*\d+)?\)/gi, '')
+      .replace(/:(\d+)\s*[–—\-]\s*(\d+)/g, '')
+      .trim();
     if (!cleanFileName || citationsEl._seenFiles.has(cleanFileName.toLowerCase())) {
       return;
     }
