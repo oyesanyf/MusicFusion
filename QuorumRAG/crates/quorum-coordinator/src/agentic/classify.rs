@@ -7,6 +7,22 @@ pub struct ClassifyIntentNode;
 impl ClassifyIntentNode {
     pub fn execute(state: &mut AgenticGraphState, hw: &HardwareTelemetry) {
         let lower = state.original_prompt.to_lowercase();
+        let is_continuation = lower == "continue"
+            || lower.starts_with("continue ")
+            || lower.contains("tell me more")
+            || lower.contains("go on")
+            || lower.contains("what else");
+
+        if is_continuation {
+            // Locate the last non-continuation user query from history
+            if let Some(last_user_turn) = state.conversation_history.iter().rev().find(|t| {
+                t.role.eq_ignore_ascii_case("user")
+                    && !t.content.to_ascii_lowercase().starts_with("continue")
+            }) {
+                state.current_query = last_user_turn.content.clone();
+            }
+        }
+
         let is_multi_hop = lower.contains("compare")
             || lower.contains("difference")
             || lower.contains("versus")

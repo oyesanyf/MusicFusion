@@ -625,6 +625,21 @@ body {
   font-weight: 600;
 }
 
+.response-action-btn.continue-btn:hover {
+  border-color: #10a37f;
+  color: #10a37f;
+}
+
+.response-action-btn.save-file-btn:hover {
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+.response-action-btn.clear-btn:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
 /* FLOATING INPUT CAPSULE */
 .input-area {
   position: absolute;

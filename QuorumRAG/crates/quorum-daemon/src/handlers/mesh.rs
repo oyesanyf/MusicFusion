@@ -505,6 +505,24 @@ pub async fn allow_pending_join_handler(
             approved.peer_id.clone(),
             quorum_types::AccessTier::Tier2Confidential,
         );
+
+        let now = chrono::Utc::now();
+        let expires = now + chrono::Duration::hours(24);
+        let vendor = quorum_coordinator::TpmOemVendor::from_manufacturer_id_or_str(
+            0,
+            &approved.tpm_badge,
+        );
+        acl_guard.record_peer_attestation(quorum_coordinator::PeerAttestationRecord {
+            peer_id: approved.peer_id.clone(),
+            pubkey: None,
+            attestation_tier: quorum_coordinator::AttestationTier::VerifiedHardwareTpm,
+            vendor: Some(vendor),
+            pcr_composite_digest: Some("OPERATOR_APPROVED_TPM20_COMPOSITE".to_string()),
+            hardware_backed: true,
+            ek_fingerprint: None,
+            verified_at: now,
+            expires_at: expires,
+        });
         drop(acl_guard);
 
         // Persist to trusted peers

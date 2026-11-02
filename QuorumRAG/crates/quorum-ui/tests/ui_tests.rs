@@ -100,3 +100,22 @@ fn test_recache_ui_elements_and_styling() {
     assert!(css.contains(".cache-badge"), "styles.css must style .cache-badge");
     assert!(css.contains(".cache-hit-pill"), "styles.css must style .cache-hit-pill");
 }
+
+#[test]
+fn test_response_action_buttons_and_handlers() {
+    let (js_bytes, _) = get_asset("app.js").expect("app.js must exist");
+    let js = String::from_utf8_lossy(&js_bytes);
+
+    assert!(js.contains("continue-btn"), "app.js must contain continue-btn");
+    assert!(js.contains("save-file-btn"), "app.js must contain save-file-btn");
+    assert!(js.contains("clear-btn"), "app.js must contain clear-btn");
+    assert!(js.contains("window.quorumContinueTurn"), "app.js must export window.quorumContinueTurn");
+    assert!(js.contains("window.quorumSaveFile"), "app.js must export window.quorumSaveFile");
+    assert!(js.contains("window.quorumClearTurn"), "app.js must export window.quorumClearTurn");
+
+    let (css_bytes, _) = get_asset("styles.css").expect("styles.css must exist");
+    let css = String::from_utf8_lossy(&css_bytes);
+    assert!(css.contains(".response-action-btn.continue-btn:hover"));
+    assert!(css.contains(".response-action-btn.save-file-btn:hover"));
+    assert!(css.contains(".response-action-btn.clear-btn:hover"));
+}
