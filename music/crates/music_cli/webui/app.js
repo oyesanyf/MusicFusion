@@ -3264,6 +3264,355 @@ Grace and love shining forevermore!`
   }
 
   // ==========================================================================
+  // MILESTONE 8: Reference WAV Importer, URL Conversion, Legal Guard & RL DPO
+  // ==========================================================================
+  let activeAuditionAudio = null;
+  let activeAuditionId = null;
+
+  function setupReferenceWavImporterAndRL() {
+    const fileInput = document.getElementById('ref-wav-file-input');
+    const btnBrowse = document.getElementById('btn-browse-ref-wavs');
+    const dropzone = document.getElementById('ref-wav-dropzone');
+    const counterBadge = document.getElementById('ref-wav-counter');
+    const capWarning = document.getElementById('ref-wav-cap-warning');
+    const btnClearAll = document.getElementById('btn-clear-all-ref-wavs');
+    const urlInput = document.getElementById('ref-url-input');
+    const btnConvertUrl = document.getElementById('btn-convert-url-wav');
+    const urlStatus = document.getElementById('url-convert-status');
+    const trackList = document.getElementById('ref-wav-list');
+    const btnGenerateRl = document.getElementById('btn-generate-rl');
+    const scoreVal = document.getElementById('val-originality-score');
+    const overlapVal = document.getElementById('val-melodic-overlap');
+    const btnDpoKeep = document.getElementById('btn-dpo-keep');
+    const btnDpoRevert = document.getElementById('btn-dpo-revert');
+    const dpoStatusMsg = document.getElementById('dpo-status-msg');
+
+    async function loadReferenceWavs() {
+      try {
+        const res = await fetch('/api/reference-wavs');
+        if (!res.ok) return;
+        const data = await res.json();
+        const refs = data.reference_wavs || [];
+        const count = refs.length;
+
+        if (counterBadge) {
+          counterBadge.textContent = `${count} / 20 reference WAVs`;
+        }
+
+        if (capWarning) {
+          if (count >= 20) {
+            capWarning.classList.remove('hidden');
+          } else {
+            capWarning.classList.add('hidden');
+          }
+        }
+
+        if (!trackList) return;
+
+        if (count === 0) {
+          trackList.innerHTML = '<div class="ref-empty-state" id="ref-empty-state">No reference WAVs imported yet. Drag &amp; drop 1 to 20 reference WAV files or convert a URL above.</div>';
+          return;
+        }
+
+        const equalWeight = (100 / count).toFixed(1);
+        let html = '';
+        refs.forEach(ref => {
+          const dur = ref.duration_secs ? `${ref.duration_secs.toFixed(1)}s` : 'WAV';
+          const bpmKey = `${Math.round(ref.bpm || 0)} BPM • ${ref.key_signature || 'Unknown'}`;
+          const isPlaying = activeAuditionId === ref.id;
+          html += `
+            <div class="ref-track-item" data-ref-id="${escapeHTML(ref.id)}">
+              <div class="ref-track-name" title="${escapeHTML(ref.file_name)}">
+                🎵 ${escapeHTML(ref.file_name)} <span style="font-size:10px; color:var(--text-muted); font-weight:normal;">(${dur})</span>
+              </div>
+              <div class="ref-track-meta">${escapeHTML(bpmKey)}</div>
+              <div class="ref-track-weight">${equalWeight}%</div>
+              <div class="ref-track-actions">
+                <button type="button" class="btn-track-audition" data-audition-id="${escapeHTML(ref.id)}">
+                  ${isPlaying ? '⏸ Pause' : '▶ Audition'}
+                </button>
+                <button type="button" class="btn-track-delete" data-delete-id="${escapeHTML(ref.id)}" title="Remove track">✕</button>
+              </div>
+            </div>
+          `;
+        });
+        trackList.innerHTML = html;
+
+        // Wire audition & delete buttons
+        trackList.querySelectorAll('.btn-track-audition').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-audition-id');
+            auditionReferenceWav(id);
+          });
+        });
+
+        trackList.querySelectorAll('.btn-track-delete').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-delete-id');
+            await deleteReferenceWav(id);
+          });
+        });
+      } catch (e) {
+        console.warn('Error loading reference WAVs:', e);
+      }
+    }
+
+    function auditionReferenceWav(id) {
+      if (activeAuditionAudio && activeAuditionId === id) {
+        if (!activeAuditionAudio.paused) {
+          activeAuditionAudio.pause();
+          activeAuditionId = null;
+        } else {
+          activeAuditionAudio.play().catch(() => {});
+          activeAuditionId = id;
+        }
+        loadReferenceWavs();
+        return;
+      }
+
+      if (activeAuditionAudio) {
+        activeAuditionAudio.pause();
+        activeAuditionAudio = null;
+      }
+
+      activeAuditionId = id;
+      activeAuditionAudio = new Audio(`/api/reference-wavs/${id}/audio`);
+      activeAuditionAudio.play().catch(() => {});
+      activeAuditionAudio.addEventListener('ended', () => {
+        activeAuditionId = null;
+        loadReferenceWavs();
+      });
+      loadReferenceWavs();
+    }
+
+    async function deleteReferenceWav(id) {
+      if (activeAuditionId === id && activeAuditionAudio) {
+        activeAuditionAudio.pause();
+        activeAuditionAudio = null;
+        activeAuditionId = null;
+      }
+      try {
+        await fetch(`/api/reference-wavs/${id}`, { method: 'DELETE' });
+        await loadReferenceWavs();
+      } catch (e) {
+        console.error('Delete error:', e);
+      }
+    }
+
+    async function uploadFiles(files) {
+      if (!files || files.length === 0) return;
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
+
+      try {
+        const res = await fetch('/api/reference-wavs/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (capWarning) {
+            capWarning.textContent = `⚠️ Upload Error: ${data.error || 'Server error'}`;
+            capWarning.classList.remove('hidden');
+          }
+        } else {
+          if (capWarning) capWarning.classList.add('hidden');
+        }
+        await loadReferenceWavs();
+      } catch (e) {
+        if (capWarning) {
+          capWarning.textContent = `⚠️ Network Error: ${e.message}`;
+          capWarning.classList.remove('hidden');
+        }
+      }
+    }
+
+    // Browse click
+    if (btnBrowse && fileInput) {
+      btnBrowse.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fileInput.click();
+      });
+    }
+
+    if (dropzone && fileInput) {
+      dropzone.addEventListener('click', () => fileInput.click());
+
+      dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('dragover');
+      });
+
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.classList.remove('dragover');
+      });
+
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+        if (e.dataTransfer && e.dataTransfer.files) {
+          uploadFiles(e.dataTransfer.files);
+        }
+      });
+
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files) {
+          uploadFiles(fileInput.files);
+          fileInput.value = '';
+        }
+      });
+    }
+
+    // Clear All
+    if (btnClearAll) {
+      btnClearAll.addEventListener('click', async () => {
+        if (activeAuditionAudio) {
+          activeAuditionAudio.pause();
+          activeAuditionAudio = null;
+          activeAuditionId = null;
+        }
+        try {
+          await fetch('/api/reference-wavs', { method: 'DELETE' });
+          await loadReferenceWavs();
+        } catch (e) {
+          console.error('Clear error:', e);
+        }
+      });
+    }
+
+    // URL Convert
+    if (btnConvertUrl && urlInput) {
+      btnConvertUrl.addEventListener('click', async () => {
+        const url = urlInput.value.trim();
+        if (!url) return;
+        btnConvertUrl.disabled = true;
+        btnConvertUrl.textContent = '⏳ Converting...';
+        if (urlStatus) {
+          urlStatus.innerHTML = '<span class="status-dot ready"></span><span class="status-text">Validating SSRF &amp; downloading audio stream...</span>';
+        }
+
+        try {
+          const res = await fetch('/api/reference-wavs/from-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+          });
+          const data = await res.json();
+          btnConvertUrl.disabled = false;
+          btnConvertUrl.textContent = '⚡ Convert URL to WAV';
+
+          if (!res.ok) {
+            if (urlStatus) {
+              urlStatus.innerHTML = `<span class="status-dot error" style="background:#ef4444;"></span><span class="status-text" style="color:#ef4444;">⚠️ ${escapeHTML(data.error || 'Conversion failed')}</span>`;
+            }
+          } else {
+            urlInput.value = '';
+            if (urlStatus) {
+              urlStatus.innerHTML = `<span class="status-dot ready"></span><span class="status-text" style="color:#10a37f;">✓ Converted "${escapeHTML(data.reference_wav.file_name)}" and added to mix!</span>`;
+            }
+            await loadReferenceWavs();
+          }
+        } catch (e) {
+          btnConvertUrl.disabled = false;
+          btnConvertUrl.textContent = '⚡ Convert URL to WAV';
+          if (urlStatus) {
+            urlStatus.innerHTML = `<span class="status-dot error" style="background:#ef4444;"></span><span class="status-text" style="color:#ef4444;">⚠️ Network error: ${escapeHTML(e.message)}</span>`;
+          }
+        }
+      });
+    }
+
+    // Generate RL
+    if (btnGenerateRl) {
+      btnGenerateRl.addEventListener('click', async () => {
+        btnGenerateRl.disabled = true;
+        btnGenerateRl.textContent = '⚡ Synthesizing with RL & Legal Guard...';
+
+        try {
+          const prompt = DOM.chatInputTextarea ? DOM.chatInputTextarea.value.trim() : '';
+          const res = await fetch('/api/reference-wavs/generate-rl', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt || undefined }),
+          });
+          const data = await res.json();
+          btnGenerateRl.disabled = false;
+          btnGenerateRl.textContent = '🚀 Generate with RL & Reference Style';
+
+          if (!res.ok) {
+            alert(data.error || 'RL Generation error');
+            return;
+          }
+
+          if (scoreVal && data.originality_report) {
+            scoreVal.textContent = `${data.originality_report.originality_score_pct.toFixed(1)}%`;
+          }
+          if (overlapVal && data.originality_report) {
+            overlapVal.textContent = `${data.originality_report.max_melodic_sequence_notes} notes (< 8 ceiling)`;
+          }
+
+          if (dpoStatusMsg) {
+            dpoStatusMsg.textContent = `RL Generation complete (Version ${data.version}). Click Keep or Revert to train DPO policy.`;
+          }
+
+          // Switch active song audio to generated version
+          if (data.song_id) {
+            State.currentSongId = data.song_id;
+            State.currentVersion = data.version;
+            switchVersion(data.version, true);
+          }
+        } catch (e) {
+          btnGenerateRl.disabled = false;
+          btnGenerateRl.textContent = '🚀 Generate with RL & Reference Style';
+          alert('Network error: ' + e.message);
+        }
+      });
+    }
+
+    // DPO Feedback Buttons
+    if (btnDpoKeep) {
+      btnDpoKeep.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/feedback/preference', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ preference: 'keep' }),
+          });
+          const data = await res.json();
+          if (dpoStatusMsg) {
+            dpoStatusMsg.textContent = '✓ Variation kept (+Reward). Bradley-Terry DPO policy updated!';
+          }
+        } catch (e) {
+          if (dpoStatusMsg) dpoStatusMsg.textContent = 'Feedback error: ' + e.message;
+        }
+      });
+    }
+
+    if (btnDpoRevert) {
+      btnDpoRevert.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/feedback/preference', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ preference: 'revert' }),
+          });
+          const data = await res.json();
+          if (dpoStatusMsg) {
+            dpoStatusMsg.textContent = '✓ Reverted (-Penalty). Bradley-Terry DPO weights adjusted.';
+          }
+        } catch (e) {
+          if (dpoStatusMsg) dpoStatusMsg.textContent = 'Feedback error: ' + e.message;
+        }
+      });
+    }
+
+    // Initial load
+    loadReferenceWavs();
+  }
+
+  // ==========================================================================
   // Initialization
   // ==========================================================================
   function init() {
@@ -3281,6 +3630,7 @@ Grace and love shining forevermore!`
     setupSidebar();
     setupSidebarSongSelection();
     setupTTSControls();
+    setupReferenceWavImporterAndRL();
     setupThemeToggle();
     switchVersion(1, false);
     fetchStoredSongsCatalog();

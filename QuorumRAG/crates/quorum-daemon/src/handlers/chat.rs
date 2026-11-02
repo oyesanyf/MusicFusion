@@ -37,6 +37,10 @@ pub struct ChatRequest {
 
     /// Optional client query ID for in-flight cancellation tracking.
     pub query_id: Option<String>,
+
+    /// Optional flag to bypass query cache (e.g. when Regenerate is clicked).
+    #[serde(default)]
+    pub bypass_cache: bool,
 }
 
 /// Request payload for `/api/chat/cancel`.
@@ -105,6 +109,7 @@ pub async fn chat_sse_handler(
 
     let (tx, rx) = tokio::sync::mpsc::channel::<AgenticTelemetryEvent>(256);
     let coordinator = Arc::clone(&state.coordinator);
+    let bypass_cache = payload.bypass_cache;
     let (in_flight_entry, in_flight_guard) = state.in_flight_queries.register(query_id);
     let task_token = in_flight_entry.token.clone();
     let task_tx = tx.clone();
@@ -120,6 +125,10 @@ pub async fn chat_sse_handler(
                 })
                 .await;
             return;
+        }
+
+        if bypass_cache {
+            let _ = coordinator.cache_manager.query_cache.clear();
         }
 
         match coordinator

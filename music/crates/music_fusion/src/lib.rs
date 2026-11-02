@@ -8,8 +8,10 @@ pub mod judge;
 pub mod memory;
 pub mod ollama_client;
 pub mod ollama_lifecycle;
+pub mod originality_guard;
 pub mod panel;
 pub mod prompt_templates;
+pub mod rl_policy;
 pub mod tts_engine;
 
 // Re-export primary types
@@ -33,6 +35,14 @@ pub use ollama_client::{
     ChatMessage, ChatOptions, ChatResponse, MissingModelGuidance, ModelTag, OllamaClient,
 };
 pub use ollama_lifecycle::{OllamaLifecycleManager, OllamaStatus};
+pub use originality_guard::{
+    LegalOriginalityGuard, CHROMA_COSINE_CEILING, HOOK_NOTE_LIMIT, PLAGIARISM_BREACH_THRESHOLD,
+    WAVEFORM_CORRELATION_CEILING,
+};
 pub use panel::{ModelAnswer, OllamaPanelOutput, OllamaProducerPanel, SpecialistOutputs};
 pub use prompt_templates::PromptPair;
+pub use rl_policy::{
+    PolicyMode, RlPolicy, SynthesisAction, DEFAULT_BETA_TEMPERATURE, DEFAULT_LEARNING_RATE,
+    WEIGHT_HARMONY, WEIGHT_HUMAN, WEIGHT_ORIGINALITY, WEIGHT_RHYTHM, WEIGHT_STYLE, WEIGHT_VOCAL,
+};
 pub use tts_engine::{FusionTtsEngine, FusionTtsModel, TtsVocalRequest, TtsVocalResponse};

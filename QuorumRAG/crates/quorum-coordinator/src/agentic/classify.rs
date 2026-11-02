@@ -35,8 +35,49 @@ impl ClassifyIntentNode {
         };
 
         state.intent = Some(intent);
-        state.query_metadata_filters =
-            crate::langextract::extract_query_metadata_filters(&state.original_prompt);
+
+        // Feature 58: Google LangExtract Candidate Extraction & 4-Arm Consensus
+        let text_for_extraction = if state.current_query != state.original_prompt {
+            &state.current_query
+        } else {
+            &state.original_prompt
+        };
+
+        let candidates = crate::langextract::extraction::extract_chat_candidates(text_for_extraction);
+        let consensus = crate::langextract::LlmFusionConsensus::evaluate_extractions(
+            text_for_extraction,
+            candidates,
+            Some(state),
+        );
+
+        let mut verified_questions = Vec::new();
+        let mut verified_entities = Vec::new();
+
+        for ext in &consensus.verified_extractions {
+            if ext.extraction_class == "question" {
+                verified_questions.push(ext.extraction_text.clone());
+            } else {
+                verified_entities.push(ext.clone());
+            }
+        }
+
+        if verified_questions.is_empty() && !state.original_prompt.trim().is_empty() {
+            verified_questions.push(state.original_prompt.trim().to_string());
+        }
+
+        state.langextract_result = Some(consensus.clone());
+        state.extracted_questions = verified_questions;
+        state.extracted_entities = verified_entities;
+
+        // Merge scalar metadata filters with LangExtract consensus attributes
+        let mut combined_filters = crate::langextract::extract_query_metadata_filters(&state.original_prompt)
+            .unwrap_or_default();
+        for (k, v) in consensus.metadata_filters {
+            combined_filters.insert(k, v);
+        }
+        if !combined_filters.is_empty() {
+            state.query_metadata_filters = Some(combined_filters);
+        }
 
         let (family, tag, rationale) = AutoFusionRouter::select_model(
             state.model_family,

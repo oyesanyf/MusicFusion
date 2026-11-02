@@ -25,3 +25,5 @@ pub enum DspError {
     #[error("Buffer parameter error: {0}")]
     ParameterError(String),
 }
+
+pub type Result<T> = std::result::Result<T, DspError>;

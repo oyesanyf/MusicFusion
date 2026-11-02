@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MusicCoreError, Result};
+use crate::rl_contracts::{LegalOriginalityReport, ReferenceWavMeta};
 use crate::schema::SongBlueprint;
 use crate::telemetry::StemTelemetry;
 
@@ -94,6 +95,12 @@ pub struct MusicProductionState {
     pub created_at: String,
     /// 21. ISO 8601 last update timestamp
     pub updated_at: String,
+    /// 22. Reference WAVs imported for style guidance (up to 20 files)
+    #[serde(default)]
+    pub reference_wavs: Vec<ReferenceWavMeta>,
+    /// 23. Verifiable legal originality & compliance report
+    #[serde(default)]
+    pub originality_report: Option<LegalOriginalityReport>,
 }
 
 impl Default for MusicProductionState {
@@ -128,6 +135,8 @@ impl MusicProductionState {
             history: vec![format!("Initialized song {} at {}", song_id, now)],
             created_at: now.clone(),
             updated_at: now,
+            reference_wavs: Vec::new(),
+            originality_report: None,
         }
     }
 
@@ -160,6 +169,8 @@ impl MusicProductionState {
             history: vec![format!("Loaded 1977 Roots Reggae Anthem preset at {}", now)],
             created_at: now.clone(),
             updated_at: now,
+            reference_wavs: Vec::new(),
+            originality_report: None,
         }
     }
 
@@ -188,6 +199,8 @@ impl MusicProductionState {
             history: vec![format!("Created state from blueprint {} v{} at {}", bp.song_id, bp.version, now)],
             created_at: bp.created_at.clone(),
             updated_at: now,
+            reference_wavs: Vec::new(),
+            originality_report: None,
         }
     }
 

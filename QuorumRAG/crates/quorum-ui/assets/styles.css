@@ -456,9 +456,16 @@ body {
   margin: 0 auto;
 }
 
+#welcome-banner,
 .welcome-banner {
+  display: block !important;
   text-align: center;
   padding: 40px 20px 24px 20px;
+}
+
+#welcome-banner.hidden,
+.welcome-banner.hidden {
+  display: block !important;
 }
 
 .welcome-logo {
@@ -473,7 +480,9 @@ body {
 }
 
 .quick-prompts,
-.prompt-chip {
+.prompt-chip,
+.prompt-chips,
+.sample-prompts {
   display: none !important;
 }
 
@@ -574,6 +583,46 @@ body {
 .citation-badge:hover {
   transform: translateY(-1px);
   filter: brightness(1.15);
+}
+
+/* BROWSER-STYLE END-OF-RESPONSE ACTION TOOLBAR */
+.response-actions-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+}
+
+.response-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.response-action-btn:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg, rgba(128, 128, 128, 0.14));
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.response-action-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-light, rgba(16, 163, 127, 0.12));
+  font-weight: 600;
 }
 
 /* FLOATING INPUT CAPSULE */

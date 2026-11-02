@@ -4,20 +4,27 @@
 //! vocal formant/rasp simulation, sample-accurate stem crossfading, pure-Rust RIFF WAV I/O,
 //! spectral telemetry analysis, and analog tape mastering with zero external C dependencies.
 
+pub mod acoustic_analyzer;
 pub mod crossfader;
 pub mod error;
 pub mod groove_synth;
 pub mod guitar_wah;
 pub mod melodic_singing;
+pub mod rvq;
 pub mod tape_mastering;
 pub mod telemetry_calc;
 pub mod vocal_formant;
 pub mod wav;
 
 // Re-exports
+pub use acoustic_analyzer::{AcousticAnalyzer, ANTI_MONOPOLY_CEILING, REFERENCE_CAP_LIMIT};
 pub use error::DspError;
 pub use melodic_singing::{
     MelodicSingingSynthesizer, StudioVocalReverb, MAJOR_PENTATONIC_RATIOS,
+};
+pub use rvq::{
+    RvqTokenizer, RvqTokenSequence, DEFAULT_CODEBOOK_DIM, DEFAULT_CODEBOOK_SIZE,
+    DEFAULT_RVQ_STAGES,
 };
 pub use wav::{AudioBuffer, WavBitDepth, WavFormat, WavSpec, DEFAULT_SAMPLE_RATE};
 

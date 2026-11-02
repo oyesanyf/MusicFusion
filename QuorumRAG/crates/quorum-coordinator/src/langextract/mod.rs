@@ -4,7 +4,7 @@ pub mod extraction;
 
 pub use alignment::ExampleData;
 pub use consensus::{ConsensusExtractionResult, LlmFusionArmReport, LlmFusionConsensus};
-pub use extraction::{filter_grounded, ground_extraction, Extraction};
+pub use extraction::{extract_chat_candidates, filter_grounded, ground_extraction, Extraction};
 
 use std::collections::BTreeMap;
 

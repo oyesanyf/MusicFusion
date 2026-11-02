@@ -18,10 +18,10 @@ colored = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 uuid = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["multipart", "stream"] }
 sysinfo = { workspace = true }
 futures = { workspace = true }
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "multipart"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 

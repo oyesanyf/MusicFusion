@@ -1,122 +1,67 @@
 # Original User Request
 
-## Approved Task Prompt — 2026-11-01T15:54:38Z
+## Initial Request — 2026-11-02T14:32:31Z
 
-Fix audio generation in d:\harfile\music by replacing the pure-Rust test-tone oscillator with physical modeling synthesis, correcting stem headroom and tape-saturation mastering to eliminate clipping, enabling a Python neural model bridge via uv with graceful fallback, and regenerating all stored sample songs.
+Build, test, and ship the 20-file Reference WAV Importer and RL Pipeline with built-in Legal Originality / Anti-Plagiarism Guard in `d:\harfile\music`:
 
-Working directory: d:\harfile\music
-Integrity mode: development
+Key Deliverables:
+1. **Multi-File Reference WAV Importer (Up to 20 `.wav` Files)**:
+   - Native file picker (`<input type="file" multiple accept=".wav,audio/wav">`) and drag-and-drop in `crates/music_cli/webui/index.html` and `crates/music_cli/webui/app.js` allowing the user to select/upload 1 to 20 `.wav` files at once (enforcing the 20-file cap clearly in UI and backend).
+   - Backend endpoint(s) in `crates/music_cli/src/rest_server.rs` (e.g., `POST /api/reference-wavs/upload`, `GET /api/reference-wavs`, `DELETE /api/reference-wavs`, `POST /api/reference-wavs/generate-rl`) that parse and analyze up to 20 real `.wav` files.
+2. **Stage 1: Reference WAV Tokenization (RVQ) & Multi-File Feature Extraction**:
+   - Residual Vector Quantization (RVQ) discrete codebook tokenizer + acoustic analyzer extracting per-file and ensemble-blended features across up to 20 reference WAVs:
+     - BPM / beat grid & rhythmic onset envelope
+     - Krumhansl-Schmuckler 12-bin chroma vector, musical key & scale profile
+     - Spectral timbre envelope, centroid, crest factor, dynamic range
+     - Vocal presence profile (1–4 kHz formant band ratio)
+     - Joint audio style embedding vector
+3. **Stage 2 & 3: RL Policy (PPO / Contextual Bandit + DPO) & Composite Reward with Mandatory Originality / Anti-Plagiarism Guard**:
+   - Multi-file style blending across the uploaded reference WAVs (up to 20 files) so no single input file is copied.
+   - Composite Reward Function:
+     `R_total = w_1 * R_style(y, x_ref_ensemble) + w_2 * R_harmony(y) + w_3 * R_rhythm(y) + w_4 * R_vocal_clarity(y) + w_5 * R_human + w_6 * R_originality_guard(y, {x_ref_1..x_ref_N})`
+   - **Mandatory Built-in Legal Originality / Anti-Plagiarism Guard (`R_originality_guard`)**:
+     - Computes mathematical similarity checks between the generated song/melody and every individual uploaded reference WAV:
+       1. Max N-gram pitch/chroma sequence overlap penalty (ensuring no copied melodic phrases/hooks).
+       2. Waveform cross-correlation & frame-level cosine similarity ceiling (penalizing/rejecting any candidate whose frame-level similarity or chroma sequence correlation to any single input file exceeds a strict originality threshold, while rewarding matching the blended ensemble style distribution).
+       3. Reports a verifiable **Originality & Legal Compliance Score (e.g. 100% Original / Max Single-File Overlap < threshold)** in the API response and WebUI card.
+   - Interactive DPO (`R_human`) preference learning wired to Co-Pilot Keep / Revert / Thumbs-Up feedback pairs `(y_chosen, y_rejected)`.
+4. **End-to-End Verification**:
+   - Unit and integration tests verifying 1..=20 WAV import, rejection/capping >20 files, RVQ tokenization, RL policy improvement over baseline (`Disabled`, `Random`, `Heuristic`, `NoLearning`), and mathematical proof that the Originality / Anti-Plagiarism Guard guarantees distinct melodies and waveforms from every input reference WAV.
+   - Rebuild `music_cli` and restart the live server so the WebUI is immediately usable.
 
-## Requirements
+## Follow-up — 2026-11-02T14:46:20Z
 
-### R1. Remove Chromatic Siren Sweep & Implement Real Physical Modeling in Pure-Rust Engine
-In the pure-Rust 48 kHz synthesis module, completely delete the stepped frequency-sweep oscillator and hard silence gating. Replace it with genuine musical synthesis locked to 76 BPM (0.7894 seconds per quarter note) and the A Major pentatonic / harmonic scale (220.0 Hz, 246.94 Hz, 277.18 Hz, 329.63 Hz, 369.99 Hz, 440.0 Hz — never sweep chromatically across all 12 semitones):
-- Maintain a continuous phase accumulator (`phase += 2.0 * PI * freq / sample_rate`) across buffer boundaries so phase never resets abruptly to 0.0 mid-waveform.
-- Implement the Karplus-Strong plucked string algorithm using a delay-line ring buffer excited by a short burst of low-pass filtered pink noise with a 0.994 feedback damping factor for reggae offbeat skank chords (beats 2 and 4) and pentatonic guitar leads.
-- Implement a Reggae One-Drop Drum & Dub Bass synthesizer:
-  - Kick & Rimshot (Beat 3 One-Drop): Synthesize the kick drum on Beat 3 using a rapid exponential pitch-drop sine wave (110 Hz down to 42 Hz over 60 ms) paired with a band-passed white-noise snare/rimshot burst (250 Hz to 1800 Hz with exponential decay).
-  - Hi-Hats: Synthesize sixteenth-note closed hi-hats using high-pass filtered metallic square-wave ratios (> 6000 Hz) with a tight 25 ms exponential decay envelope.
-  - Dub Sub-Bass: Synthesize a warm, low-pass filtered (cutoff = 180 Hz) sine + triangle bassline walking on roots and fifths (A1 = 55.0 Hz, D2 = 73.42 Hz, E2 = 82.41 Hz) with a smooth 15 ms linear attack and 120 ms exponential release to eliminate clicks and dead-air gaps.
-  - Hammond Organ Bubble: Additive drawbar sine harmonics (1.0x, 2.0x, 3.0x, 4.0x fundamental) with a gentle 6 Hz rotary speaker tremolo LFO, enveloped smoothly with ADSR.
+ADDITIONAL MANDATORY LEGAL SAFEGUARDS FROM USER (Enforce in DSP/RL code, REST API report, and WebUI Legal Compliance Badge):
 
-### R2. Fix Digital Clipping, Headroom, and WAV Serialization
-In the Rust mixer and mastering stage:
-- Process all internal stems in normalized f32 (-1.0 to 1.0).
-- Scale each individual stem by 0.20 (-14 dBFS RMS headroom) before summing stems together.
-- Apply a Biquad 2nd-order Butterworth Low-Pass filter at 12,000 Hz on synthetic instruments to remove harsh digital aliasing harmonics, followed by a smooth `f32::tanh(sample * 1.2)` soft-clipping analog tape saturator and peak normalization to -1.0 dBFS (0.891) before writing 16-bit PCM samples via hound.
+1. **Zero Direct Waveform Splicing / Sampling (`no_master_sampling_verified: true`)**:
+   - Never splice, concatenate, or decode raw prefix tokens/samples from any uploaded reference `.wav` into the generated output audio (Bridgeport Music safeguard).
+   - Reference WAVs are used strictly for extracting uncopyrightable statistical/style building blocks (BPM/tempo, musical key/scale, common chord progression transitions, spectral EQ balance, crest factor, and 1–4 kHz vocal mix ratio). All output audio and stems are synthesized 100% from scratch.
+2. **Anti-Plagiarism Melodic & Waveform Ceiling (`max_ngram_melody_overlap` & `max_waveform_correlation` below strict ceiling)**:
+   - Enforce a hard similarity ceiling in `R_style` / `R_originality_guard` that penalizes any candidate whose pitch-contour N-gram overlap or frame-level chroma/waveform correlation to any single uploaded reference WAV exceeds the originality threshold.
+3. **Zero Biometric Voice Cloning (`synthetic_voice_only_elvis_compliant: true`)**:
+   - Do not clone or copy speaker-identifying vocal timbres from uploaded WAVs (ELVIS Act / Right of Publicity safeguard). Only extract mix/presence targets (1–4 kHz vocal-to-accompaniment ratio and `-2.6 dB` sidechain ducking target) and synthesize all vocals using `MelodicSingingSynthesizer` (`FusionTtsEngine`).
+4. **Surface Legal Compliance Report in API & WebUI**:
+   - Include a clear `legal_compliance` object in the `/api/reference-wavs/generate-rl` response and display a visible **Legal & Originality Safeguard Verified** badge in the Web Studio UI showing:
+     - `zero_waveform_sampling: true` (100% Newly Synthesized Master)
+     - `max_single_file_melody_overlap_pct` (Strictly below ceiling, e.g. < 15%)
+     - `synthetic_vocal_timbre_only: true` (No Unauthorized Voice Cloning)
+     - `originality_score_pct` (e.g. 94%–100% Original)
 
-### R3. Enable Neural Vocals & Song Generation via uv Subprocess Bridge
-When `engine_mode` is "auto" or "hf_hybrid":
-- Automatically bootstrap a local Python environment inside `d:\harfile\music\.venv` using `uv venv` and install torch, torchaudio, transformers, diffusers, accelerate, and soundfile.
-- Provide a working Python worker script (`workers/generate_song.py`) invoked by Rust via `tokio::process::Command` that uses Hugging Face models (ACE-Step-v1.5, YuE-s1-7B, or musicgen-medium based on detected VRAM from `SystemMemory::detect_live()`) to synthesize neural audio onto disk.
-- When GPU VRAM is insufficient or neural weights/dependencies cannot be fetched, automatically fall back to the pure-Rust physical modeling synthesizer with a clear console notification.
-- Log clear progress in the Tokio console reporting whether a track was rendered by Hugging Face GPU weights or the pure-Rust physical modeler.
+## Follow-up — 2026-11-02T15:09:35Z
 
-### R4. Regenerate Stored Sample Songs & Run Verification
-- Re-run `--create-reggae-anthem` and verify via the Rust spectral/clipping inspector that zero samples clip and no silence dropouts occur.
-- Regenerate stored sample songs in `d:\harfile\music\storage\songs\` (`roots_reggae_anthem`, `song_afrobeats_002`, `song-one-love-shining-1977`, `song_reggae_anthem_001` across v1 and v2) so all on-disk `final_master.wav` and stem files reflect the new synthesis and mastering pipeline.
+USER REQUIREMENT ADDITION FOR MILESTONE 8 (Include in active `worker_m8` implementation before finishing REST API & WebUI):
 
-## Verification Resources
-- Existing workspace tests run via `cargo test` across all crates (`music_core`, `music_dsp`, `music_fusion`, `music_pipeline`, `music_cli`).
-- Rust spectral and clipping inspector: `--create-reggae-anthem`.
+Add the **"Convert URL to WAV & Add to Current Mix"** workflow right alongside the 20-file Reference WAV importer:
 
-## Acceptance Criteria
-
-### Audio Synthesis & DSP Quality
-- [ ] Phase accumulator is continuous across buffer boundaries with zero abrupt phase resets to 0.0 mid-waveform.
-- [ ] Pure-Rust engine synthesizes reggae offbeat skank chords and guitar leads via Karplus-Strong string algorithm with 0.994 feedback damping.
-- [ ] Reggae one-drop drum and dub bass synthesizer produces kick on beat 3 (110 Hz to 42 Hz pitch drop), hi-hats (> 6000 Hz with 25 ms decay), dub sub-bass (180 Hz cutoff, 15 ms attack, 120 ms release), and enveloped Hammond organ bubble.
-- [ ] Pure-Rust output adheres strictly to 76 BPM and A Major pentatonic / harmonic scale frequencies without chromatic siren sweeps.
-
-### Mastering & Anti-Clipping
-- [ ] Internal audio stems are processed in normalized f32 and scaled by 0.20 before summation.
-- [ ] Output audio passes through 12 kHz Biquad low-pass filtering, `tanh` tape saturation, and peak normalization to -1.0 dBFS (0.891).
-- [ ] Rust spectral/clipping inspector confirms 0 clipped samples (> 0 dBFS) on generated WAV files.
-
-### Subprocess Bridge & Fallback
-- [ ] Python worker script `workers/generate_song.py` exists and is invocable via `uv run` by Rust `tokio::process::Command`.
-- [ ] System automatically falls back to pure-Rust physical modeling if GPU VRAM is insufficient or weights are unavailable.
-- [ ] Tokio console logs explicitly state whether audio was generated via Hugging Face neural weights or pure-Rust synthesis.
-
-### Regeneration & Test Pass
-- [ ] All stored sample songs in `storage/songs/` are regenerated with updated `final_master.wav` and stems.
-- [ ] `cargo test` passes across all crates in the workspace.
-
-
-## Follow-up — 2026-11-01T16:31:54Z
-
-User update / requirement reinforcement:
-"all instruments must be used"
-
-Please ensure that ALL instruments are actively synthesized, separated/preserved across stems, and mixed into `final_master.wav` for every song generation (One-Drop Kick & Band-Passed Rimshot/Snare, >6000 Hz 16th-Note Closed Hi-Hats & Nyabinghi Percussion, Low-Pass 180 Hz Dub Sub-Bass walking on roots/fifths, Karplus-Strong Plucked Offbeat Skank Guitar Chords on beats 2 & 4, Karplus-Strong Pentatonic Lead Wah Guitar Solo, Additive Drawbar Hammond B3 Organ Bubble with 6 Hz rotary tremolo LFO + Brass/Keys, and Lead & Backing Choir Vocals) — no instrument stem may be dropped, muted, or left silent in either the individual stems or the summed master mix!
-
-
-## Critical Requirement Reinforcement — 2026-11-01T16:32:13Z
-
-"all instruments must be used"
-
-Please ensure that ALL instruments are actively synthesized, separated/preserved across stems, and mixed into `final_master.wav` for every song generation:
-1. One-Drop Kick & Band-Passed Rimshot/Snare
-2. >6000 Hz 16th-Note Closed Hi-Hats & Nyabinghi Percussion
-3. Low-Pass 180 Hz Dub Sub-Bass walking on roots/fifths
-4. Karplus-Strong Plucked Offbeat Skank Guitar Chords on beats 2 & 4
-5. Karplus-Strong Pentatonic Lead Wah Guitar Solo
-6. Additive Drawbar Hammond B3 Organ Bubble with 6 Hz rotary tremolo LFO + Brass/Keys
-7. Lead & Backing Choir Vocals
-
-No instrument stem may be dropped, muted, or left silent in either the individual stems or the summed master mix! Ensure worker_m7, reviewers, challengers, and forensic auditors explicitly verify this constraint.
-
-
-## Follow-up — 2026-11-01T18:03:46Z
-
-URGENT USER FEEDBACK:
-"the voice outs like a computer voice and it is talking not music"
-
-Root cause: The vocal synthesis (`try_synthesize_windows_sapi_vocals` in `node2_groove_yue.rs`, `fusion_tts.rs`, or the vocal pipeline) is currently using Windows `System.Speech.Synthesis.SpeechSynthesizer` (`Microsoft David Desktop`), which is a flat desktop screen-reader TTS voice that *talks* like a robot/computer instead of *singing* a musical melody!
-
-Please immediately fix vocal generation so the vocals are SUNG MUSICALLY rather than spoken like a flat desktop computer screen-reader:
-1. Replace flat spoken `System.Speech` talking with true melodic singing synthesis:
-   - Either use neural singing/melodic vocal synthesis in the Python `.venv` worker (`suno/bark`, `edge-tts` / neural vocal + PSOLA/phase-vocoder pitch-contour singing in the song's musical scale & BPM rhythm, or harmonic singing synthesizer) OR pitch-lock/resynthesize every syllable onto the actual A Major Pentatonic musical melody notes (`220.0 Hz`, `246.94 Hz`, `277.18 Hz`, `329.63 Hz`, `369.99 Hz`, `440.0 Hz`) with sustained sung vowels, natural vibrato (`5.5 Hz`), 3-part harmony choir backing (Root + Major 3rd + Perfect 5th), rhythmic phrasing locked to the 76 BPM beat grid, and warm studio reverb/formant richness so it sounds like actual melodic singing rather than a computer reading text aloud!
-2. Regenerate all stored songs (`roots_reggae_anthem`, `song-one-love-shining-1977`, `song_afrobeats_002`, `song_reggae_anthem_001` across `v1` and `v2`) so `yue_vocals.wav`, `raspy_tenor_vocals.wav`, and `final_master.wav` contain true melodic sung vocals (never flat spoken `Microsoft David` talking).
-
-
-## Critical User Feedback — 2026-11-01T18:04:04Z
-
-"the voice outs like a computer voice and it is talking not music"
-
-Root cause: The vocal synthesis (try_synthesize_windows_sapi_vocals in node2_groove_yue.rs, fusion_tts.rs, or the vocal pipeline) is currently using Windows System.Speech.Synthesis.SpeechSynthesizer (Microsoft David Desktop), which is a flat desktop screen-reader TTS voice that *talks* like a robot/computer instead of *singing* a musical melody!
-
-Please immediately fix vocal generation so the vocals are SUNG MUSICALLY rather than spoken like a flat desktop computer screen-reader:
-1. Replace flat spoken System.Speech talking with true melodic singing synthesis:
-   - Either use neural singing/melodic vocal synthesis in the Python .venv worker (suno/bark, edge-tts / neural vocal + PSOLA/phase-vocoder pitch-contour singing in the song's musical scale & BPM rhythm, or harmonic singing synthesizer) OR pitch-lock/resynthesize every syllable onto the actual A Major Pentatonic musical melody notes (220.0 Hz, 246.94 Hz, 277.18 Hz, 329.63 Hz, 369.99 Hz, 440.0 Hz) with sustained sung vowels, natural vibrato (5.5 Hz), 3-part harmony choir backing (Root + Major 3rd + Perfect 5th), rhythmic phrasing locked to the 76 BPM beat grid, and warm studio reverb/formant richness so it sounds like actual melodic singing rather than a computer reading text aloud!
-2. Regenerate all stored songs (roots_reggae_anthem, song-one-love-shining-1977, song_afrobeats_002, song_reggae_anthem_001 across v1 and v2) so yue_vocals.wav, raspy_tenor_vocals.wav, and final_master.wav contain true melodic sung vocals (never flat spoken Microsoft David talking).
-
-
-## Follow-up — 2026-11-01T18:10:24Z
-
-User shared the Hugging Face AI Music Generator comparison article (DiffRhythm `ASLP-lab/DiffRhythm`, MiniMax-Music3 `MiniMaxAI/MiniMax-Music3`, MusicGen `facebook/musicgen-small` / `medium` / `large`, Bark `suno/bark`, Fish Speech `fishaudio/fish-speech-1.5`, SO-VITS-SVC / RVC, Kokoro-82M `hexgrad/Kokoro-82M`, plus ACE-Step `ACE-Step/ACE-Step-v1-3.5B` and YuE `m-a-p/YuE-s1-7B-anneal-en-cot`) and asked:
-"are any of these models free and better"
-
-Please ensure that:
-1. Our Hugging Face model catalog (`crates/music_fusion/src/hf_model_discovery.rs`), `workers/generate_song.py`, and the WebUI model selectors (`index.html` / `app.js`) include the best free Apache-2.0 / MIT open-weight models from this article — specifically **DiffRhythm (`ASLP-lab/DiffRhythm` — Apache 2.0, 44.1 kHz stereo full-song lyrics+music diffusion)**, **ACE-Step (`ACE-Step/ACE-Step-v1-3.5B` — Apache 2.0)**, **YuE (`m-a-p/YuE-s1-7B-anneal-en-cot` — Apache 2.0)**, **Bark (`suno/bark` — MIT singing & music)**, **Fish Speech (`fishaudio/fish-speech-1.5` — Apache 2.0)**, **RVC / Seed-VC (`Plachtaa/Seed-VC` — MIT singing voice conversion)**, and **MusicGen (`facebook/musicgen-medium`)**.
-2. Finish `worker_m7_vocal` so the vocals in all stored songs are **melodically sung** (never flat desktop `Microsoft David` spoken talking!) and complete the final verification gate.
+1. **Web Studio UI (`crates/music_cli/webui/index.html` & `app.js`)**:
+   - Right next to the "Import Reference WAVs (Up to 20 Files)" file picker, include a **YouTube / Audio URL input box** + **"Convert to WAV & Add to Mix"** button (supporting one or multiple URLs up to the 20-file pool limit).
+   - Counts toward the up-to-20 reference file slots for the active mix and displays the converted `.wav` filename, source URL badge, duration, detected BPM, musical key, and inline audio preview player (`<audio controls>`) + download link in the Reference Pool list.
+2. **Backend Endpoint (`POST /api/reference-wavs/from-url` in `crates/music_cli/src/rest_server.rs`)**:
+   - **Strict SSRF & URL Validation**: Validate the URL scheme (`http://` or `https://` only) and mathematically block private/loopback/link-local IPv4/IPv6 ranges (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `::1`, `fc00::/7`, `fe80::/10`, `0.0.0.0`) before fetching or invoking external converters.
+   - **URL-to-WAV Conversion Pipeline**:
+     - For YouTube / streaming URLs: invoke `yt-dlp` (`--no-playlist -x --audio-format wav --postprocessor-args "ffmpeg:-ar 44100 -ac 2"`) or `ffmpeg` to extract clean stereo 44.1 kHz PCM `.wav` audio.
+     - For direct `.wav` / audio HTTP(S) URLs (or if `yt-dlp` is not needed for a direct audio link): support direct download/conversion via `ffmpeg` or native WAV decoding so it works both with YouTube URLs and direct audio URLs.
+   - **Saved to Current Mix Storage**: Persist the converted `.wav` file inside the active mix/reference storage directory (e.g. `storage/reference_wavs/` or `storage/reference_wavs/<song_id>/`) and expose it via GET so the user can preview, replay, or download the converted `.wav` for their mix.
+   - **Automatic Stage 1 Feature & RVQ Analysis**: Immediately analyze the converted `.wav` (BPM, Krumhansl-Schmuckler key/chroma vector, spectral timbre envelope, 1–4 kHz vocal presence target, and RVQ discrete tokens) and add it to the ensemble style blend (enforcing the 20-file cap).
+3. **Full Legal & Anti-Plagiarism Safeguards**:
+   - Apply the exact same `LegalOriginalityGuard` (`zero_waveform_sampling: true`, maximum melodic N-gram similarity ceiling, and `synthetic_vocal_timbre_only: true` ELVIS Act compliance) to URL-converted reference WAVs so only uncopyrightable musical building blocks (tempo, key/scale, groove, mix balance) guide the RL synthesis.

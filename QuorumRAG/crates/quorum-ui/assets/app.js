@@ -110,7 +110,7 @@
   }
 
   // Ensure any legacy quick-prompt chips are removed while keeping the top page logo (#welcome-banner) visible
-  document.querySelectorAll('.quick-prompts, .prompt-chip').forEach(el => el.remove());
+  document.querySelectorAll('.quick-prompts, .prompt-chip, .prompt-chips, .sample-prompts').forEach(el => el.remove());
 
   // 5. NEW CHAT
   btnNewChat.addEventListener('click', () => {
@@ -124,21 +124,25 @@
     resetTelemetryPills();
   });
 
-  // 7. INPUT AUTO-RESIZE, LIVE LLM SPELLCHECK & KEYBOARD HANDLING
-  const btnSpellcheck = document.getElementById('btn-spellcheck');
+  // 7. INPUT AUTO-RESIZE, DYNAMIC REAL-TIME SPELLCHECK & KEYBOARD HANDLING
   const spellcheckStatus = document.getElementById('spellcheck-status');
   let spellcheckDebounceTimer = null;
   let lastSpellcheckedText = '';
+  let spellcheckInFlight = false;
 
   async function spellcheckChatBox(useLlm = true) {
     const rawVal = promptInput.value;
     const trimmed = rawVal.trim();
-    if (!trimmed || trimmed.startsWith('@') || trimmed.startsWith('/') || trimmed === lastSpellcheckedText) {
+    if (!trimmed || trimmed.startsWith('@') || trimmed.startsWith('/') || trimmed === lastSpellcheckedText || spellcheckInFlight) {
+      if (!trimmed && spellcheckStatus) {
+        spellcheckStatus.textContent = '✨ Dynamic LLM Spellcheck Active';
+      }
       return trimmed;
     }
+    spellcheckInFlight = true;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1600);
+      const timeoutId = setTimeout(() => controller.abort(), 1800);
       const res = await fetch('/api/chat/spellcheck', {
         method: 'POST',
         signal: controller.signal,
@@ -150,42 +154,52 @@
       const data = await res.json();
       if (data && data.corrected) {
         lastSpellcheckedText = data.corrected;
-        // Only update the chat box if the user hasn't typed something completely different in the meantime
+        // Dynamically update the chat box while preserving the user's cursor / trailing space
         if (promptInput.value.trim() === trimmed && data.changed) {
+          const wasAtEnd = promptInput.selectionStart >= rawVal.length - 1;
+          const prevSelectionStart = promptInput.selectionStart;
           const trailingSpace = /\s$/.test(rawVal) ? ' ' : '';
-          promptInput.value = data.corrected + trailingSpace;
+          const nextValue = data.corrected + trailingSpace;
+          promptInput.value = nextValue;
+          if (wasAtEnd) {
+            promptInput.setSelectionRange(nextValue.length, nextValue.length);
+          } else {
+            const clamped = Math.min(prevSelectionStart, nextValue.length);
+            promptInput.setSelectionRange(clamped, clamped);
+          }
           promptInput.style.height = 'auto';
           promptInput.style.height = Math.min(promptInput.scrollHeight, 160) + 'px';
           if (spellcheckStatus) {
-            spellcheckStatus.textContent = `✨ Spellchecked: "${data.corrected}"`;
+            spellcheckStatus.textContent = `✨ Auto-corrected: "${data.corrected}"`;
           }
         }
         return data.corrected;
       }
-    } catch (_e) {}
+    } catch (_e) {
+    } finally {
+      spellcheckInFlight = false;
+    }
     return trimmed;
   }
 
-  if (btnSpellcheck) {
-    btnSpellcheck.addEventListener('click', async () => {
-      if (spellcheckStatus) {
-        spellcheckStatus.textContent = '✨ Checking spelling with LLM...';
-      }
-      lastSpellcheckedText = '';
-      await spellcheckChatBox(true);
-    });
-  }
-
-  promptInput.addEventListener('input', () => {
+  promptInput.addEventListener('input', (e) => {
     promptInput.style.height = 'auto';
     promptInput.style.height = Math.min(promptInput.scrollHeight, 160) + 'px';
+    if (!promptInput.value.trim()) {
+      lastSpellcheckedText = '';
+      if (spellcheckStatus) {
+        spellcheckStatus.textContent = '✨ Dynamic LLM Spellcheck Active';
+      }
+    }
     if (spellcheckDebounceTimer) {
       clearTimeout(spellcheckDebounceTimer);
     }
-    // Trigger live LLM spellcheck after a 550ms typing pause (or after spacebar completes a word)
+    // Dynamic real-time spellcheck: fire immediately (80ms) when finishing a word with space/punctuation, or 320ms pause
+    const lastChar = (promptInput.value || '').slice(-1);
+    const delayMs = (lastChar === ' ' || lastChar === '?' || lastChar === '.' || lastChar === '!') ? 80 : 320;
     spellcheckDebounceTimer = setTimeout(() => {
       spellcheckChatBox(true);
-    }, 550);
+    }, delayMs);
   });
 
   promptInput.addEventListener('keydown', (e) => {
@@ -231,31 +245,8 @@
     });
   }
 
-  // 8. SEND PROMPT & SSE CONSUMER
-  async function submitPrompt() {
-    if (spellcheckDebounceTimer) {
-      clearTimeout(spellcheckDebounceTimer);
-      spellcheckDebounceTimer = null;
-    }
-    let text = promptInput.value.trim();
-    if (!text || isGenerating) return;
-
-    // Check for @extract slash command
-    if (text.startsWith('@extract ')) {
-      const codeToExtract = text.substring(9).trim();
-      handleExtractCommand(codeToExtract);
-      promptInput.value = '';
-      promptInput.style.height = 'auto';
-      return;
-    }
-
-    // Run fast LLM spellcheck on the chat box before submitting the RAG query
-    const correctedText = await spellcheckChatBox(true);
-    if (correctedText && correctedText.trim()) {
-      text = correctedText.trim();
-      promptInput.value = text;
-    }
-
+  // 8. SEND PROMPT, STREAMING ORCHESTRATION & BROWSER-STYLE RESPONSE ACTION TOOLBAR
+  async function streamAssistantTurn(text, turnHistorySnapshot, bodyEl, citationsEl, headerEl, actionsEl, bypassCache = false) {
     isGenerating = true;
     btnSend.disabled = true;
     btnSend.classList.add('hidden');
@@ -271,14 +262,17 @@
     telemetryBar.classList.remove('hidden');
     resetTelemetryPills();
 
-    // Append User Message
-    appendMessage('user', text);
-    promptInput.value = '';
-    promptInput.style.height = 'auto';
-
-    // Create Assistant Message with animated cycling thinking indicator
-    const { msgEl, bodyEl, citationsEl, headerEl } = createAssistantMessage();
+    bodyEl._rawMarkdown = '';
+    bodyEl.innerHTML = '';
     citationsEl._pendingCitations = [];
+    citationsEl.innerHTML = '';
+    if (actionsEl) {
+      actionsEl.innerHTML = '';
+    }
+    if (headerEl) {
+      const oldPill = headerEl.querySelector('.cache-hit-pill');
+      if (oldPill) oldPill.remove();
+    }
     startThinkingIndicator(bodyEl);
 
     try {
@@ -303,7 +297,8 @@
               model_family: currentModel,
               top_k: 12,
               access_tier: 0,
-              history: conversationHistoryTurns.slice(-14)
+              bypass_cache: Boolean(bypassCache),
+              history: turnHistorySnapshot
             })
           });
           if (resp.ok) break;
@@ -366,10 +361,17 @@
       if (bodyEl._rawMarkdown) {
         bodyEl.style.whiteSpace = 'normal';
         bodyEl.innerHTML = renderMarkdownHtml(bodyEl._rawMarkdown);
-        conversationHistoryTurns.push(
-          { role: 'user', content: text },
-          { role: 'assistant', content: bodyEl._rawMarkdown }
-        );
+        if (!bypassCache) {
+          conversationHistoryTurns.push(
+            { role: 'user', content: text },
+            { role: 'assistant', content: bodyEl._rawMarkdown }
+          );
+        } else if (conversationHistoryTurns.length >= 2) {
+          conversationHistoryTurns[conversationHistoryTurns.length - 1] = {
+            role: 'assistant',
+            content: bodyEl._rawMarkdown
+          };
+        }
       } else {
         const cursor = bodyEl.querySelector('.typing-cursor');
         if (cursor) cursor.remove();
@@ -382,6 +384,10 @@
           appendCitation(citationsEl, cit);
         }
       }
+      // 3. Render browser-style Response Action Toolbar (Copy, Regenerate, Read Aloud, Helpful/Not Helpful)
+      if (actionsEl) {
+        renderResponseActionsBar(actionsEl, bodyEl, citationsEl, headerEl, text, turnHistorySnapshot);
+      }
       activeAbortController = null;
       activeQueryId = null;
       isGenerating = false;
@@ -392,6 +398,42 @@
       }
       scrollToBottom();
     }
+  }
+
+  async function submitPrompt() {
+    if (spellcheckDebounceTimer) {
+      clearTimeout(spellcheckDebounceTimer);
+      spellcheckDebounceTimer = null;
+    }
+    let text = promptInput.value.trim();
+    if (!text || isGenerating) return;
+
+    // Check for @extract slash command
+    if (text.startsWith('@extract ')) {
+      const codeToExtract = text.substring(9).trim();
+      handleExtractCommand(codeToExtract);
+      promptInput.value = '';
+      promptInput.style.height = 'auto';
+      return;
+    }
+
+    // Run dynamic spellcheck on the chat box before submitting the RAG query
+    const correctedText = await spellcheckChatBox(true);
+    if (correctedText && correctedText.trim()) {
+      text = correctedText.trim();
+      promptInput.value = text;
+    }
+
+    const turnHistorySnapshot = conversationHistoryTurns.slice(-14);
+
+    // Append User Message
+    appendMessage('user', text);
+    promptInput.value = '';
+    promptInput.style.height = 'auto';
+
+    // Create Assistant Message with animated cycling thinking indicator + response action toolbar
+    const { bodyEl, citationsEl, headerEl, actionsEl } = createAssistantMessage();
+    await streamAssistantTurn(text, turnHistorySnapshot, bodyEl, citationsEl, headerEl, actionsEl, false);
   }
 
   const THINKING_PHRASES = [
@@ -615,7 +657,13 @@
   function renderMarkdownHtml(raw) {
     if (!raw) return '';
     // Strip any legacy inline "### Supporting Evidence & Citations" block if cached
-    const cleanedRaw = String(raw).split(/###\s*Supporting Evidence & Citations/i)[0].trim();
+    let cleanedRaw = String(raw).split(/###\s*Supporting Evidence & Citations/i)[0].trim();
+    // Strip ChatGPT export artifacts and file citation tokens
+    cleanedRaw = cleanedRaw.replace(/fileciteturn\d+file\d+/gi, '').replace(/sandbox:\/mnt\/data\/\S*/gi, '');
+    // Strip line number references e.g. (Lines 35–39), (Lines 1-10), :35-39 from prose body
+    cleanedRaw = cleanedRaw.replace(/\(Lines?\s*\d+\s*[–-]\s*\d+\)/gi, '').replace(/:(\d+)-(\d+)/g, '');
+    // Strip raw markdown file headers e.g. ### 📄 filename
+    cleanedRaw = cleanedRaw.replace(/^###?\s*📄.*$/gm, '');
     const lines = cleanedRaw.split(/\r?\n/);
     let html = '';
     let inList = false;
@@ -674,6 +722,7 @@
 
   function appendCitation(citationsEl, cit) {
     if (!citationsEl.querySelector('.sources-heading')) {
+      citationsEl._seenFiles = new Set();
       citationsEl.style.marginTop = '12px';
       citationsEl.style.paddingTop = '10px';
       citationsEl.style.borderTop = '1px solid var(--border-color, rgba(128,128,128,0.25))';
@@ -683,15 +732,28 @@
       label.textContent = 'Sources';
       citationsEl.appendChild(label);
     }
+    if (!citationsEl._seenFiles) {
+      citationsEl._seenFiles = new Set();
+    }
     const fileName = String(cit.file_path || '').split(/[\\/]/).pop() || cit.file_path;
+    const cleanFileName = fileName.trim();
+    if (!cleanFileName || citationsEl._seenFiles.has(cleanFileName.toLowerCase())) {
+      return;
+    }
+    citationsEl._seenFiles.add(cleanFileName.toLowerCase());
+
+    const rawScore = Number(cit.score !== undefined ? cit.score : (cit.relevance_score || 0));
+    let scorePct = rawScore > 1 ? Math.round(rawScore) : Math.round(rawScore * 100);
+    scorePct = Math.max(0, Math.min(100, scorePct));
+
     const badge = document.createElement('a');
     badge.className = 'citation-badge';
     badge.href = '#';
-    badge.title = `${cit.file_path} (Lines ${cit.line_start}-${cit.line_end})\nScore: ${Number(cit.score || 0).toFixed(3)}\n${cit.snippet || ''}`;
-    badge.innerHTML = `📄 ${escapeHtml(fileName)} <span style="opacity:0.7;">:${cit.line_start}-${cit.line_end}</span>`;
+    badge.title = `${cit.file_path}\nAccuracy: ${scorePct}%\n${cit.snippet || ''}`.trim();
+    badge.innerHTML = `📄 ${escapeHtml(cleanFileName)} <span class="score-pill" style="opacity:0.85; font-size:11px; margin-left:5px; padding:1px 6px; border-radius:4px; background:rgba(66,133,244,0.2); font-weight:600;">${scorePct}%</span>`;
     badge.addEventListener('click', (e) => {
       e.preventDefault();
-      alert(`Source Citation:\nFile: ${cit.file_path}\nLines: ${cit.line_start}-${cit.line_end}\nPeer: ${cit.peer_id}\nSnippet:\n${cit.snippet || '(no snippet)'}`);
+      alert(`Source Citation:\nFile: ${cit.file_path}\nAccuracy: ${scorePct}%\nPeer: ${cit.peer_id || 'local'}\nSnippet:\n${cit.snippet || '(no snippet)'}`);
     });
     citationsEl.appendChild(badge);
   }
@@ -767,13 +829,122 @@
     const citations = document.createElement('div');
     citations.className = 'citation-container';
 
+    const actions = document.createElement('div');
+    actions.className = 'response-actions-bar';
+
     msgDiv.appendChild(header);
     msgDiv.appendChild(body);
     msgDiv.appendChild(citations);
+    msgDiv.appendChild(actions);
     chatStream.appendChild(msgDiv);
     scrollToBottom();
 
-    return { msgEl: msgDiv, bodyEl: body, citationsEl: citations, headerEl: header };
+    return { msgEl: msgDiv, bodyEl: body, citationsEl: citations, headerEl: header, actionsEl: actions };
+  }
+
+  function renderResponseActionsBar(actionsEl, bodyEl, citationsEl, headerEl, turnPrompt, turnHistorySnapshot) {
+    if (!actionsEl) return;
+    actionsEl.innerHTML = '';
+
+    // 1. Copy Button
+    const btnCopy = document.createElement('button');
+    btnCopy.type = 'button';
+    btnCopy.className = 'response-action-btn btn-copy-response';
+    btnCopy.title = 'Copy response to clipboard';
+    btnCopy.innerHTML = '<span>📋</span><span>Copy</span>';
+    btnCopy.addEventListener('click', async () => {
+      const textToCopy = bodyEl._rawMarkdown || bodyEl.innerText || '';
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(textToCopy);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = textToCopy;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        btnCopy.classList.add('active');
+        btnCopy.innerHTML = '<span>✓</span><span>Copied!</span>';
+        setTimeout(() => {
+          btnCopy.classList.remove('active');
+          btnCopy.innerHTML = '<span>📋</span><span>Copy</span>';
+        }, 2000);
+      } catch (_e) {}
+    });
+
+    // 2. Regenerate Button
+    const btnRegenerate = document.createElement('button');
+    btnRegenerate.type = 'button';
+    btnRegenerate.className = 'response-action-btn btn-regenerate-response';
+    btnRegenerate.title = 'Regenerate response using local RAG orchestrator';
+    btnRegenerate.innerHTML = '<span>🔄</span><span>Regenerate</span>';
+    btnRegenerate.addEventListener('click', async () => {
+      if (isGenerating || !turnPrompt) return;
+      await streamAssistantTurn(turnPrompt, turnHistorySnapshot || [], bodyEl, citationsEl, headerEl, actionsEl, true);
+    });
+
+    // 3. Read Aloud / Stop Button
+    const btnSpeak = document.createElement('button');
+    btnSpeak.type = 'button';
+    btnSpeak.className = 'response-action-btn btn-speak-response';
+    btnSpeak.title = 'Read response aloud';
+    btnSpeak.innerHTML = '<span>🔊</span><span>Read Aloud</span>';
+    btnSpeak.addEventListener('click', () => {
+      if (!('speechSynthesis' in window)) return;
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+        btnSpeak.classList.remove('active');
+        btnSpeak.innerHTML = '<span>🔊</span><span>Read Aloud</span>';
+        return;
+      }
+      const plainText = (bodyEl.innerText || bodyEl._rawMarkdown || '').replace(/\[\d+\]/g, '');
+      if (!plainText.trim()) return;
+      const utterance = new SpeechSynthesisUtterance(plainText);
+      btnSpeak.classList.add('active');
+      btnSpeak.innerHTML = '<span>⏹</span><span>Stop Reading</span>';
+      utterance.onend = () => {
+        btnSpeak.classList.remove('active');
+        btnSpeak.innerHTML = '<span>🔊</span><span>Read Aloud</span>';
+      };
+      utterance.onerror = () => {
+        btnSpeak.classList.remove('active');
+        btnSpeak.innerHTML = '<span>🔊</span><span>Read Aloud</span>';
+      };
+      window.speechSynthesis.speak(utterance);
+    });
+
+    // 4. Helpful (Thumbs Up) & Not Helpful (Thumbs Down) Buttons
+    const btnUp = document.createElement('button');
+    btnUp.type = 'button';
+    btnUp.className = 'response-action-btn btn-feedback-up';
+    btnUp.title = 'Good response';
+    btnUp.innerHTML = '<span>👍</span>';
+
+    const btnDown = document.createElement('button');
+    btnDown.type = 'button';
+    btnDown.className = 'response-action-btn btn-feedback-down';
+    btnDown.title = 'Needs improvement';
+    btnDown.innerHTML = '<span>👎</span>';
+
+    btnUp.addEventListener('click', () => {
+      const nextActive = !btnUp.classList.contains('active');
+      btnUp.classList.toggle('active', nextActive);
+      btnDown.classList.remove('active');
+    });
+
+    btnDown.addEventListener('click', () => {
+      const nextActive = !btnDown.classList.contains('active');
+      btnDown.classList.toggle('active', nextActive);
+      btnUp.classList.remove('active');
+    });
+
+    actionsEl.appendChild(btnCopy);
+    actionsEl.appendChild(btnRegenerate);
+    actionsEl.appendChild(btnSpeak);
+    actionsEl.appendChild(btnUp);
+    actionsEl.appendChild(btnDown);
   }
 
   function scrollToBottom() {
@@ -786,7 +957,7 @@
   // 9. @extract COMMAND HANDLER
   async function handleExtractCommand(text) {
     appendMessage('user', `@extract ${text}`);
-    const { bodyEl } = createAssistantMessage();
+    const { bodyEl, citationsEl, headerEl, actionsEl } = createAssistantMessage();
     bodyEl.innerHTML = `<em>Running Google LangExtract 4-Arm Consensus...</em>`;
 
     try {
@@ -808,6 +979,10 @@
       `;
     } catch (e) {
       bodyEl.innerHTML = `<span style="color:var(--danger);">Extraction failed: ${e.message}</span>`;
+    } finally {
+      if (actionsEl) {
+        renderResponseActionsBar(actionsEl, bodyEl, citationsEl, headerEl, `@extract ${text}`, null);
+      }
     }
   }
 
@@ -3201,7 +3376,10 @@
       item.innerHTML = `<span>${escapeHtml(target.title)}</span>`;
       item.addEventListener('click', () => {
         closeSettingsView();
-        if (welcomeBanner) welcomeBanner.classList.add('hidden');
+        if (welcomeBanner) {
+          welcomeBanner.style.display = '';
+          welcomeBanner.classList.remove('hidden');
+        }
         appendMessage('user', target.title);
       });
       conversationHistory.prepend(item);

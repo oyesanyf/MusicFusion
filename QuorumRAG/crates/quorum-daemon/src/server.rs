@@ -120,6 +120,7 @@ async fn chat_stream_compat_handler(
         access_tier: Some(0),
         history: Vec::new(),
         query_id: None,
+        bypass_cache: false,
     };
     chat::chat_sse_handler(State(state), axum::Json(req)).await
 }

@@ -115,3 +115,15 @@ Gate Result: **FAIL** (challenger_m7_2 REJECT: "ALL INSTRUMENTS MUST BE USED" in
 | auditor_m7_recheck | teamwork_auditor | CLEAN | handoff.md | Verified 100% genuine DSP, zero mocks, zero fake data, genuine melodic singing synthesis, zero registry/PATH mutations, 191/191 E2E tests pass |
 
 Gate Result: **PASS** (Milestone 7 Physical Modeling Synthesis, Stem Headroom & Tape Mastering, uv Python Neural Bridge, Melodic Singing Upgrade & Sample Regeneration is DONE)
+
+## Milestone 8 — Iteration 1
+| Agent | Role | Verdict | Source | Notes |
+|-------|------|---------|--------|-------|
+| worker_m8 | teamwork_worker | DONE | handoff.md | Commits `db03bfe` and `35e4d1a`, 119 DSP tests, 53 fusion tests, 4 cli tests, 4-baseline RL benchmark, Bridgeport & ELVIS Act safeguards pass |
+| reviewer_m8_1 | teamwork_reviewer | APPROVE | handoff.md | Approved. DSP, Krumhansl chroma, anti-monopoly simplex <=60%, RVQ monotonic norm reduction, 119 tests pass |
+| reviewer_m8_2 | teamwork_reviewer | APPROVE | handoff.md | Approved. Originality guard (Bridgeport & ELVIS safeguards), RL policy, DPO, SSRF math, WebUI, 53 fusion tests, 4 cli tests pass |
+| challenger_m8_1 | teamwork_challenger | APPROVE | handoff.md | Approved. 12/12 empirical tests pass: >=8 hook rejection, 12 transpositions, polarity inversion, RVQ monotonic reduction across 500 trials, anti-monopoly <=60% |
+| challenger_m8_2 | teamwork_challenger | APPROVE | handoff.md | Approved. 5/5 empirical tests pass: 20-file cap, 21st file rejection (400), corruption rejection, math SSRF across all ranges, 50-seed RL benchmark 95% CIs |
+| auditor_m8 | teamwork_auditor | CLEAN | handoff.md | CLEAN. Zero mocks, zero sample splicing, zero voice cloning, zero registry/PATH mutations, math SSRF verified |
+
+Gate Result: **PASS** (100% Unanimous Approval & Clean Forensic Audit: Milestone 8 20-File Reference WAV Importer, RVQ Tokenizer & RL Pipeline with Legal Originality Guard is DONE)
