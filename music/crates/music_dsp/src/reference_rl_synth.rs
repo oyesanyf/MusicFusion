@@ -19,7 +19,9 @@ use std::f32::consts::PI;
 use music_core::rl_contracts::BlendedStyleProfile;
 use crate::groove_synth::DspRng;
 use crate::guitar_wah::{GuitarAmpSimulator, KarplusStrongString, PinkNoiseGenerator};
-use crate::melodic_singing::{MelodicSingingSynthesizer, StudioVocalReverb};
+use crate::melodic_singing::{
+    MelodicSingingSynthesizer, MovementSection, SongMovementKind, StudioVocalReverb,
+};
 use crate::tape_mastering::{apply_analog_mastering, MasteringProfile};
 use crate::vocal_formant::BiquadFilter;
 use crate::wav::{AudioBuffer, DEFAULT_SAMPLE_RATE as SAMPLE_RATE};
@@ -195,26 +197,12 @@ impl ReferenceRlSynthesizer {
                  Carried on the rhythm of a midnight westbound train!\n\
                  From the wooden porch steps to the California sea,\n\
                  One love shining over you and me!\n\n\
-                 [Verse 2]\n\
-                 (Driving 16th-note hi-hat accents, rounded 55–90 Hz fretless bass resonance, delicate Wurlitzer electric piano chords, and whisper-quiet Hammond B3 pad)\n\
-                 Dashboard glowing amber as the border towns roll by,\n\
-                 Dawn is breaking crimson on the edge of the sky.\n\
-                 We built our shelter out of honesty and grace,\n\
-                 Found a quiet harbor in this wide-open space.\n\n\
                  [Bridge]\n\
                  (Yearning pedal steel guitar swells bloom softly into a 16-bar melodic, woody acoustic slide guitar solo capturing longing and motion)\n\
                  Hear the slide guitar crying down the open line,\n\
                  Every crossroads leading back to yours and mine!\n\n\
-                 [Guitar Solo]\n\
-                 (16-bar melodic woody acoustic slide guitar solo with expressive bottleneck glissandos, warm open-string resonance, and Wurlitzer harmonic blooms)\n\n\
-                 [Chorus]\n\
-                 One love shining through the canyon rain!\n\
-                 (Harmony response: Shining through the rain!)\n\
-                 Carried on the rhythm of a midnight westbound train!\n\
-                 From the wooden porch steps to the California sea,\n\
-                 One love shining over you and me!\n\n\
                  [Outro]\n\
-                 (Intimate dual harmony call-and-response swells gently over the looping fingerpicked steel-string acoustic riff and warm 1988 LA Studer A800 tape fade)\n\
+                 (Intimate dual harmony call-and-response swells gently before the climax woody acoustic slide guitar solo and warm 1988 LA Studer A800 tape fade)\n\
                  One love shining, roll on down the line,\n\
                  Acoustic strings and tender souls forever intertwined.",
                 key = key,
@@ -235,18 +223,6 @@ impl ReferenceRlSynthesizer {
                  Feel the roots groove rising in our veins!\n\
                  Sing it clear and upfront across the open night,\n\
                  Let the soaring guitar carry us into the light!\n\n\
-                 [Instrumental Interlude]\n\
-                 (Blazing Dire Straits-style fingerpicked electric guitar solo — expressive double-stops, cascading minor triads, and crying tube sustain)\n\n\
-                 [Guitar Solo]\n\
-                 (16-bar soaring Mark Knopfler / Sultans-inspired melodic guitar solo over warm acoustic rhythm and locked roots bass)\n\n\
-                 [Verse 2]\n\
-                 Coffee in a paper cup, radio tuned low,\n\
-                 Still got a hundred miles of winding road to go.\n\
-                 When the rhythm hits the pocket and the bassline walks the floor,\n\
-                 We leave the heavy shadows outside the studio door.\n\n\
-                 [Bridge]\n\
-                 From the quiet acoustic whisper to the crying electric bend,\n\
-                 Every note is a promise that the journey never ends!\n\n\
                  [Outro]\n\
                  Roll on through the night, let the silver strings ring true,\n\
                  Warm roots and clear voices shining straight to you.",
@@ -485,48 +461,59 @@ impl ReferenceRlSynthesizer {
         };
 
         let shift = (melodic_seed as usize) % 3;
-        // (start_beat_in_16, duration_beats, scale_idx, slide_semitones, vibrato_depth)
-        let solo_licks: [(f32, f32, usize, f32, f32); 18] = [
-            // Bar 1: Yearning bottleneck slide up from 3rd to 5th
-            (0.0,  2.0, 4 + (shift % 2), 2.0, 0.009),
-            (2.0,  1.25, 5, 0.0, 0.007),
-            (3.25, 0.75, 4, 0.0, 0.004),
-            // Bar 2: Woody acoustic slide cry up to the octave
-            (4.0,  1.5, 7, 2.0, 0.010),
-            (5.5,  1.0, 6, 0.0, 0.006),
-            (6.5,  1.5, 4, 1.0, 0.008),
-            // Bar 3: Cascading highway melody phrase
-            (8.0,  1.0, 4, 0.0, 0.004),
-            (9.0,  1.0, 5, 2.0, 0.008),
-            (10.0, 1.25, 7, 0.0, 0.009),
-            (11.25, 0.75, 8, 2.0, 0.010),
-            // Bar 4: Long singing slide resolution
-            (12.0, 1.0, 9, 0.0, 0.008),
-            (13.0, 0.75, 7, 0.0, 0.005),
-            (13.75, 0.75, 5, 0.0, 0.005),
-            (14.5, 0.75, 4, 1.0, 0.006),
-            (15.25, 0.75, 2, 0.0, 0.007),
-            (15.5, 0.25, 4, 0.0, 0.004),
-            (15.75, 0.25, 7, 0.0, 0.008),
-            (15.9, 0.10, 7, 0.0, 0.005),
+        // Expressive fingerpicked / bottleneck acoustic guitar solo licks:
+        // (start_beat_in_16, duration_beats, scale_idx, grace_slide_semitones, has_double_stop)
+        let solo_licks: [(f32, f32, usize, f32, bool); 24] = [
+            // Bar 1: Plucked bottleneck grace-note slide into 5th & warm double-stop sixths
+            (0.0,  0.75, 4 + (shift % 2), 2.0, true),
+            (0.75, 0.75, 5, 0.0, false),
+            (1.5,  1.0,  6, 2.0, true),
+            (2.5,  0.75, 5, 0.0, false),
+            (3.25, 0.75, 4, 0.0, true),
+            // Bar 2: Ascending woody acoustic cry up to the high root & 9th
+            (4.0,  0.75, 4, 0.0, false),
+            (4.75, 0.75, 6, 2.0, true),
+            (5.5,  1.0,  7, 0.0, true),
+            (6.5,  0.75, 6, 0.0, false),
+            (7.25, 0.75, 4, 0.0, true),
+            // Bar 3: Cascading fingerpicked highway melody phrase
+            (8.0,  0.50, 4, 0.0, false),
+            (8.5,  0.50, 5, 0.0, false),
+            (9.0,  0.75, 7, 2.0, true),
+            (9.75, 0.75, 8, 0.0, true),
+            (10.5, 0.75, 7, 0.0, false),
+            (11.25, 0.75, 5, 0.0, true),
+            // Bar 4: Warm acoustic double-stop resolution to tonic
+            (12.0, 0.75, 6, 2.0, true),
+            (12.75, 0.75, 5, 0.0, false),
+            (13.5, 0.50, 4, 0.0, true),
+            (14.0, 0.50, 2, 0.0, false),
+            (14.5, 0.50, 4, 0.0, true),
+            (15.0, 0.50, 5, 0.0, false),
+            (15.5, 0.25, 4, 0.0, false),
+            (15.75, 0.25, 7, 0.0, true),
         ];
 
-        let mut phase = 0.0f32;
-        let mut harm_phase = 0.0f32;
-        let mut smoothed_freq = lead_root * 2.0;
+        let mut lead_str_l = KarplusStrongString::new(SAMPLE_RATE);
+        let mut lead_str_r = KarplusStrongString::new(SAMPLE_RATE);
+        let mut harm_str_l = KarplusStrongString::new(SAMPLE_RATE);
+        let mut harm_str_r = KarplusStrongString::new(SAMPLE_RATE);
+        let mut rng = DspRng::new(7741 + melodic_seed as u32);
+        let mut pink = PinkNoiseGenerator::new();
+
         let drive = if is_acoustic_slide {
-            1.15 // Clean, woody, unclipped acoustic resonator body!
+            1.08 // Pure, warm, unclipped woody acoustic soundboard!
         } else {
-            (1.6 + guitar_drive * 1.4).clamp(1.4, 3.2)
+            (1.35 + guitar_drive * 0.6).clamp(1.2, 2.1)
         };
         let mut amp = GuitarAmpSimulator::new(drive);
         let mut woody_resonator = if is_acoustic_slide {
-            BiquadFilter::peaking_eq(310.0, 1.3, 4.2, 2) // Warm Dobro / woody acoustic slide resonance
+            BiquadFilter::peaking_eq(265.0, 1.1, 3.6, 2) // Warm Martin / Dobro wooden soundboard resonance
         } else {
-            BiquadFilter::peaking_eq(1250.0, 1.2, 3.2, 2)
+            BiquadFilter::peaking_eq(850.0, 1.1, 2.6, 2)
         };
-        let mut air_eq = BiquadFilter::peaking_eq(2850.0, 1.0, 2.4, 2);
-        let mut reverb = StudioVocalReverb::new(SAMPLE_RATE, 0.24);
+        let mut air_eq = BiquadFilter::peaking_eq(3400.0, 1.0, 2.8, 2);
+        let mut reverb = StudioVocalReverb::new(SAMPLE_RATE, 0.22);
 
         let delay_len_l = (0.125 * sr) as usize;
         let delay_len_r = (0.175 * sr) as usize;
@@ -535,82 +522,73 @@ impl ReferenceRlSynthesizer {
         let mut d_idx_l = 0usize;
         let mut d_idx_r = 0usize;
 
+        let mut last_lick_id: Option<(usize, usize)> = None;
+        let mut grace_target_pushed = false;
+
         for i in 0..frames {
             let t = i as f32 / sr;
             let total_beats = t / beat_sec;
             let in_main_solo = total_beats >= solo_beat_window.0 && total_beats < solo_beat_window.1;
-            let in_intro_hook = total_beats < 8.0;
-            let in_outro_solo = total_beats >= 80.0;
-            // Transition blooms at the end of every 4-bar section (beats 14..16)
-            let in_transition_swell = (total_beats % 16.0) >= 13.5;
+            let in_intro_hook = total_beats < 2.0;
+            // Subtle fingerpicked turnaround fills at the end of every 4-bar section (beats 14..16)
+            let in_transition_fill = (total_beats % 16.0) >= 14.0 && total_beats < solo_beat_window.1;
 
-            let beat_in_16 = total_beats % 16.0;
-            let mut active_lick: Option<(f32, f32, usize, f32, f32)> = None;
-            if in_main_solo || in_intro_hook || in_outro_solo || in_transition_swell {
-                for &lick in &solo_licks {
+            let (cycle_num, beat_in_16) = if in_main_solo {
+                let rel = total_beats - solo_beat_window.0;
+                ((rel / 16.0).floor() as usize + 100, rel % 16.0)
+            } else {
+                ((total_beats / 16.0).floor() as usize, total_beats % 16.0)
+            };
+
+            let mut active_lick: Option<(usize, (f32, f32, usize, f32, bool))> = None;
+            if in_main_solo || in_intro_hook || in_transition_fill {
+                for (l_idx, &lick) in solo_licks.iter().enumerate() {
                     if beat_in_16 >= lick.0 && beat_in_16 < (lick.0 + lick.1) {
-                        active_lick = Some(lick);
+                        active_lick = Some((l_idx, lick));
                         break;
                     }
                 }
             }
 
-            let dry_sig = if let Some((start_b, dur_b, s_idx, slide_st, vib_depth)) = active_lick {
+            if let Some((l_idx, (start_b, dur_b, s_idx, slide_st, has_double_stop))) = active_lick {
+                let cur_id = (cycle_num, l_idx);
                 let progress = ((beat_in_16 - start_b) / dur_b).clamp(0.0, 1.0);
-                let note_sec = dur_b * beat_sec;
-                let elapsed_sec = progress * note_sec;
+                let target_st = scale_semitones[s_idx % scale_semitones.len()];
+                let target_hz = lead_root * 2.0f32.powf(target_st / 12.0);
+                let harm_st = scale_semitones[(s_idx + 2) % scale_semitones.len()];
+                let harm_hz = lead_root * 2.0f32.powf(harm_st / 12.0);
+                let vel = if in_main_solo { 0.92 } else { 0.68 };
 
-                // Smooth bottleneck acoustic slide glissando (starts -slide_st below target and glides smoothly in)
-                let slide_offset = if slide_st > 0.0 {
-                    let glide_t = (progress / 0.42).min(1.0);
-                    -slide_st * (1.0 - (glide_t * PI * 0.5).sin())
-                } else {
-                    0.0
-                };
-                let base_st = scale_semitones[s_idx % scale_semitones.len()] + slide_offset;
-                let target_hz = lead_root * 2.0f32.powf(base_st / 12.0);
+                if last_lick_id != Some(cur_id) {
+                    last_lick_id = Some(cur_id);
+                    grace_target_pushed = false;
+                    // If this note has a bottleneck grace slide, pluck the lower grace note first!
+                    let initial_hz = if slide_st > 0.0 {
+                        lead_root * 2.0f32.powf((target_st - slide_st) / 12.0)
+                    } else {
+                        target_hz
+                    };
+                    lead_str_l.pluck_with_rng(initial_hz, vel, &mut rng, &mut pink);
+                    lead_str_r.pluck_with_rng(initial_hz * 1.0015, vel * 0.96, &mut rng, &mut pink);
+                    if has_double_stop {
+                        harm_str_l.pluck_with_rng(harm_hz, vel * 0.62, &mut rng, &mut pink);
+                        harm_str_r.pluck_with_rng(harm_hz * 1.0018, vel * 0.62, &mut rng, &mut pink);
+                    }
+                } else if slide_st > 0.0 && !grace_target_pushed && progress >= 0.18 {
+                    // 75 ms later, slide/hammer-on into the target melody note!
+                    grace_target_pushed = true;
+                    lead_str_l.pluck_with_rng(target_hz, vel * 0.95, &mut rng, &mut pink);
+                    lead_str_r.pluck_with_rng(target_hz * 1.0015, vel * 0.92, &mut rng, &mut pink);
+                }
+            }
 
-                // Smooth bottleneck vibrato (5.6 Hz)
-                let vib = (2.0 * PI * 5.6 * t).sin() * vib_depth * (elapsed_sec / 0.10).min(1.0);
-                let glide_coef = if is_acoustic_slide { 0.015 } else { 0.12 };
-                smoothed_freq = smoothed_freq * (1.0 - glide_coef) + target_hz * (1.0 + vib) * glide_coef;
+            let raw_l = lead_str_l.tick() * 0.78 + harm_str_l.tick() * 0.48;
+            let raw_r = lead_str_r.tick() * 0.78 + harm_str_r.tick() * 0.48;
+            let dry_l = amp.process(raw_l) * 0.82;
+            let dry_r = amp.process(raw_r) * 0.82;
 
-                phase = (phase + smoothed_freq / sr).fract();
-                let sixth_harm_hz = smoothed_freq * 1.259_921;
-                harm_phase = (harm_phase + sixth_harm_hz / sr).fract();
-
-                let w = 2.0 * PI * phase;
-                // Volume-pedal / bottleneck bloom envelope on transitions, plucked woody attack on solo notes
-                let env = if in_transition_swell && !in_main_solo {
-                    (progress * PI).sin() * 0.75
-                } else if progress < 0.06 {
-                    progress / 0.06
-                } else if progress > 0.88 {
-                    (1.0 - progress) / 0.12
-                } else {
-                    (-elapsed_sec * 1.1).exp() * 0.68 + 0.32
-                };
-
-                let raw_string = (w.sin() * 0.58
-                    + (2.0 * w + 0.3).sin() * 0.30
-                    + (3.0 * w + 0.8).sin() * 0.15
-                    + (2.0 * PI * harm_phase).sin() * 0.18)
-                    * env;
-
-                let level = if in_main_solo {
-                    0.86
-                } else if in_intro_hook || in_outro_solo {
-                    0.64
-                } else {
-                    0.48
-                };
-                amp.process(raw_string) * level
-            } else {
-                0.0
-            };
-
-            let eq_l = air_eq.process_sample(0, woody_resonator.process_sample(0, dry_sig));
-            let eq_r = air_eq.process_sample(1, woody_resonator.process_sample(1, dry_sig));
+            let eq_l = air_eq.process_sample(0, woody_resonator.process_sample(0, dry_l));
+            let eq_r = air_eq.process_sample(1, woody_resonator.process_sample(1, dry_r));
 
             let del_l = delay_buf_l[d_idx_l];
             let del_r = delay_buf_r[d_idx_r];
@@ -939,17 +917,55 @@ impl ReferenceRlSynthesizer {
             || lower_prompt.contains("fretless")
             || lower_prompt.contains("wurlitzer");
 
-        let duration_secs = 56.0f32;
         let (root_hz, is_minor) = Self::parse_key_root_and_mode(&key_signature);
         let chords = Self::build_8bar_chord_progression(root_hz, is_minor);
+        let beat_sec = 60.0 / (bpm as f32);
 
-        // 16-beat Bridge/Solo spotlight window: Beats 48..64 (after Verse 1, Chorus, and Verse 2!)
-        let solo_beat_window = (48.0f32, 64.0f32);
+        // 1. Synthesize clear, upfront contralto/raspy acoustic tenor lead + dual harmony vocals FIRST
+        //    with NO mid-word solo interruption and NO wrap-around repetition!
+        let max_vocal_canvas_secs = 80.0f32;
+        let vocal_synth = MelodicSingingSynthesizer::new(SAMPLE_RATE);
+        let raw_vocals = vocal_synth.synthesize_reference_conditioned_vocal_track(
+            max_vocal_canvas_secs,
+            bpm as f32,
+            root_hz * 2.0,
+            is_minor,
+            &sung_lyrics,
+            melodic_seed,
+            true,
+            None,
+        );
 
-        // 1. Synthesize all instrumental stems conditioned on the prompt, reference ensemble & RL action
-        let acoustic_guitar =
+        // Find the exact frame where the vocalist finishes the final lyric of [Outro]
+        let mut last_vocal_frame = (36.0 * SAMPLE_RATE as f32) as usize;
+        for f in (0..raw_vocals.frame_count()).rev() {
+            let amp = raw_vocals.samples[f * 2]
+                .abs()
+                .max(raw_vocals.samples[f * 2 + 1].abs());
+            if amp > 0.025 {
+                last_vocal_frame = f;
+                break;
+            }
+        }
+        let last_vocal_sec = (last_vocal_frame as f32 / SAMPLE_RATE as f32).clamp(28.0, 62.0);
+        let last_vocal_beat = last_vocal_sec / beat_sec;
+
+        // After the vocalist finishes the final word, launch the 16-beat woody acoustic slide guitar solo
+        // followed by a 6-beat resolving tonic chord ring-out and smooth 3.5s studio fade-out!
+        let solo_start_beat = last_vocal_beat;
+        let solo_end_beat = solo_start_beat + 16.0;
+        let solo_beat_window = (solo_start_beat, solo_end_beat);
+        let duration_secs = ((solo_end_beat + 6.0) * beat_sec).clamp(48.0, 76.0);
+        let frames = (duration_secs * SAMPLE_RATE as f32).round() as usize;
+
+        let mut vocals = AudioBuffer::new(SAMPLE_RATE, 2, duration_secs);
+        let copy_frames = frames.min(raw_vocals.frame_count());
+        vocals.samples[..copy_frames * 2].copy_from_slice(&raw_vocals.samples[..copy_frames * 2]);
+
+        // 2. Synthesize all instrumental stems conditioned on the prompt, reference ensemble & RL action
+        let mut acoustic_guitar =
             Self::synthesize_warm_acoustic_guitar_stem(duration_secs, bpm as f32, &chords, melodic_seed);
-        let lead_guitar_solo = Self::synthesize_lead_or_slide_guitar_solo_stem(
+        let mut lead_guitar_solo = Self::synthesize_lead_or_slide_guitar_solo_stem(
             duration_secs,
             bpm as f32,
             root_hz,
@@ -959,57 +975,79 @@ impl ReferenceRlSynthesizer {
             melodic_seed,
             solo_beat_window,
         );
-        let (drums, percussion_fills) = Self::synthesize_acoustic_roots_drums(
+        let (mut drums, mut percussion_fills) = Self::synthesize_acoustic_roots_drums(
             duration_secs,
             bpm as f32,
             drum_punch,
             is_1988_folk_soul,
             melodic_seed,
         );
-        let bass = Self::synthesize_fretless_roots_bass_stem(
+        let mut bass = Self::synthesize_fretless_roots_bass_stem(
             duration_secs,
             bpm as f32,
             &chords,
             bass_warmth_db,
         );
-        let keys_organ = Self::synthesize_wurlitzer_b3_and_pedal_steel_stem(
+        let mut keys_organ = Self::synthesize_wurlitzer_b3_and_pedal_steel_stem(
             duration_secs,
             bpm as f32,
             &chords,
         );
 
-        // 2. Synthesize clear, upfront contralto/raspy acoustic tenor lead + dual harmony vocals
-        let vocal_synth = MelodicSingingSynthesizer::new(SAMPLE_RATE);
-        let vocals = vocal_synth.synthesize_reference_conditioned_vocal_track(
-            duration_secs,
-            bpm as f32,
-            root_hz * 2.0,
-            is_minor,
-            &sung_lyrics,
-            melodic_seed,
-            true,
-            Some(solo_beat_window),
-        );
+        // Apply clean studio ending resolution over the final 3.5 seconds of all stems
+        // (drums taper first so the acoustic guitar, fretless bass & Wurlitzer chord rings out and fades to 0.0!)
+        let fade_out_secs = 3.5f32;
+        let fade_start_sec = (duration_secs - fade_out_secs).max(10.0);
+        for i in 0..frames {
+            let t = i as f32 / (SAMPLE_RATE as f32);
+            if t >= fade_start_sec {
+                let progress = ((t - fade_start_sec) / fade_out_secs).clamp(0.0, 1.0);
+                // Smooth raised-cosine studio fade-out reaching 0.0000 for the last 0.25s
+                let chord_fade = if progress >= 0.93 {
+                    0.0
+                } else {
+                    0.5 * (1.0 + (progress / 0.93 * PI).cos())
+                };
+                // Drums finish 1.2s earlier so the final acoustic chord rings out purely
+                let drum_fade = if progress >= 0.60 {
+                    0.0
+                } else {
+                    0.5 * (1.0 + (progress / 0.60 * PI).cos())
+                };
+                acoustic_guitar.samples[i * 2] *= chord_fade;
+                acoustic_guitar.samples[i * 2 + 1] *= chord_fade;
+                lead_guitar_solo.samples[i * 2] *= chord_fade;
+                lead_guitar_solo.samples[i * 2 + 1] *= chord_fade;
+                bass.samples[i * 2] *= chord_fade;
+                bass.samples[i * 2 + 1] *= chord_fade;
+                keys_organ.samples[i * 2] *= chord_fade;
+                keys_organ.samples[i * 2 + 1] *= chord_fade;
+                drums.samples[i * 2] *= drum_fade;
+                drums.samples[i * 2 + 1] *= drum_fade;
+                percussion_fills.samples[i * 2] *= drum_fade;
+                percussion_fills.samples[i * 2 + 1] *= drum_fade;
+                vocals.samples[i * 2] *= chord_fade;
+                vocals.samples[i * 2 + 1] *= chord_fade;
+            }
+        }
 
         // 3. Build Draft Groove stem (acoustic guitar + drums + fretless bass foundation)
-        let frames = vocals.frame_count();
         let mut draft_groove = AudioBuffer::new(SAMPLE_RATE, 2, duration_secs);
         for i in 0..frames {
-            draft_groove.samples[i * 2] = (acoustic_guitar.samples[i * 2] * 0.45
-                + drums.samples[i * 2] * 0.50
-                + bass.samples[i * 2] * 0.48)
-                .clamp(-0.92, 0.92);
-            draft_groove.samples[i * 2 + 1] = (acoustic_guitar.samples[i * 2 + 1] * 0.45
-                + drums.samples[i * 2 + 1] * 0.50
-                + bass.samples[i * 2 + 1] * 0.48)
-                .clamp(-0.92, 0.92);
+            draft_groove.samples[i * 2] = (acoustic_guitar.samples[i * 2] * 0.55
+                + drums.samples[i * 2] * 0.55
+                + bass.samples[i * 2] * 0.52)
+                .clamp(-0.95, 0.95);
+            draft_groove.samples[i * 2 + 1] = (acoustic_guitar.samples[i * 2 + 1] * 0.55
+                + drums.samples[i * 2 + 1] * 0.55
+                + bass.samples[i * 2 + 1] * 0.52)
+                .clamp(-0.95, 0.95);
         }
 
         // 4. 1988 LA Studer A800 Analog Master Mix with Vocal-Priority Compression & Acoustic Front-Presence
         let mut raw_master = AudioBuffer::new(SAMPLE_RATE, 2, duration_secs);
-        let vocal_boost = 10.0f32.powf((vocal_gain_db.clamp(-1.5, 4.5) + 1.8) / 20.0);
-        let max_duck_atten = 10.0f32.powf(ducking_db.clamp(-5.0, -1.8) / 20.0);
-        let beat_sec = 60.0 / (bpm as f32);
+        let vocal_boost = 10.0f32.powf((vocal_gain_db.clamp(-1.0, 4.5) + 2.4) / 20.0);
+        let max_duck_atten = 10.0f32.powf(ducking_db.clamp(-5.5, -2.2) / 20.0);
         let mut v_env = 0.0f32;
 
         for i in 0..frames {
@@ -1021,44 +1059,82 @@ impl ReferenceRlSynthesizer {
             let vr = vocals.samples[i * 2 + 1] * vocal_boost;
             let v_mag = vl.abs().max(vr.abs());
             if v_mag > v_env {
-                v_env = 0.990 * v_env + 0.010 * v_mag;
+                v_env = 0.985 * v_env + 0.015 * v_mag;
             } else {
-                v_env = 0.9992 * v_env + 0.0008 * v_mag;
+                v_env = 0.9990 * v_env + 0.0010 * v_mag;
             }
 
             // Vocal-priority sidechain compression so storytelling vocals & acoustic strings sit right up front
-            let inst_duck = if v_env > 0.04 {
-                1.0 - ((v_env / 0.35).min(1.0) * (1.0 - max_duck_atten))
+            let inst_duck = if v_env > 0.025 {
+                (1.0 - ((v_env / 0.28).min(1.0) * (1.0 - max_duck_atten))).clamp(0.42, 1.0)
             } else {
                 1.0
             };
 
             // Keep fingerpicked steel-string acoustic guitar prominent right alongside the vocals
-            let ac_l = acoustic_guitar.samples[i * 2] * 0.48 * (0.85 + 0.15 * inst_duck);
-            let ac_r = acoustic_guitar.samples[i * 2 + 1] * 0.48 * (0.85 + 0.15 * inst_duck);
+            let ac_l = acoustic_guitar.samples[i * 2] * 0.54 * (0.82 + 0.18 * inst_duck);
+            let ac_r = acoustic_guitar.samples[i * 2 + 1] * 0.54 * (0.82 + 0.18 * inst_duck);
 
-            let solo_gain = if in_solo { 0.72 } else { 0.32 * inst_duck };
+            let solo_gain = if in_solo { 0.88 } else { 0.28 * inst_duck };
             let sl_l = lead_guitar_solo.samples[i * 2] * solo_gain;
             let sl_r = lead_guitar_solo.samples[i * 2 + 1] * solo_gain;
 
-            let dr_l = drums.samples[i * 2] * 0.36 * inst_duck;
-            let dr_r = drums.samples[i * 2 + 1] * 0.36 * inst_duck;
+            let dr_l = drums.samples[i * 2] * 0.42 * inst_duck;
+            let dr_r = drums.samples[i * 2 + 1] * 0.42 * inst_duck;
 
-            let ba_l = bass.samples[i * 2] * 0.38 * inst_duck;
-            let ba_r = bass.samples[i * 2 + 1] * 0.38 * inst_duck;
+            let ba_l = bass.samples[i * 2] * 0.44 * inst_duck;
+            let ba_r = bass.samples[i * 2 + 1] * 0.44 * inst_duck;
 
             // Whisper-quiet Hammond B3 + delicate Wurlitzer & pedal steel tucked gently in the mix
-            let or_l = keys_organ.samples[i * 2] * 0.18 * inst_duck;
-            let or_r = keys_organ.samples[i * 2 + 1] * 0.18 * inst_duck;
+            let or_l = keys_organ.samples[i * 2] * 0.22 * inst_duck;
+            let or_r = keys_organ.samples[i * 2 + 1] * 0.22 * inst_duck;
 
-            let mix_l = vl * 0.65 + ac_l + sl_l + dr_l + ba_l + or_l;
-            let mix_r = vr * 0.65 + ac_r + sl_r + dr_r + ba_r + or_r;
+            let mix_l = vl * 0.95 + ac_l + sl_l + dr_l + ba_l + or_l;
+            let mix_r = vr * 0.95 + ac_r + sl_r + dr_r + ba_r + or_r;
 
-            raw_master.samples[i * 2] = mix_l.tanh() * 0.92;
-            raw_master.samples[i * 2 + 1] = mix_r.tanh() * 0.92;
+            raw_master.samples[i * 2] = mix_l.tanh() * 0.95;
+            raw_master.samples[i * 2 + 1] = mix_r.tanh() * 0.95;
         }
 
-        let final_master = apply_analog_mastering(&raw_master, MasteringProfile::StuderA800Tape1970s);
+        let mut final_master = apply_analog_mastering(&raw_master, MasteringProfile::StuderA800Tape1970s);
+
+        // 5. Broadcast Loudness Make-Up Gain & True-Peak Limiter (-9.8 dBFS RMS, -0.25 dBFS Ceiling)
+        //    plus guaranteed studio fade-out to 0.0000 silence at the end of the track!
+        let active_end_frame = ((fade_start_sec * SAMPLE_RATE as f32) as usize).min(frames);
+        let mut active_sum_sq = 0.0f64;
+        let active_samples = (active_end_frame * 2).max(1);
+        for &s in &final_master.samples[..active_samples] {
+            active_sum_sq += (s as f64) * (s as f64);
+        }
+        let active_rms = (active_sum_sq / active_samples as f64).sqrt() as f32;
+        let makeup_gain = (0.32 / active_rms.max(0.05)).clamp(1.15, 2.8);
+
+        for i in 0..frames {
+            let t = i as f32 / (SAMPLE_RATE as f32);
+            let end_env = if t >= fade_start_sec {
+                let progress = ((t - fade_start_sec) / fade_out_secs).clamp(0.0, 1.0);
+                if progress >= 0.93 {
+                    0.0
+                } else {
+                    0.5 * (1.0 + (progress / 0.93 * PI).cos())
+                }
+            } else {
+                1.0
+            };
+
+            for ch in 0..2 {
+                let x = final_master.samples[i * 2 + ch] * makeup_gain * end_env;
+                // Smooth analog soft-knee true-peak ceiling at 0.965 (-0.3 dBFS)
+                let abs_x = x.abs();
+                let limited = if abs_x <= 0.76 {
+                    x
+                } else {
+                    let excess = (abs_x - 0.76) / 0.205;
+                    (0.76 + 0.205 * excess.tanh()).copysign(x)
+                };
+                final_master.samples[i * 2 + ch] = limited.clamp(-0.966, 0.966);
+            }
+        }
 
         ReferenceRlSongOutput {
             title,

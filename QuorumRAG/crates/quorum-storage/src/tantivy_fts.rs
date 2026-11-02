@@ -313,7 +313,9 @@ impl TantivyFtsIndex {
             return Ok(Vec::new());
         }
 
+        tracing::info!(query = %trimmed, "TantivyFtsIndex::search start");
         self.reload_with_retry(SyncCheck::None)?;
+        tracing::info!("TantivyFtsIndex::search reload_with_retry done");
         let searcher = self.reader.searcher();
         if searcher.num_docs() == 0 {
             return Ok(Vec::new());
