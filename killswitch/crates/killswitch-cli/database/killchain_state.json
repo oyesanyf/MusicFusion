@@ -18,91 +18,83 @@
     "tarpitted_pids": [],
     "active_network_rules": [],
     "quarantined_arms": {},
-    "last_action_timestamp": "2026-11-02T21:16:55.103372400Z",
+    "last_action_timestamp": "2026-11-02T22:16:14.551959300Z",
     "lockout_remaining_secs": 0,
     "rollback_watchdog_max_secs": 1800,
     "health_probe_interval_secs": 60,
     "consecutive_healthy_probes_required": 3,
     "consecutive_healthy_probes": 0,
-    "last_health_probe_timestamp": "2026-11-02T21:16:55.103372400Z",
+    "last_health_probe_timestamp": "2026-11-02T22:16:14.551959300Z",
     "last_health_probe_passed": true,
     "last_health_probe_summary": "Host disarmed unconditionally on service stop/shutdown signal",
-    "state_hash_blake3": "340982d52ce9b908969563e4ac060914f4bafec25febe72385d99ac5df3134b0"
+    "state_hash_blake3": "883d0a9f5ff16bfd42ade21a83a0566ea9ca0eafa58ca4a40441271a7f428a60"
   },
   "network_receipts": [],
   "process_records": [],
   "history": [
     {
-      "timestamp": "2026-11-02T21:16:55.103395200+00:00",
+      "timestamp": "2026-11-02T22:16:14.551980300+00:00",
       "action": "DISARMED_UNCONDITIONAL",
       "operator": "SYSTEM_SHUTDOWN",
       "reason": "Automatic host disarm on service stop/shutdown signal",
-      "prev_event_hash": "9a0f6055789cc471f0824e38249c19910b62f94f25db65bfe546d599684a8925",
-      "event_hash": "015cdcf66e8ba2c5cfb6d4c0fe785108dcab8a2eff16ddd154574572577ef852"
+      "prev_event_hash": "be0c3b76b982b550157d1d44d9bd534281d07d5fb8cf0fdc490079470e9cd04d",
+      "event_hash": "8a10c7a0204a5a77d8336869992f6b8007c343e9a38388c89e3be40ea0b98d1e"
     },
     {
-      "timestamp": "2026-11-02T21:16:53.404532400+00:00",
+      "timestamp": "2026-11-02T22:16:12.955886400+00:00",
       "action": "DISARMED_UNCONDITIONAL",
       "operator": "SYSTEM_SHUTDOWN",
       "reason": "Automatic host disarm on service stop/shutdown signal",
-      "prev_event_hash": "d7b942e14dba47a9fa45ce3ce46cf4ca7e4ec83d5611ae39428c92d5df0713fe",
-      "event_hash": "9a0f6055789cc471f0824e38249c19910b62f94f25db65bfe546d599684a8925"
+      "prev_event_hash": "b32555703b3a4fc13ac09783da08489dab533cca0c96e09454de0944f33e0e17",
+      "event_hash": "be0c3b76b982b550157d1d44d9bd534281d07d5fb8cf0fdc490079470e9cd04d"
     },
     {
-      "timestamp": "2026-11-02T21:16:45.812823700+00:00",
+      "timestamp": "2026-11-02T22:16:05.416987900+00:00",
       "action": "DISARMED_UNCONDITIONAL",
       "operator": "SYSTEM_SHUTDOWN",
       "reason": "Automatic host disarm on service stop/shutdown signal",
-      "prev_event_hash": "d4519824370a8981d91ccf2d548a37803053379e0e0177c18a6dcca57c874418",
-      "event_hash": "d7b942e14dba47a9fa45ce3ce46cf4ca7e4ec83d5611ae39428c92d5df0713fe"
+      "prev_event_hash": "e41a5292b3abb85e184598f8c2ff4d0c0ac146aebe466eb1f6311a5fd9ad16f8",
+      "event_hash": "b32555703b3a4fc13ac09783da08489dab533cca0c96e09454de0944f33e0e17"
     },
     {
-      "timestamp": "2026-11-02T21:16:41.683316500+00:00",
+      "timestamp": "2026-11-02T22:16:01.257076800+00:00",
       "action": "DISARMED_UNCONDITIONAL",
       "operator": "SYSTEM_SHUTDOWN",
       "reason": "Automatic host disarm on service stop/shutdown signal",
-      "prev_event_hash": "cb7624c1db798e3ebba3bbd97dcc8d3708eb592f0cf944c2801991e7ddff5933",
-      "event_hash": "d4519824370a8981d91ccf2d548a37803053379e0e0177c18a6dcca57c874418"
+      "prev_event_hash": "b40862c39d28e61c3e56b0bf66c4cf5bb8405d5b9b8c58413cfe0103acf8a6d1",
+      "event_hash": "e41a5292b3abb85e184598f8c2ff4d0c0ac146aebe466eb1f6311a5fd9ad16f8"
     },
     {
-      "timestamp": "2026-11-02T20:57:49.652957+00:00",
+      "timestamp": "2026-11-02T22:01:35.892605100+00:00",
       "action": "DISARMED_UNCONDITIONAL",
       "operator": "SYSTEM_SHUTDOWN",
       "reason": "Automatic host disarm on service stop/shutdown signal",
-      "prev_event_hash": "ad13cca304ea5e7f4e273a08aba0ca36305adff579771d3977acb71574ea7474",
-      "event_hash": "cb7624c1db798e3ebba3bbd97dcc8d3708eb592f0cf944c2801991e7ddff5933"
+      "prev_event_hash": "87d31b1916f911c165d9353cb18efea0c37e8aa278002f868fb1fc651763aaaa",
+      "event_hash": "b40862c39d28e61c3e56b0bf66c4cf5bb8405d5b9b8c58413cfe0103acf8a6d1"
     },
     {
-      "timestamp": "2026-11-02T18:29:10.966920+00:00",
+      "timestamp": "2026-11-02T22:01:34.214988500+00:00",
       "action": "DISARMED_UNCONDITIONAL",
       "operator": "SYSTEM_SHUTDOWN",
       "reason": "Automatic host disarm on service stop/shutdown signal",
-      "prev_event_hash": "dcfafc3878842824f1b1afdb4225950d2cf49e8cce587e066d6a674c4d4e7dfd",
-      "event_hash": "ad13cca304ea5e7f4e273a08aba0ca36305adff579771d3977acb71574ea7474"
+      "prev_event_hash": "bc1e6db29ad6390587102d60bb9c772955a2e05e0e023386e73cdd254fa73424",
+      "event_hash": "87d31b1916f911c165d9353cb18efea0c37e8aa278002f868fb1fc651763aaaa"
     },
     {
-      "timestamp": "2026-11-02T18:29:09.363603700+00:00",
+      "timestamp": "2026-11-02T22:01:26.746587100+00:00",
       "action": "DISARMED_UNCONDITIONAL",
       "operator": "SYSTEM_SHUTDOWN",
       "reason": "Automatic host disarm on service stop/shutdown signal",
-      "prev_event_hash": "240f761acd044d638a40d79e4f5b3c2da0074ee310f415dd2e5f4ac17608a510",
-      "event_hash": "dcfafc3878842824f1b1afdb4225950d2cf49e8cce587e066d6a674c4d4e7dfd"
+      "prev_event_hash": "60851055686ef646216935a0a6f4e05d028fd60f132c3da54b029dc50ef44e04",
+      "event_hash": "bc1e6db29ad6390587102d60bb9c772955a2e05e0e023386e73cdd254fa73424"
     },
     {
-      "timestamp": "2026-11-02T18:29:01.735642600+00:00",
-      "action": "DISARMED_UNCONDITIONAL",
-      "operator": "SYSTEM_SHUTDOWN",
-      "reason": "Automatic host disarm on service stop/shutdown signal",
-      "prev_event_hash": "edc4753965a63ea7977bb9dbef993ab6397972439a601cff4d67fd0d0e64e146",
-      "event_hash": "240f761acd044d638a40d79e4f5b3c2da0074ee310f415dd2e5f4ac17608a510"
-    },
-    {
-      "timestamp": "2026-11-02T18:28:57.540259200+00:00",
+      "timestamp": "2026-11-02T22:01:22.465800400+00:00",
       "action": "DISARMED_UNCONDITIONAL",
       "operator": "SYSTEM_SHUTDOWN",
       "reason": "Automatic host disarm on service stop/shutdown signal",
       "prev_event_hash": "86744e4299ddad97f27ca1f0f63a700ce88d0f5c096b9199479abd3547b35fbe",
-      "event_hash": "edc4753965a63ea7977bb9dbef993ab6397972439a601cff4d67fd0d0e64e146"
+      "event_hash": "60851055686ef646216935a0a6f4e05d028fd60f132c3da54b029dc50ef44e04"
     },
     {
       "timestamp": "2026-11-02T06:07:33.131372100+00:00",
@@ -729,8 +721,8 @@
       "event_hash": "475ba7d02d9104b1bef7bf04ee4add9b77eb12f67241da6c40aa660e61d8e1d3"
     }
   ],
-  "sequence_number": 87,
-  "prev_hash": "3a69edf0c34b92edc5c4e25e127fb5894dd1419be4e68af506ddb6c9d24df2e3",
-  "current_hash": "e64df94a15159d453e2fbb72016742f37a7163d222fc55847febe4738e5f972d",
-  "committed_at": "2026-11-02T21:16:55.103411200Z"
+  "sequence_number": 86,
+  "prev_hash": "60adf83a6484f42f1873eadce2389bfdd6069894ce85921e6277dd8562a2d1ff",
+  "current_hash": "2c9d19b4f6acd5c5205527b2763087a058c7fa10464028b18bfe530dbf01f7fc",
+  "committed_at": "2026-11-02T22:16:14.552001400Z"
 }
