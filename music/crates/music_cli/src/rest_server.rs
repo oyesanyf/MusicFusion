@@ -1664,6 +1664,22 @@ pub async fn bind_server(start_port: u16, end_port: u16) -> anyhow::Result<(toki
     bind_server_on_host("127.0.0.1", start_port, end_port).await
 }
 
+/// Checks whether `port` is completely free across loopback, all-interfaces TCP (`0.0.0.0`),
+/// and UDP (`0.0.0.0`) so we never collide with another service on `127.0.0.1`, `10.0.0.3`, or `0.0.0.0`.
+fn is_port_free_across_interfaces(host: &str, port: u16) -> bool {
+    let loopback = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    if std::net::TcpStream::connect_timeout(&loopback, std::time::Duration::from_millis(40)).is_ok() {
+        return false;
+    }
+    if std::net::TcpListener::bind(("0.0.0.0", port)).is_err() {
+        return false;
+    }
+    if std::net::UdpSocket::bind(("0.0.0.0", port)).is_err() {
+        return false;
+    }
+    std::net::TcpListener::bind((host, port)).is_ok()
+}
+
 /// Resilient port binding loop on explicit host.
 pub async fn bind_server_on_host(host: &str, start_port: u16, end_port: u16) -> anyhow::Result<(tokio::net::TcpListener, u16)> {
     if start_port == 0 {
@@ -1673,11 +1689,35 @@ pub async fn bind_server_on_host(host: &str, start_port: u16, end_port: u16) -> 
         return Ok((listener, bound_port));
     }
 
-    for port in start_port..=end_port {
+    let effective_end = if end_port < start_port {
+        start_port.saturating_add(20)
+    } else if end_port == start_port {
+        start_port.saturating_add(20)
+    } else {
+        end_port
+    };
+
+    for port in start_port..=effective_end {
+        if !is_port_free_across_interfaces(host, port) {
+            log::warn!(
+                "Port {} is already in use by another service on this machine; trying next port {}...",
+                port,
+                port.saturating_add(1)
+            );
+            continue;
+        }
         let addr = format!("{}:{}", host, port);
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
-                log::info!("Successfully bound Tokio HTTP server on http://{}", addr);
+                if port != start_port {
+                    log::info!(
+                        "Port {} was in use; automatically bound Tokio HTTP server to next free port http://{}",
+                        start_port,
+                        addr
+                    );
+                } else {
+                    log::info!("Successfully bound Tokio HTTP server on http://{}", addr);
+                }
                 return Ok((listener, port));
             }
             Err(e) => {
@@ -1685,7 +1725,7 @@ pub async fn bind_server_on_host(host: &str, start_port: u16, end_port: u16) -> 
             }
         }
     }
-    anyhow::bail!("Failed to bind any port in range {}..={} on {}", start_port, end_port, host)
+    anyhow::bail!("Failed to bind any port in range {}..={} on {}", start_port, effective_end, host)
 }
 
 /// Dynamic server binder: scans `start_port..=end_port` and falls back to OS-assigned ephemeral port

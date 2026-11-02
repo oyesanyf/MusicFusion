@@ -161,7 +161,18 @@ async fn main() -> anyhow::Result<()> {
         args.ollama_host.clone(),
     ).await?;
 
-    let url = format!("http://{}:{}/", args.host, bound_port);
+    let browser_host = if args.host == "0.0.0.0" || args.host == "::" {
+        "127.0.0.1"
+    } else {
+        args.host.as_str()
+    };
+    let url = format!("http://{}:{}/", browser_host, bound_port);
+    if bound_port != args.port {
+        println!(
+            "⚠️  Port {} was in use — automatically switched to free port {}",
+            args.port, bound_port
+        );
+    }
     println!("🌐 Web Studio server running at {}", url);
     println!("🎵 Press Ctrl+C to terminate server.");
 
