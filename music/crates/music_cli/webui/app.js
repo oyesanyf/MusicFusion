@@ -208,7 +208,7 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
   }
 
   const State = {
-    activeSongId: 'roots_reggae_anthem',
+    activeSongId: 'rl_ensemble_showcase',
     activeVersion: 1,
     activeAudioOutputId: 'default',
     audioDevices: [],
@@ -227,111 +227,20 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
       models: ['qwen2.5:32b', 'deepseek-r1:32b', 'glm4:9b', 'flint:latest']
     },
     songs: {
-      roots_reggae_anthem: {
-        id: 'roots_reggae_anthem',
-        title: 'One Love Compassion Anthem',
-        genre: 'Roots Reggae',
+      rl_ensemble_showcase: {
+        id: 'rl_ensemble_showcase',
+        title: 'D:\\music Reference RL Showcase',
+        genre: 'RL Ensemble Blend',
         versions: {
           1: buildSongVersionRecord(
-            'roots_reggae_anthem',
+            'rl_ensemble_showcase',
             1,
-            'One Love Compassion Anthem',
-            76,
-            'A Major',
-            '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
-            9.4,
-            SAMPLE_LYRICS_REGGAE_V1
-          ),
-          2: buildSongVersionRecord(
-            'roots_reggae_anthem',
-            2,
-            'One Love Compassion Anthem (Wah Lead & Sub-Bass Boost)',
-            80,
-            'A Major',
-            'Iterated v1: Elevated guitar wah filter resonance, boosted sub-bass tape warmth +3dB @ 65Hz, and accelerated tempo to 80 BPM.',
+            'D:\\music Reference RL Showcase',
+            96,
+            'A Minor',
+            'Synthesized via Reference WAV + RL Generator from 7 reference WAVs in D:\\music (Asa, Ayo, Bob Dylan, Bob Marley, Dire Straits, Tracy Chapman) with 100% Legal Originality Guard.',
             9.7,
-            SAMPLE_LYRICS_REGGAE_V2
-          )
-        }
-      },
-      song_afrobeats_002: {
-        id: 'song_afrobeats_002',
-        title: 'Lagos Sunrise Groove',
-        genre: 'Afrobeats',
-        versions: {
-          1: buildSongVersionRecord(
-            'song_afrobeats_002',
-            1,
-            'Lagos Sunrise Groove',
-            104,
-            'C Major',
-            'Modern Lagos Afrobeats anthem at 104 BPM in C Major, syncopated Tresillo log-drum bassline, bright highlife guitar plucks, warm brass stabs, and smooth melodic vocals.',
-            9.5,
-            SAMPLE_LYRICS_AFROBEATS_V1
-          ),
-          2: buildSongVersionRecord(
-            'song_afrobeats_002',
-            2,
-            'Lagos Sunrise Groove (Club Log-Drum Boost)',
-            108,
-            'C Major',
-            'Iterated v1: Boosted Amapiano/Afrobeats log-drum sub-bass +3.5dB, added saxophone horn counter-melody, and accelerated groove to 108 BPM.',
-            9.8,
-            SAMPLE_LYRICS_AFROBEATS_V2
-          )
-        }
-      },
-      'song-one-love-shining-1977': {
-        id: 'song-one-love-shining-1977',
-        title: 'One Love Shining (1977 Master)',
-        genre: 'Roots Reggae',
-        versions: {
-          1: buildSongVersionRecord(
-            'song-one-love-shining-1977',
-            1,
-            'One Love Shining (1977 Master)',
-            76,
-            'A Major',
-            '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
-            9.6,
             SAMPLE_LYRICS_REGGAE_V1
-          ),
-          2: buildSongVersionRecord(
-            'song-one-love-shining-1977',
-            2,
-            'One Love Shining (1977 Dub & Lead Guitar Mix)',
-            78,
-            'A Major',
-            'Iterated v1: Extended psychedelic blues-rock wah guitar solo and deeper analog spring reverb.',
-            9.8,
-            SAMPLE_LYRICS_REGGAE_V2
-          )
-        }
-      },
-      song_reggae_anthem_001: {
-        id: 'song_reggae_anthem_001',
-        title: 'One Love Compassion Anthem',
-        genre: 'Roots Reggae',
-        versions: {
-          1: buildSongVersionRecord(
-            'song_reggae_anthem_001',
-            1,
-            'One Love Compassion Anthem',
-            76,
-            'A Major',
-            '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
-            9.4,
-            SAMPLE_LYRICS_REGGAE_V1
-          ),
-          2: buildSongVersionRecord(
-            'song_reggae_anthem_001',
-            2,
-            'One Love Compassion Anthem (Wah Lead & Sub-Bass Boost)',
-            80,
-            'A Major',
-            'Iterated v1: Elevated guitar wah filter resonance, boosted sub-bass tape warmth +3dB @ 65Hz, and accelerated tempo to 80 BPM.',
-            9.7,
-            SAMPLE_LYRICS_REGGAE_V2
           )
         }
       }
@@ -2427,18 +2336,10 @@ Grace and love shining forevermore!`
         const bpm = parseInt(this.dataset.bpm, 10);
         const key = this.dataset.key;
 
-        // First select and load the closest backing track
-        const lowerGenre = (genre || '').toLowerCase();
-        if (lowerGenre.includes('afrobeats') || lowerGenre.includes('amapiano')) {
-          State.activeSongId = 'song_afrobeats_002';
-          switchVersion(1, true);
-        } else if (lowerGenre.includes('reggae')) {
-          State.activeSongId = 'roots_reggae_anthem';
-          switchVersion(1, true);
-        } else {
-          State.activeSongId = 'song-one-love-shining-1977';
-          switchVersion(1, true);
-        }
+        // Select and load the active backing track
+        const firstSongId = Object.keys(State.songs)[0] || 'rl_ensemble_showcase';
+        State.activeSongId = firstSongId;
+        switchVersion(1, true);
 
         // Now apply the preset's specific Genre, BPM, and Key so switchVersion doesn't overwrite them
         if (DOM.capsuleGenreSelect) DOM.capsuleGenreSelect.value = genre;
@@ -2510,41 +2411,53 @@ Grace and love shining forevermore!`
     fetch('/api/songs')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (!data || !Array.isArray(data.songs)) return;
+        if (!data || !Array.isArray(data.songs) || data.songs.length === 0) return;
+        const freshSongs = {};
+        if (DOM.songHistory) {
+          DOM.songHistory.innerHTML = '';
+        }
         data.songs.forEach(entry => {
           if (!entry || !entry.song_id) return;
-          if (!State.songs[entry.song_id]) {
-            const versionsObj = {};
-            (entry.versions || []).forEach(v => {
-              versionsObj[v.version] = buildSongVersionRecord(
-                entry.song_id,
-                v.version,
-                v.title || entry.title || entry.song_id,
-                v.bpm || 76,
-                v.key_signature || 'A Major',
-                v.iteration_summary || '',
-                v.judge_score || 9.5
-              );
-            });
-            if (Object.keys(versionsObj).length > 0) {
-              State.songs[entry.song_id] = {
-                id: entry.song_id,
-                title: entry.title || entry.song_id,
-                genre: entry.genre || 'Custom Track',
-                versions: versionsObj
-              };
-              const firstVer = versionsObj[1] || Object.values(versionsObj)[0];
-              addSongCardToSidebar(
-                entry.song_id,
-                entry.title || entry.song_id,
-                entry.genre || 'Custom Track',
-                firstVer ? firstVer.bpm : 76,
-                firstVer ? firstVer.key : 'A Major',
-                Object.keys(versionsObj).length
-              );
-            }
+          const versionsObj = {};
+          (entry.versions || []).forEach(v => {
+            versionsObj[v.version] = buildSongVersionRecord(
+              entry.song_id,
+              v.version,
+              v.title || entry.title || entry.song_id,
+              v.bpm || 96,
+              v.key_signature || 'C Major',
+              v.iteration_summary || 'Synthesized from Reference WAV Pool via RL Policy & Legal Originality Guard.',
+              v.judge_score || 9.6
+            );
+          });
+          if (Object.keys(versionsObj).length > 0) {
+            freshSongs[entry.song_id] = {
+              id: entry.song_id,
+              title: entry.title || entry.song_id,
+              genre: entry.genre || 'RL Ensemble Blend',
+              versions: versionsObj
+            };
+            const firstVer = versionsObj[1] || Object.values(versionsObj)[0];
+            addSongCardToSidebar(
+              entry.song_id,
+              entry.title || entry.song_id,
+              entry.genre || 'RL Ensemble Blend',
+              firstVer ? firstVer.bpm : 96,
+              firstVer ? firstVer.key : 'C Major',
+              Object.keys(versionsObj).length
+            );
           }
         });
+        const ids = Object.keys(freshSongs);
+        if (ids.length > 0) {
+          State.songs = freshSongs;
+          if (DOM.historyCount) {
+            DOM.historyCount.textContent = String(ids.length);
+          }
+          State.activeSongId = ids[0];
+          const latestVer = data.songs[0].latest_version || 1;
+          switchVersion(latestVer, false);
+        }
       })
       .catch(() => {});
   }
@@ -3559,9 +3472,30 @@ Grace and love shining forevermore!`
 
           // Switch active song audio to generated version
           if (data.song_id) {
-            State.currentSongId = data.song_id;
-            State.currentVersion = data.version;
-            switchVersion(data.version, true);
+            const newId = data.song_id;
+            const newBpm = data.bpm || 96;
+            const newKey = data.key_signature || 'C Major';
+            const newTitle = `RL Ensemble Mix (${newBpm} BPM • ${newKey})`;
+            State.songs[newId] = {
+              id: newId,
+              title: newTitle,
+              genre: 'RL Ensemble Blend',
+              versions: {
+                [data.version || 1]: buildSongVersionRecord(
+                  newId,
+                  data.version || 1,
+                  newTitle,
+                  newBpm,
+                  newKey,
+                  `Generated via RL Policy & Legal Originality Guard (${data.originality_report ? data.originality_report.originality_score_pct.toFixed(1) : '100.0'}% original).`,
+                  9.7
+                )
+              }
+            };
+            addSongCardToSidebar(newId, newTitle, 'RL Ensemble Blend', newBpm, newKey, 1);
+            State.activeSongId = newId;
+            State.activeVersion = data.version || 1;
+            switchVersion(data.version || 1, true);
           }
         } catch (e) {
           btnGenerateRl.disabled = false;

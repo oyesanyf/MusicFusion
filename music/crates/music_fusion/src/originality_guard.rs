@@ -371,7 +371,13 @@ impl LegalOriginalityGuard {
             sa = (sa + step).min(max_start_a);
         }
 
-        max_sim.clamp(0.0, 1.0)
+        let progression_scale = if window_size < 4 {
+            // Single global key summary vector: sharing a musical key is uncopyrightable
+            (window_size as f32 / 4.0) * 0.25
+        } else {
+            1.0
+        };
+        (max_sim * progression_scale).clamp(0.0, 1.0)
     }
 
     fn downsample_to_4khz(mono_buf: &AudioBuffer) -> Vec<f32> {

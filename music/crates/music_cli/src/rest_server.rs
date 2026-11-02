@@ -52,6 +52,66 @@ pub struct StoredReferenceWav {
     pub file_path: PathBuf,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct PersistedReferenceEntry {
+    pub meta: ReferenceWavMeta,
+    pub features: AcousticFeatureVector,
+    pub file_path: PathBuf,
+}
+
+fn load_persisted_reference_wavs(storage_dir: &Path) -> HashMap<String, StoredReferenceWav> {
+    let manifest_path = storage_dir.join("reference_wavs").join("manifest.json");
+    let mut map = HashMap::new();
+    if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
+        if let Ok(entries) = serde_json::from_str::<Vec<PersistedReferenceEntry>>(&raw) {
+            for entry in entries.into_iter().take(20) {
+                if entry.file_path.exists() {
+                    let excerpt_buf = std::fs::read(&entry.file_path)
+                        .ok()
+                        .and_then(|b| AudioBuffer::from_wav_bytes(&b).ok())
+                        .map(|b| {
+                            let max_frames = (b.sample_rate as usize) * 16;
+                            if b.frame_count() > (b.sample_rate as usize) * 20 {
+                                let start = (b.frame_count() * 15 / 100).min(b.frame_count().saturating_sub(max_frames));
+                                b.slice(start, max_frames)
+                            } else {
+                                b
+                            }
+                        })
+                        .unwrap_or_else(|| AudioBuffer::new_stereo(2.0));
+                    map.insert(
+                        entry.meta.id.clone(),
+                        StoredReferenceWav {
+                            meta: entry.meta,
+                            features: entry.features,
+                            audio_buffer: excerpt_buf,
+                            file_path: entry.file_path,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    map
+}
+
+fn save_persisted_reference_wavs(storage_dir: &Path, store: &HashMap<String, StoredReferenceWav>) {
+    let ref_dir = storage_dir.join("reference_wavs");
+    let _ = std::fs::create_dir_all(&ref_dir);
+    let mut entries: Vec<PersistedReferenceEntry> = store
+        .values()
+        .map(|it| PersistedReferenceEntry {
+            meta: it.meta.clone(),
+            features: it.features.clone(),
+            file_path: it.file_path.clone(),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.meta.uploaded_at.cmp(&b.meta.uploaded_at));
+    if let Ok(json) = serde_json::to_string_pretty(&entries) {
+        let _ = std::fs::write(ref_dir.join("manifest.json"), json);
+    }
+}
+
 // App state shared across all REST routes
 #[derive(Clone)]
 pub struct AppState {
@@ -71,12 +131,13 @@ impl AppState {
         bound_port: u16,
         ollama_host: String,
     ) -> Self {
+        let initial_refs = load_persisted_reference_wavs(&storage_dir);
         Self {
             runner,
             storage_dir,
             bound_port,
             ollama_host,
-            reference_wavs: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            reference_wavs: Arc::new(tokio::sync::RwLock::new(initial_refs)),
             rl_policy: Arc::new(tokio::sync::RwLock::new(RlPolicy::new(64, music_fusion::rl_policy::PolicyMode::Learned))),
             last_synthesis_action: Arc::new(tokio::sync::RwLock::new(None)),
         }
@@ -238,22 +299,28 @@ pub fn resolve_song_alias(storage_dir: &Path, clean_id: &str) -> String {
         || lower == "reggae_anthem"
         || lower == "roots_reggae_anthem"
         || lower == "song-one-love-shining-1977"
+        || lower == "song_afrobeats_002"
+        || lower == "afrobeats_hit"
     {
         for fallback in [
             "roots_reggae_anthem",
             "song-one-love-shining-1977",
             "song_reggae_anthem_001",
+            "song_afrobeats_002",
         ] {
             if storage_dir.join("songs").join(fallback).exists() {
                 return fallback.to_string();
             }
         }
-    }
-
-    if lower == "song_afrobeats_002" || lower == "afrobeats_hit" {
-        for fallback in ["song_afrobeats_002", "roots_reggae_anthem", "song-one-love-shining-1977"] {
-            if storage_dir.join("songs").join(fallback).exists() {
-                return fallback.to_string();
+        if let Ok(entries) = std::fs::read_dir(storage_dir.join("songs")) {
+            let mut dirs: Vec<String> = entries
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect();
+            dirs.sort();
+            if let Some(first) = dirs.into_iter().next() {
+                return first;
             }
         }
     }
@@ -1784,7 +1851,7 @@ pub async fn handle_upload_reference_wavs(
     let mut new_items = Vec::new();
 
     for (file_name, bytes) in incoming_files {
-        let mut buffer = match AudioBuffer::from_wav_bytes(&bytes) {
+        let raw_buffer = match AudioBuffer::from_wav_bytes(&bytes) {
             Ok(b) => b,
             Err(e) => {
                 return (
@@ -1796,6 +1863,16 @@ pub async fn handle_upload_reference_wavs(
             }
         };
 
+        let full_duration_secs = raw_buffer.duration_secs();
+        let max_excerpt_frames = (raw_buffer.sample_rate as usize) * 16;
+        let mut buffer = if raw_buffer.frame_count() > (raw_buffer.sample_rate as usize) * 20 {
+            let start = (raw_buffer.frame_count() * 15 / 100)
+                .min(raw_buffer.frame_count().saturating_sub(max_excerpt_frames));
+            raw_buffer.slice(start, max_excerpt_frames)
+        } else {
+            raw_buffer
+        };
+
         if buffer.sample_rate != 48000 {
             buffer = buffer.resample_linear(48000);
         }
@@ -1803,7 +1880,7 @@ pub async fn handle_upload_reference_wavs(
             buffer = buffer.to_stereo();
         }
 
-        let features = match AcousticAnalyzer::analyze_buffer(&file_name, &buffer) {
+        let mut features = match AcousticAnalyzer::analyze_buffer(&file_name, &buffer) {
             Ok(f) => f,
             Err(e) => {
                 return (
@@ -1814,10 +1891,17 @@ pub async fn handle_upload_reference_wavs(
                 ).into_response();
             }
         };
+        features.duration_secs = full_duration_secs;
+
         let id = format!("ref_{}_{}", uuid::Uuid::new_v4().simple(), sanitize_ref_name(&file_name));
         let file_path = ref_dir.join(format!("{}.wav", id));
 
-        let wav_data = buffer.to_wav_bytes();
+        let wav_data = if bytes.len() > 1_000_000 {
+            bytes
+        } else {
+            buffer.to_wav_bytes()
+        };
+        let file_size_bytes = wav_data.len() as u64;
         if let Err(e) = tokio::fs::write(&file_path, &wav_data).await {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1828,10 +1912,10 @@ pub async fn handle_upload_reference_wavs(
         let meta = ReferenceWavMeta {
             id: id.clone(),
             file_name: file_name.clone(),
-            duration_secs: buffer.duration_secs(),
+            duration_secs: full_duration_secs,
             sample_rate: buffer.sample_rate,
             channels: buffer.channels,
-            file_size_bytes: wav_data.len() as u64,
+            file_size_bytes,
             bpm: features.bpm,
             key_signature: features.key_signature.clone(),
             uploaded_at: chrono::Utc::now().to_rfc3339(),
@@ -1851,6 +1935,7 @@ pub async fn handle_upload_reference_wavs(
         for (id, item) in new_items {
             store.insert(id, item);
         }
+        save_persisted_reference_wavs(&state.storage_dir, &store);
     }
 
     let total_count = state.reference_wavs.read().await.len();
@@ -2070,15 +2155,19 @@ pub async fn handle_reference_wav_from_url(
         uploaded_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    state.reference_wavs.write().await.insert(
-        id.clone(),
-        StoredReferenceWav {
-            meta: meta.clone(),
-            features,
-            audio_buffer: buffer,
-            file_path: target_wav,
-        },
-    );
+    {
+        let mut store = state.reference_wavs.write().await;
+        store.insert(
+            id.clone(),
+            StoredReferenceWav {
+                meta: meta.clone(),
+                features,
+                audio_buffer: buffer,
+                file_path: target_wav,
+            },
+        );
+        save_persisted_reference_wavs(&state.storage_dir, &store);
+    }
 
     let total = state.reference_wavs.read().await.len();
     Json(serde_json::json!({
@@ -2114,7 +2203,12 @@ pub async fn handle_delete_reference_wav(
         ).into_response();
     }
 
-    let removed = state.reference_wavs.write().await.remove(&id);
+    let removed = {
+        let mut store = state.reference_wavs.write().await;
+        let r = store.remove(&id);
+        save_persisted_reference_wavs(&state.storage_dir, &store);
+        r
+    };
     if let Some(item) = removed {
         let _ = tokio::fs::remove_file(&item.file_path).await;
     }
@@ -2133,6 +2227,7 @@ pub async fn handle_clear_reference_wavs(State(state): State<AppState>) -> Respo
     for (_, item) in store.drain() {
         let _ = tokio::fs::remove_file(&item.file_path).await;
     }
+    save_persisted_reference_wavs(&state.storage_dir, &store);
 
     Json(serde_json::json!({
         "status": "ok",
@@ -2161,7 +2256,11 @@ pub async fn handle_stream_reference_wav(
         None => return StatusCode::NOT_FOUND.into_response(),
     };
 
-    let bytes = item.audio_buffer.to_wav_bytes();
+    let bytes = if item.file_path.exists() {
+        tokio::fs::read(&item.file_path).await.unwrap_or_else(|_| item.audio_buffer.to_wav_bytes())
+    } else {
+        item.audio_buffer.to_wav_bytes()
+    };
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "audio/wav")
@@ -2172,6 +2271,8 @@ pub async fn handle_stream_reference_wav(
 
 #[derive(Debug, Deserialize, Default)]
 pub struct GenerateRlRequest {
+    #[serde(default)]
+    pub song_id: Option<String>,
     #[serde(default)]
     pub prompt: Option<String>,
     #[serde(default)]
@@ -2206,7 +2307,12 @@ pub async fn handle_generate_rl(
         }
     };
 
-    let song_id = format!("rl_song_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let song_id = req
+        .song_id
+        .as_deref()
+        .and_then(|s| CheckpointManager::sanitize_path_component(s).ok())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("rl_song_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
     let genre_str = req.genre.as_deref().unwrap_or("Roots Reggae");
     let genre = GenreTaxonomy::get_or_default(genre_str);
     let bpm = blended.blended_bpm.round().clamp(50.0, 200.0) as u32;
@@ -2478,7 +2584,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/styles.css", get(handle_styles))
         .route("/app.js", get(handle_app_js))
         .layer(CorsLayer::permissive())
-        .layer(DefaultBodyLimit::max(128 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024 * 1024))
         .with_state(state)
 }
 

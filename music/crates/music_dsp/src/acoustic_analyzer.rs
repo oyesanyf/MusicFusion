@@ -47,11 +47,27 @@ impl AcousticAnalyzer {
         }
 
         // Downmix to mono for analysis
-        let mono_samples = buffer.to_mono().samples;
+        let full_mono = buffer.to_mono().samples;
+        if full_mono.len() < 1024 {
+            return Err(DspError::ParameterError(
+                "Audio buffer is too short for 1024-point FFT".to_string(),
+            ));
+        }
+
+        // For multi-minute reference tracks (> 20s), analyze a representative 16s musical window
+        // (starting 15% into the track to skip silent intros) so 70-100 MB WAVs analyze in < 100ms.
+        let max_window_samples = (sample_rate as usize) * 16;
+        let mono_samples: &[f32] = if full_mono.len() > (sample_rate as usize) * 20 {
+            let start = (full_mono.len() * 15 / 100).min(full_mono.len().saturating_sub(max_window_samples));
+            let end = (start + max_window_samples).min(full_mono.len());
+            &full_mono[start..end]
+        } else {
+            &full_mono
+        };
         let n_samples = mono_samples.len();
 
         // 1. Dynamic range and crest factor (time-domain)
-        let (crest_factor_db, dynamic_range_db) = Self::calculate_dynamics(&mono_samples);
+        let (crest_factor_db, dynamic_range_db) = Self::calculate_dynamics(mono_samples);
 
         // 2. STFT frame processing (fine musical pitch resolution, 10ms hops)
         let fft_size = if n_samples >= 4096 {
@@ -62,11 +78,6 @@ impl AcousticAnalyzer {
             1024
         };
         let hop_size = (sample_rate / 100).max(1) as usize; // 10ms hop
-        if n_samples < 1024 {
-            return Err(DspError::ParameterError(
-                "Audio buffer is too short for 1024-point FFT".to_string(),
-            ));
-        }
 
         let num_frames = (n_samples - fft_size) / hop_size + 1;
         let mut stft_magnitudes: Vec<Vec<f32>> = Vec::with_capacity(num_frames);
@@ -596,9 +607,28 @@ impl AcousticAnalyzer {
 
         let mut last_bin: Option<u8> = None;
 
-        for (i, c) in frame_chromas.iter().enumerate() {
-            let energy = frame_energies.get(i).copied().unwrap_or(0.0);
-            if energy / max_energy < 0.02 {
+        // For long polyphonic recordings (> 300 frames / > 3.0s), aggregate chroma over 20-frame
+        // (~200ms musical eighth-note) windows so harmonic STFT frame jitter does not produce
+        // thousands of spurious sub-10ms transitions, and cap at 32 representative contour notes.
+        let chunk_frames = if frame_chromas.len() > 300 { 20 } else { 1 };
+        let max_notes = if frame_chromas.len() > 300 { 32 } else { usize::MAX };
+
+        let mut idx = 0;
+        while idx < frame_chromas.len() && sequence.len() < max_notes {
+            let end = (idx + chunk_frames).min(frame_chromas.len());
+            let mut avg_energy = 0.0f32;
+            let mut agg_chroma = [0.0f32; 12];
+            for j in idx..end {
+                let e = frame_energies.get(j).copied().unwrap_or(0.0);
+                avg_energy += e;
+                for k in 0..12 {
+                    agg_chroma[k] += frame_chromas[j][k];
+                }
+            }
+            avg_energy /= (end - idx).max(1) as f32;
+            idx = end;
+
+            if avg_energy / max_energy < 0.02 {
                 // Low energy frame (silence / pause): reset note transition tracker
                 last_bin = None;
                 continue;
@@ -606,8 +636,8 @@ impl AcousticAnalyzer {
             let mut best_bin = 0u8;
             let mut best_val = -1.0f32;
             for k in 0..12 {
-                if c[k] > best_val {
-                    best_val = c[k];
+                if agg_chroma[k] > best_val {
+                    best_val = agg_chroma[k];
                     best_bin = k as u8;
                 }
             }
