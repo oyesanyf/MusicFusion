@@ -30,6 +30,7 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         .route("/api/dlp/status", get(settings::dlp_status_handler))
         .route("/api/dlp/policy", post(settings::update_dlp_policy_handler))
         .route("/api/dlp/test", post(settings::test_dlp_inspection_handler))
+        .route("/api/endpoints/probe", post(settings::probe_endpoint_handler))
 
         // Cache Management Endpoints
         .route("/api/cache/recache", post(cache::recache_handler))
@@ -96,8 +97,9 @@ async fn chat_stream_compat_handler(
         prompt,
         search_mode: None,
         model_family: family,
-        top_k: Some(8),
+        top_k: Some(12),
         access_tier: Some(0),
+        history: Vec::new(),
     };
     chat::chat_sse_handler(State(state), axum::Json(req)).await
 }

@@ -273,7 +273,8 @@ impl DeterministicOfflineSynthesisEngine {
     }
 
     /// Multi-turn long-form synthesis via Ollama `POST /api/chat` (adapted from the IDE project).
-    /// Uses `num_predict: 4096` and `num_ctx: 8192` with conversation history and retrieved RAG chunks.
+    /// Dynamically reads `ollama_url`, `primary_workhorse_model`, `sampling_temperature`, `max_output_tokens`,
+    /// `agentic_chunk_size`, and `natural_human_voice` from `ChatGptUiSettings`.
     fn query_local_ollama_chat(
         prompt: &str,
         history: &[ChatTurnMessage],
@@ -281,16 +282,52 @@ impl DeterministicOfflineSynthesisEngine {
         requested_model_tag: &str,
     ) -> Option<String> {
         use std::io::{Read, Write};
-        use std::net::{SocketAddr, TcpStream};
+        use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
         use std::time::Duration;
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], 11434));
-        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(450)).ok()?;
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(75)));
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+        let controller = crate::dlp_mesh::global_mesh_dlp_controller();
+        // Only invoke external local Ollama TCP socket when running inside the initialized daemon runtime
+        let daemon_active = controller
+            .settings_file_path
+            .read()
+            .map(|p| p.is_some())
+            .unwrap_or(false);
+        if !daemon_active {
+            return None;
+        }
 
-        // Use fast, capable local model (defaulting to qwen2.5:7b for low-latency long-form synthesis)
-        let model = if requested_model_tag.contains("qwen2.5:7b")
+        let ui = controller
+            .settings
+            .read()
+            .map(|g| g.ui.clone())
+            .unwrap_or_default();
+
+        // Parse host:port from ui.ollama_url (default 127.0.0.1:11434)
+        let raw_ollama_url = if ui.ollama_url.trim().is_empty() {
+            "http://127.0.0.1:11434"
+        } else {
+            ui.ollama_url.trim()
+        };
+        let host_port = raw_ollama_url
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .split('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("127.0.0.1:11434");
+        let addr: SocketAddr = host_port
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut it| it.next())
+            .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 11434)));
+
+        // Resolve workhorse model from UI settings or router recommendation
+        let configured_model = ui.primary_workhorse_model.trim();
+        let model = if !configured_model.is_empty()
+            && (configured_model.contains(':') || configured_model.starts_with("qwen") || configured_model.starts_with("gemma") || configured_model.starts_with("glm"))
+        {
+            configured_model
+        } else if requested_model_tag.contains("qwen2.5:7b")
             || requested_model_tag.contains("glm4:9b")
             || requested_model_tag.contains("gemma2:9b")
         {
@@ -299,9 +336,20 @@ impl DeterministicOfflineSynthesisEngine {
             "qwen2.5:7b"
         };
 
+        let temp = ui.sampling_temperature.clamp(0.0, 1.0);
+        let chunk_budget = ui.agentic_chunk_size.clamp(512, 8192);
+        let num_predict = ui.max_output_tokens.max(512).min(chunk_budget);
+        let num_ctx = (num_predict * 2).max(8192);
+
+        let voice_directive = if ui.natural_human_voice {
+            " Write in a natural human voice with varied cadence, dynamic burstiness, and zero robotic AI clichés."
+        } else {
+            ""
+        };
+
         let mut messages: Vec<serde_json::Value> = Vec::new();
 
-        let system_prompt = if !matched_chunks.is_empty() {
+        let base_system = if !matched_chunks.is_empty() {
             "You are QuorumRAG, an advanced local Retrieval-Augmented Generation (RAG) and multi-turn research assistant. \
             You are given retrieved document chunks from the user's local physical drives along with prior conversation history. \
             Synthesize information across ALL relevant retrieved chunks (do not stop after the first chunk). \
@@ -317,6 +365,8 @@ impl DeterministicOfflineSynthesisEngine {
             multiple detailed paragraphs, and bullet points covering background, key details, technical or historical significance, and impact. \
             Use the conversation history to seamlessly answer multi-turn follow-up questions."
         };
+
+        let system_prompt = format!("{}{}", base_system, voice_directive);
 
         messages.push(serde_json::json!({
             "role": "system",
@@ -372,48 +422,72 @@ impl DeterministicOfflineSynthesisEngine {
             "content": user_content
         }));
 
-        let payload = serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "stream": false,
-            "options": {
-                "temperature": 0.25,
-                "num_predict": 4096,
-                "num_ctx": 8192,
-                "top_p": 0.9,
-                "repeat_penalty": 1.1
+        let send_chat_request = |target_model: &str| -> Option<String> {
+            let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(75)));
+            let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+
+            let payload = serde_json::json!({
+                "model": target_model,
+                "messages": messages,
+                "stream": false,
+                "options": {
+                    "temperature": temp,
+                    "num_predict": num_predict,
+                    "num_ctx": num_ctx,
+                    "top_p": 0.9,
+                    "repeat_penalty": 1.1
+                }
+            })
+            .to_string();
+
+            // Use HTTP/1.0 so Go's net/http server in Ollama never uses Transfer-Encoding: chunked on large responses
+            let request = format!(
+                "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                host_port,
+                payload.len(),
+                payload
+            );
+
+            stream.write_all(request.as_bytes()).ok()?;
+            let mut raw_resp = String::new();
+            stream.read_to_string(&mut raw_resp).ok()?;
+
+            let body_start = raw_resp.find("\r\n\r\n").map(|i| i + 4)?;
+            let body_str = &raw_resp[body_start..];
+            let json_start = body_str.find('{')?;
+            let json_end = body_str.rfind('}')?;
+            let val: serde_json::Value =
+                serde_json::from_str(&body_str[json_start..=json_end]).ok()?;
+
+            let text = val
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+                .or_else(|| val.get("response").and_then(|r| r.as_str()))?
+                .trim();
+
+            if text.is_empty() {
+                None
+            } else {
+                Some(text.to_string())
             }
-        })
-        .to_string();
+        };
 
-        let request = format!(
-            "POST /api/chat HTTP/1.1\r\nHost: 127.0.0.1:11434\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            payload.len(),
-            payload
-        );
+        let synthesized = send_chat_request(model).or_else(|| {
+            if model != "qwen2.5:7b" {
+                send_chat_request("qwen2.5:7b")
+            } else {
+                None
+            }
+        })?;
 
-        stream.write_all(request.as_bytes()).ok()?;
-        let mut raw_resp = String::new();
-        stream.read_to_string(&mut raw_resp).ok()?;
-
-        let body_start = raw_resp.find("\r\n\r\n").map(|i| i + 4)?;
-        let body_str = &raw_resp[body_start..];
-        let json_start = body_str.find('{')?;
-        let json_end = body_str.rfind('}')?;
-        let val: serde_json::Value = serde_json::from_str(&body_str[json_start..=json_end]).ok()?;
-
-        let text = val
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_str())
-            .or_else(|| val.get("response").and_then(|r| r.as_str()))?
-            .trim();
-
-        if text.is_empty() {
-            None
-        } else {
-            Some(text.to_string())
+        if let Ok(mut guard) = crate::dlp_mesh::global_mesh_dlp_controller().settings.write() {
+            if guard.ui.restrl_daemon_running {
+                guard.ui.restrl_processed_tasks = guard.ui.restrl_processed_tasks.saturating_add(1);
+            }
         }
+        Some(synthesized)
     }
 }
 

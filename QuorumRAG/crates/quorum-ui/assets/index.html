@@ -67,6 +67,23 @@
 
       <!-- Sidebar Footer Status & Settings Trigger -->
       <div class="sidebar-footer">
+        <!-- Always-Visible Continuous Indexer Progress Card -->
+        <div id="live-indexer-card" class="live-indexer-card" title="Click to open Indexer Controls" style="background:rgba(255,255,255,0.04); border:1px solid var(--border-subtle, rgba(255,255,255,0.1)); border-radius:10px; padding:10px 12px; margin-bottom:8px; cursor:pointer;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--text-primary);">
+              <span id="live-indexer-dot" class="pulse-dot" style="width:8px; height:8px; border-radius:50%; background:#10a37f; display:inline-block;"></span>
+              <span id="live-indexer-phase">Continuous Indexer</span>
+            </div>
+            <span id="live-indexer-pct" style="font-size:11px; font-weight:700; color:#10a37f;">Active</span>
+          </div>
+          <div style="width:100%; height:6px; background:rgba(255,255,255,0.1); border-radius:999px; overflow:hidden; margin-bottom:6px;">
+            <div id="live-indexer-bar" style="width:15%; height:100%; background:linear-gradient(90deg, #2563eb, #10a37f); border-radius:999px; transition:width 0.4s ease;"></div>
+          </div>
+          <div id="live-indexer-stats" style="font-size:11px; color:var(--text-muted, #9ca3af); line-height:1.35;">
+            Scanning local drives...
+          </div>
+        </div>
+
         <button id="btn-open-settings" class="sidebar-settings-btn" title="Open Settings (Ctrl+,)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span>Settings</span>
@@ -122,6 +139,13 @@
               <option value="theme-warm">Warm (Sepia)</option>
               <option value="theme-white">White (Clean Light)</option>
             </select>
+          </div>
+          <div id="top-index-progress-pill" class="btn-recache-header" title="Live Continuous Drive Indexing Progress — Click for details" style="display:inline-flex; align-items:center; gap:8px; cursor:pointer; padding:5px 11px;">
+            <span id="top-index-dot" class="pulse-dot" style="width:7px; height:7px; border-radius:50%; background:#10a37f; display:inline-block;"></span>
+            <span id="top-index-text" style="font-size:12px; font-weight:500;">Indexing Drives...</span>
+            <div style="width:54px; height:5px; background:rgba(128,128,128,0.25); border-radius:999px; overflow:hidden;">
+              <div id="top-index-bar" style="width:20%; height:100%; background:linear-gradient(90deg, #2563eb, #10a37f); transition:width 0.4s ease;"></div>
+            </div>
           </div>
           <button id="btn-top-settings" class="btn-recache-header" title="Open Settings (Ctrl+,)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -309,6 +333,10 @@
           <span class="nav-item-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></span>
           <span class="nav-item-label">Appearance</span>
         </button>
+        <button class="chatgpt-nav-item" data-tab="models">
+          <span class="nav-item-icon">🧠</span>
+          <span class="nav-item-label">AI Models &amp; Endpoints</span>
+        </button>
         <button class="chatgpt-nav-item" data-tab="mesh">
           <span class="nav-item-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
           <span class="nav-item-label">Mesh &amp; Shared Folders</span>
@@ -378,8 +406,15 @@
     </aside>
 
     <!-- Right Content Area -->
-    <section class="chatgpt-settings-main custom-scroll">
-      <div id="settings-content-container" class="chatgpt-settings-content"></div>
+    <section class="chatgpt-settings-main custom-scroll" style="display:flex; flex-direction:column;">
+      <div id="settings-content-container" class="chatgpt-settings-content" style="flex:1; padding-bottom:32px;"></div>
+      <div class="settings-dialog-footer" style="position:sticky; bottom:0; z-index:20; display:flex; align-items:center; justify-content:space-between; padding:12px 28px; background:var(--bg-surface, #111318); border-top:1px solid var(--border-subtle, rgba(255,255,255,0.1));">
+        <button type="button" id="btn-reset-settings" class="pill-btn" onclick="window._resetSettingsToDefaults()" style="padding:7px 14px; font-size:12.5px;">Reset to Defaults</button>
+        <div style="display:flex; gap:10px;">
+          <button type="button" id="btn-cancel-settings" class="pill-btn" onclick="window._closeSettingsFromFooter()" style="padding:7px 16px; font-size:12.5px;">Cancel</button>
+          <button type="button" id="btn-save-settings" class="pill-btn" onclick="window._saveAllPreferencesFromFooter()" style="padding:7px 18px; font-size:12.5px; background:#6366f1; color:#ffffff; border-color:#6366f1; font-weight:600;">Save Preferences</button>
+        </div>
+      </div>
     </section>
   </div>
 

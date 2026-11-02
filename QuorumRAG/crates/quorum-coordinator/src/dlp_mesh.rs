@@ -231,6 +231,26 @@ pub struct ChatGptUiSettings {
     pub retain_chat_history: bool,
     pub anonymize_mesh_queries: bool,
     pub archived_chats: Vec<ArchivedChatEntry>,
+    // IDE General & AI Models / Endpoints Settings
+    pub enable_streaming: bool,
+    pub auto_scroll: bool,
+    pub sizing_strategy: String,
+    pub ollama_url: String,
+    pub ipc_url: String,
+    pub cdp_port: u16,
+    pub primary_workhorse_model: String,
+    pub fusion_panel_size: usize,
+    pub vision_specialist_model: String,
+    pub audio_specialist_model: String,
+    pub multimodal_auto_routing: bool,
+    pub natural_human_voice: bool,
+    pub sampling_temperature: f32,
+    pub max_output_tokens: usize,
+    pub agentic_loop_enabled: bool,
+    pub agentic_chunk_size: usize,
+    pub agentic_strategy: String,
+    pub restrl_daemon_running: bool,
+    pub restrl_processed_tasks: u64,
     // Dynamic key-value settings for all interactive controls (Appearance, Personalization, Family, Contacts, Voice, etc.)
     #[serde(flatten)]
     pub extra: std::collections::HashMap<String, serde_json::Value>,
@@ -280,6 +300,25 @@ impl Default for ChatGptUiSettings {
             retain_chat_history: true,
             anonymize_mesh_queries: true,
             archived_chats: Vec::new(),
+            enable_streaming: true,
+            auto_scroll: true,
+            sizing_strategy: "runtime_ram".to_string(),
+            ollama_url: "http://127.0.0.1:11434".to_string(),
+            ipc_url: "http://127.0.0.1:3031".to_string(),
+            cdp_port: 9222,
+            primary_workhorse_model: "qwen2.5:7b".to_string(),
+            fusion_panel_size: 0,
+            vision_specialist_model: "qwen2.5-vl".to_string(),
+            audio_specialist_model: "whisper-base".to_string(),
+            multimodal_auto_routing: true,
+            natural_human_voice: true,
+            sampling_temperature: 0.20,
+            max_output_tokens: 262144,
+            agentic_loop_enabled: true,
+            agentic_chunk_size: 4096,
+            agentic_strategy: "auto_continuation".to_string(),
+            restrl_daemon_running: true,
+            restrl_processed_tasks: 14,
             extra: std::collections::HashMap::new(),
         }
     }
@@ -620,7 +659,21 @@ impl OsoosiMeshDlpController {
             replacement: &str,
             conf: f32,
         ) {
-            if let Ok(re) = Regex::new(re_str) {
+            static REGEX_CACHE: OnceLock<RwLock<std::collections::HashMap<String, Regex>>> =
+                OnceLock::new();
+            let cache = REGEX_CACHE.get_or_init(|| RwLock::new(std::collections::HashMap::new()));
+            let re_opt = {
+                let guard = cache.read().unwrap_or_else(|e| e.into_inner());
+                guard.get(re_str).cloned()
+            }
+            .or_else(|| {
+                let compiled = Regex::new(re_str).ok()?;
+                let mut guard = cache.write().unwrap_or_else(|e| e.into_inner());
+                guard.insert(re_str.to_string(), compiled.clone());
+                Some(compiled)
+            });
+
+            if let Some(re) = re_opt {
                 for mat in re.find_iter(text) {
                     spans.push(DetectedPhiSpan {
                         category: category.to_string(),

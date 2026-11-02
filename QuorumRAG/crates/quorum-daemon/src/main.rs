@@ -193,22 +193,54 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
     let bind_addr = format!("{}:{}", cli.host, bound_http_port);
     info!("QuorumRAG Web UI listening on http://{}", bind_addr);
 
-    // Automatically start background Magika crawl & ingestion across configured watch_paths once server is ready
+    // Continuously run background Magika crawl & incremental ingestion across all watched physical drives & shared folders
     if !ingest_config.watch_paths.is_empty() {
         let bg_worker = Arc::clone(&reindex_worker);
         let bg_paths = ingest_config.watch_paths.clone();
+        let bg_shutdown = Arc::clone(&shutdown_notify);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            let initial_options = quorum_ingest::ReindexOptions {
-                target_paths: bg_paths,
-                full_rebuild: false,
-                force_reembed: false,
-                batch_size: 64,
-                num_threads: 0,
-                dry_run: false,
-            };
-            if let Err(e) = bg_worker.start_reindex(initial_options).await {
-                error!("Failed to start initial background watch_dir crawl: {}", e);
+            loop {
+                // Collect physical drive watch paths + any user-configured shared folders
+                let mut target_paths = bg_paths.clone();
+                if let Ok(guard) = quorum_coordinator::global_mesh_dlp_controller().settings.read() {
+                    for folder in &guard.mesh.shared_folders {
+                        let p = std::path::PathBuf::from(&folder.path);
+                        if !target_paths.contains(&p) {
+                            target_paths.push(p);
+                        }
+                    }
+                }
+
+                let is_running = match bg_worker.get_progress().await {
+                    Some(prog) => matches!(
+                        prog.phase,
+                        quorum_ingest::ReindexPhase::ScanningFilesystem
+                            | quorum_ingest::ReindexPhase::ChunkingAndVectorizing
+                            | quorum_ingest::ReindexPhase::WritingToStorage
+                            | quorum_ingest::ReindexPhase::CompactingIndexes
+                    ),
+                    None => false,
+                };
+
+                if !is_running {
+                    let pass_options = quorum_ingest::ReindexOptions {
+                        target_paths,
+                        full_rebuild: false,
+                        force_reembed: false,
+                        batch_size: 64,
+                        num_threads: 0,
+                        dry_run: false,
+                    };
+                    if let Err(e) = bg_worker.start_reindex(pass_options).await {
+                        error!("Continuous background indexer pass warning: {}", e);
+                    }
+                }
+
+                tokio::select! {
+                    _ = bg_shutdown.notified() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(12)) => {}
+                }
             }
         });
     }

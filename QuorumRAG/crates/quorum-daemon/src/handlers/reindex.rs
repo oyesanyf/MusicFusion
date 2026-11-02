@@ -72,11 +72,46 @@ pub async fn start_reindex_handler(
 pub async fn reindex_status_handler(
     State(state): State<Arc<DaemonState>>,
 ) -> impl IntoResponse {
+    let total_stored_chunks = state.storage.count().await.unwrap_or(0);
+    let watched_paths: Vec<String> = state
+        .ingest_config
+        .watch_paths
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
     match state.reindex_worker.get_progress().await {
-        Some(progress) => Json(serde_json::to_value(progress).unwrap_or_default()).into_response(),
+        Some(progress) => {
+            let mut val = serde_json::to_value(&progress).unwrap_or_default();
+            if let Some(obj) = val.as_object_mut() {
+                let pct = if progress.files_total_estimated > 0 {
+                    ((progress.files_scanned as f64 / progress.files_total_estimated as f64) * 100.0)
+                        .clamp(0.0, 100.0)
+                } else if matches!(progress.phase, quorum_ingest::ReindexPhase::Completed) {
+                    100.0
+                } else {
+                    0.0
+                };
+                obj.insert("percent".to_string(), serde_json::json!(pct));
+                obj.insert("total_stored_chunks".to_string(), serde_json::json!(total_stored_chunks));
+                obj.insert("continuous_mode".to_string(), serde_json::json!(true));
+                obj.insert("watched_paths".to_string(), serde_json::json!(watched_paths));
+            }
+            Json(val).into_response()
+        }
         None => Json(serde_json::json!({
-            "phase": "idle",
-            "message": "No reindexing task has been executed yet"
+            "phase": "scanning_filesystem",
+            "percent": 0.0,
+            "files_scanned": 0,
+            "files_total_estimated": 0,
+            "files_indexed": 0,
+            "files_skipped_unmodified": 0,
+            "chunks_newly_embedded": 0,
+            "chunks_reused_from_cache": 0,
+            "total_stored_chunks": total_stored_chunks,
+            "continuous_mode": true,
+            "watched_paths": watched_paths,
+            "message": "Continuous background indexer initializing..."
         }))
         .into_response(),
     }
