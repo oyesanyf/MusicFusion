@@ -1,28 +1,25 @@
-# Progress — 2026-11-01T19:20:00Z
+# Progress — 2026-11-02T15:47:00Z
 
 ## Current Status
-Last visited: 2026-11-01T19:20:00Z
-- [x] Milestones 1-5: Completed & Verified Clean
-- [x] Milestone 6: Completed & Verified
-- [x] Milestone 7: Physical Modeling Synthesis, Stem Headroom & Tape Mastering, uv Python Neural Bridge & Sample Regeneration
-  - [x] Step 1: Investigation & Technical Survey (All 3 Explorers Completed)
-  - [x] Step 2: Implementation (worker_m7 completed)
-  - [x] Steps 3-5: Verification Gate Iteration 1 (4/5 passed; challenger_m7_2 REJECT on Afrobeats drums.wav RMS)
-  - [x] Step 6: Iteration 2 Remediation & Recheck
-    - [x] worker_m7_remed (7214f0b8): Completed (Afrobeats drums.wav RMS: -14.42 dBFS, Python Exception exit code 2, 56 stems > -50 dBFS, 88 WAV files pass, cargo test pass, commit 7b3b79c pushed)
-    - [x] worker_m7_vocal (f2cd07d7): Completed (Melodic singing synthesizer created, 113 dsp tests pass, 43 fusion tests pass, 31 pipeline tests pass, open model catalog in place, all 8 sample song versions regenerated, commit f48b7e0 pushed)
-    - [x] Iteration 2 Recheck Gate:
-      - [x] challenger_m7_recheck (4840fcb8): **APPROVE** (Verified all 56 stems RMS > -50 dBFS, 88 WAV files pass validation, 0 clipping, true peaks <= -1.0 dBFS, melodic singing verified, workspace and e2e tests 100% pass)
-      - [x] reviewer_m7_recheck (49b662d5): **APPROVE** (Verified code, 3-band drum filter, melodic singing synthesizer, open model catalog, and 100% passing tests)
-      - [x] auditor_m7_recheck (5893885b): **CLEAN** (Verified 100% genuine DSP, zero mocks, zero fake data, genuine melodic singing synthesis, zero registry/PATH mutations, 191/191 E2E tests pass)
-  - [x] Final Gate Result: **PASS** (100% Unanimous Approval & Clean Forensic Audit)
+Last visited: 2026-11-02T15:47:00Z
+- [x] Milestones 1-7: Completed & Verified Clean
+- [x] Milestone 8: 20-File Reference WAV Importer, RVQ Tokenizer & RL Pipeline with Legal Originality / Anti-Plagiarism Guard
+  - [x] Phase 0: Technical Survey & Specification Mining
+    - [x] explorer_m8_1: WebUI & REST Server architecture for 1..=20 WAV upload [DONE]
+    - [x] explorer_m8_2: DSP Feature Extraction, RVQ Tokenizer & AudioBuffer contracts [DONE]
+    - [x] spec_miner_m8: RL Policy (PPO/Bandit+DPO), Composite Reward & Originality Guard math [DONE]
+  - [x] Phase 1: Scope Synthesis & Milestone Decomposition (SCOPE.md created) [DONE]
+  - [ ] Phase 2: Implementation (Worker: worker_m8) [IN_PROGRESS: DSP & Fusion RL done, integrating REST endpoints, URL-to-WAV converter with SSRF guards & WebUI]
+  - [ ] Phase 3: Verification Gate (Reviewers, Challengers, Forensic Auditor)
+  - [ ] Phase 4: Solo PR Ship, Rebuild & Live Server Restart
 
 ## Iteration Status
-Current iteration: 2 / 32 (Milestone 7)
-- Milestone 1: DONE (Gate 2 Passed)
-- Milestone 2: DONE (Gate 2 Passed)
-- Milestone 3: DONE (Gate 2 Passed)
-- Milestone 4: DONE (Gate 2 Passed)
-- Milestone 5: DONE (Final Gate Passed)
-- Milestone 6: DONE (Verified)
-- Milestone 7: DONE (Gate 2 Passed: 100% Unanimous Approval, CLEAN Forensic Audit, 191/191 E2E Tests Passing)
+Current iteration: 1 / 32 (Milestone 8)
+- Milestone 1: DONE
+- Milestone 2: DONE
+- Milestone 3: DONE
+- Milestone 4: DONE
+- Milestone 5: DONE
+- Milestone 6: DONE
+- Milestone 7: DONE
+- Milestone 8: IN_PROGRESS (Phase 0: Technical Survey)

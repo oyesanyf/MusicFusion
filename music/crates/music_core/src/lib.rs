@@ -4,12 +4,18 @@
 pub mod blueprint;
 pub mod error;
 pub mod genre;
+pub mod rl_contracts;
 pub mod schema;
 pub mod state;
 pub mod telemetry;
 
 pub use error::{MusicCoreError, Result};
 pub use genre::{GenreCategory, GenrePreset, GenreRegistry, GenreTaxonomy, ModalScale, RhythmGroove};
+pub use rl_contracts::{
+    AcousticFeatureVector, BaselineBenchmarkSummary, BlendedStyleProfile, ComplianceStatus,
+    CompositeRewardBreakdown, ConfidenceInterval95, DpoPreferencePair, LegalComplianceInfo,
+    LegalOriginalityReport, ReferenceWavMeta, SingleFileOriginalityAudit,
+};
 pub use schema::{PipelineModelStack, SongBlueprint, SongSection, StemMixConfig};
 pub use state::{
     EngineMode, MusicProductionState, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_FINAL_MASTER,

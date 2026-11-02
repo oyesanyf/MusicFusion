@@ -318,10 +318,11 @@ impl TantivyFtsIndex {
         if searcher.num_docs() == 0 {
             return Ok(Vec::new());
         }
-        let query_parser = QueryParser::for_index(
+        let mut query_parser = QueryParser::for_index(
             &self.index,
             vec![self.field_text_content, self.field_file_path_text],
         );
+        query_parser.set_field_boost(self.field_file_path_text, 3.0);
 
         let has_explicit_syntax = trimmed.contains(':')
             || trimmed.contains('"')
@@ -383,20 +384,70 @@ impl TantivyFtsIndex {
 
         let combined = BooleanQuery::intersection(vec![text_query, Box::new(tier_range)]);
         let num_docs = searcher.num_docs() as usize;
-        let effective_limit = top_k.min(num_docs.max(1));
+        // Over-fetch when the index is large so monolithic dumps (chat.html, conversations-*.json)
+        // or source code files never crowd out real PDF/DOCX documents before top_k truncation.
+        let fetch_limit = if num_docs > 500 {
+            (top_k * 8).max(400).min(num_docs.max(1))
+        } else {
+            top_k.min(num_docs.max(1))
+        };
         let top_docs = searcher
-            .search(&combined, &TopDocs::with_limit(effective_limit).order_by_score())
+            .search(&combined, &TopDocs::with_limit(fetch_limit).order_by_score())
             .map_err(|e| StorageError::Tantivy(format!("Search execution failed: {}", e)))?;
 
-        let mut scored_chunks = Vec::with_capacity(top_docs.len());
+        let mut primary_chunks = Vec::with_capacity(top_k);
+        let mut fallback_chunks = Vec::new();
         for (score, doc_address) in top_docs {
             let doc: TantivyDocument = searcher
                 .doc(doc_address)
                 .map_err(|e| StorageError::Tantivy(format!("Failed to retrieve document: {}", e)))?;
 
             let chunk = self.doc_to_chunk(&doc);
-            scored_chunks.push(ScoredChunk::new(chunk, score, "local", false));
+            let path_l = chunk.file_path.to_ascii_lowercase();
+            let file_l = std::path::Path::new(&chunk.file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+
+            if file_l.starts_with('~')
+                || file_l.starts_with(".~lock")
+                || file_l == "chat.html"
+                || (file_l.starts_with("conversations-") && file_l.ends_with(".json"))
+            {
+                continue;
+            }
+
+            let is_low_priority_code_or_repo = path_l.contains("\\harfile\\")
+                || path_l.contains("/harfile/")
+                || file_l.ends_with(".rs")
+                || file_l.ends_with(".py")
+                || file_l.ends_with(".js")
+                || file_l.ends_with(".ts")
+                || file_l.ends_with(".json")
+                || file_l.ends_with(".toml")
+                || file_l.ends_with(".lock");
+
+            let scored = ScoredChunk::new(chunk, score, "local", false);
+            if is_low_priority_code_or_repo {
+                fallback_chunks.push(scored);
+            } else {
+                primary_chunks.push(scored);
+                if primary_chunks.len() >= top_k {
+                    break;
+                }
+            }
         }
+
+        if primary_chunks.len() < top_k {
+            for c in fallback_chunks {
+                primary_chunks.push(c);
+                if primary_chunks.len() >= top_k {
+                    break;
+                }
+            }
+        }
+        let mut scored_chunks = primary_chunks;
 
         scored_chunks.sort_by(|a, b| {
             b.score

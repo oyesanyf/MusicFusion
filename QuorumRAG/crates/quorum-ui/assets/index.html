@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QuorumRAG — Local-First P2P Retrieval &amp; Agentic Workspace</title>
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
-  <link rel="stylesheet" href="/assets/styles.css?v=20261102">
+  <link rel="stylesheet" href="/assets/styles.css?v=20261102b">
   <style>
     /* Inlined fallback styles ensuring test assertions pass */
     :root {
@@ -184,9 +184,6 @@
           <form id="chat-form" class="input-capsule">
             <div class="input-row">
               <textarea id="prompt-input" class="prompt-textarea" rows="1" spellcheck="true" placeholder="Ask anything about your local documents..."></textarea>
-              <button type="button" id="btn-spellcheck" class="btn-spellcheck" title="Correct spelling in chat box using local LLM" style="background:rgba(16, 163, 127, 0.14); color:#10a37f; border:1px solid rgba(16, 163, 127, 0.35); border-radius:8px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;">
-                <span>✨</span><span>Spellcheck</span>
-              </button>
               <button type="button" id="btn-stop" class="btn-stop hidden" title="Stop generating response" style="background:var(--danger, #ef4444); color:#fff; border:none; border-radius:8px; padding:6px 12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;">
                 <span>■</span><span>Stop</span>
               </button>
@@ -195,7 +192,7 @@
               </button>
             </div>
             <div class="input-footer">
-              <span class="input-hint">Enter to send, Shift+Enter for newline · <span id="spellcheck-status" style="color:#10a37f; font-weight:600;">LLM Auto-Spellcheck Active</span></span>
+              <span class="input-hint">Enter to send, Shift+Enter for newline · <span id="spellcheck-status" style="color:#10a37f; font-weight:600;">✨ Dynamic LLM Spellcheck Active</span></span>
               <span id="hardware-status" class="hardware-status">RAM: Probing...</span>
             </div>
           </form>
@@ -408,6 +405,6 @@
     </section>
   </div>
 
-  <script src="/assets/app.js?v=20261102"></script>
+  <script src="/assets/app.js?v=20261102b"></script>
 </body>
 </html>

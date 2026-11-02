@@ -415,6 +415,156 @@ One love, one heart, shining forever in harmony!</textarea>
             </div>
           </section>
 
+          <!-- ============================================================ -->
+          <!-- REFERENCE WAV IMPORTER & RL GENERATION SECTION (MILESTONE 8) -->
+          <!-- ============================================================ -->
+          <section class="reference-wav-importer-card" id="reference-wav-importer-section" aria-label="Reference WAV Importer & RL Generation">
+            <div class="ref-card-header">
+              <div class="ref-header-title-group">
+                <span class="ref-icon">📁</span>
+                <div>
+                  <h3 class="ref-title">Reference WAV Importer &amp; Style Ensemble Blend</h3>
+                  <p class="ref-subtitle">Import 1 to 20 reference audio files (.WAV) or convert streaming URLs to shape production style, tempo, chroma &amp; vocal timbre with RL.</p>
+                </div>
+              </div>
+              <div class="ref-header-badges">
+                <span class="ref-counter-badge" id="ref-wav-counter">0 / 20 reference WAVs</span>
+                <button type="button" class="btn-clear-ref-wavs" id="btn-clear-all-ref-wavs" title="Clear all reference WAVs">🗑️ Clear All</button>
+              </div>
+            </div>
+
+            <!-- Over-Capacity Warning Banner -->
+            <div class="ref-warning-banner hidden" id="ref-wav-cap-warning" role="alert">
+              ⚠️ <strong>Maximum Capacity Reached:</strong> The studio supports up to 20 reference WAV files. Please remove a track before adding more.
+            </div>
+
+            <!-- Dual Import Controls: Native File Picker & Drag-and-Drop Zone + URL Converter Bar -->
+            <div class="ref-importer-controls-grid">
+              <!-- Drag and Drop Zone -->
+              <div class="ref-dropzone" id="ref-wav-dropzone" tabindex="0" role="button" aria-label="Drag and drop WAV files here or click to browse">
+                <input type="file" id="ref-wav-file-input" multiple accept=".wav,audio/wav" style="display:none;">
+                <div class="dropzone-content">
+                  <div class="dropzone-icon">📥</div>
+                  <div class="dropzone-text">
+                    <strong>Drag &amp; drop WAV files here</strong> or <span class="dropzone-browse-link" id="btn-browse-ref-wavs">Browse from Computer</span>
+                  </div>
+                  <div class="dropzone-hint">Supports up to 20 files • 44.1 / 48 kHz 16/24/32-bit WAV</div>
+                </div>
+              </div>
+
+              <!-- Convert URL to WAV Bar -->
+              <div class="ref-url-convert-box">
+                <label for="ref-url-input" class="ref-url-label">🔗 Convert URL to WAV &amp; Add to Current Mix:</label>
+                <div class="ref-url-input-group">
+                  <input type="url" id="ref-url-input" class="ref-url-input" placeholder="Paste streaming or audio URL (e.g. YouTube, SoundCloud, direct WAV)..." spellcheck="false">
+                  <button type="button" class="btn-convert-url-wav" id="btn-convert-url-wav">
+                    <span>⚡ Convert URL to WAV</span>
+                  </button>
+                </div>
+                <div class="ref-url-status" id="url-convert-status">
+                  <span class="status-dot ready"></span>
+                  <span class="status-text">SSRF-protected downloader ready (rejects private &amp; loopback IPs)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Active Reference Tracks Table / List -->
+            <div class="ref-tracks-container" id="ref-tracks-container">
+              <div class="ref-tracks-header">
+                <span class="col-name">File / Source</span>
+                <span class="col-meta">BPM &amp; Key</span>
+                <span class="col-weight">Style Blend Weight</span>
+                <span class="col-actions">Actions</span>
+              </div>
+              <div class="ref-wav-list" id="ref-wav-list">
+                <!-- Dynamically rendered track items -->
+                <div class="ref-empty-state" id="ref-empty-state">
+                  No reference WAVs imported yet. Drag &amp; drop 1 to 20 reference WAV files or convert a URL above.
+                </div>
+              </div>
+            </div>
+
+            <!-- RL Generation Button Bar -->
+            <div class="ref-generation-bar">
+              <div class="ref-gen-left">
+                <span class="ensemble-badge" id="ensemble-blend-badge">⚖️ Anti-Monopoly Ensemble: ≤ 60% Cap</span>
+                <span class="dpo-badge" id="dpo-feedback-badge">🎯 Online DPO Preference Learning Active</span>
+              </div>
+              <button type="button" class="btn-generate-rl" id="btn-generate-rl">
+                <span>🚀 Generate with RL &amp; Reference Style</span>
+              </button>
+            </div>
+
+            <!-- Legal & Originality Safeguard Verified Card -->
+            <div class="legal-compliance-card" id="legal-compliance-card">
+              <div class="compliance-header">
+                <div class="compliance-title-group">
+                  <span class="shield-icon">🛡️</span>
+                  <div>
+                    <h4 class="compliance-title">Legal &amp; Originality Safeguards Verified</h4>
+                    <span class="compliance-subtitle">Full compliance with Bridgeport Music, Tennessee ELVIS Act, and strict anti-plagiarism ceilings</span>
+                  </div>
+                </div>
+                <div class="originality-score-pill" id="originality-score-pill">
+                  <span class="score-label">Originality Score:</span>
+                  <span class="score-val" id="val-originality-score">100.0%</span>
+                </div>
+              </div>
+
+              <div class="compliance-badges-grid">
+                <!-- Badge 1: Zero Waveform Sampling (Bridgeport) -->
+                <div class="compliance-badge-item passed" id="badge-bridgeport">
+                  <div class="badge-icon">✓</div>
+                  <div class="badge-text">
+                    <strong>Zero Waveform Sampling</strong>
+                    <span>100% synthesized from scratch • Bridgeport Music compliant</span>
+                  </div>
+                </div>
+
+                <!-- Badge 2: Melodic Overlap Ceiling -->
+                <div class="compliance-badge-item passed" id="badge-melodic-overlap">
+                  <div class="badge-icon">✓</div>
+                  <div class="badge-text">
+                    <strong>Transposition-Invariant Melodic Guard</strong>
+                    <span>LCS Overlap: <span id="val-melodic-overlap">0 notes (&lt; 8 ceiling)</span></span>
+                  </div>
+                </div>
+
+                <!-- Badge 3: Synthetic Vocals Only (Tennessee ELVIS Act) -->
+                <div class="compliance-badge-item passed" id="badge-elvis">
+                  <div class="badge-icon">✓</div>
+                  <div class="badge-text">
+                    <strong>Synthetic Vocal Timbre Only</strong>
+                    <span>Tennessee ELVIS Act compliant • Zero voice cloning</span>
+                  </div>
+                </div>
+
+                <!-- Badge 4: Anti-Monopoly Style Blending -->
+                <div class="compliance-badge-item passed" id="badge-anti-monopoly">
+                  <div class="badge-icon">✓</div>
+                  <div class="badge-text">
+                    <strong>Anti-Monopoly Ensemble Blending</strong>
+                    <span>Single source cap ≤ 60.0% • Simplex normalized</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- DPO Preference Feedback Row (Keep / Revert) -->
+              <div class="dpo-feedback-row" id="dpo-feedback-row">
+                <span class="dpo-prompt">RL Generation Feedback (Trains DPO Policy):</span>
+                <div class="dpo-buttons">
+                  <button type="button" class="btn-dpo-keep" id="btn-dpo-keep" title="Keep this variation (Positive DPO reward)">
+                    👍 Keep Variation (+Reward)
+                  </button>
+                  <button type="button" class="btn-dpo-revert" id="btn-dpo-revert" title="Revert to previous variation (Negative DPO penalty)">
+                    👎 Revert (-Penalty)
+                  </button>
+                </div>
+                <span class="dpo-status-msg" id="dpo-status-msg"></span>
+              </div>
+            </div>
+          </section>
+
           <!-- User Message Bubble -->
           <div class="message-bubble user-bubble">
             <div class="bubble-header">

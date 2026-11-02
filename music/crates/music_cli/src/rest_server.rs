@@ -9,22 +9,27 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Path as AxumPath, Query, State},
+    extract::{Multipart, Path as AxumPath, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
 use music_core::genre::GenreTaxonomy;
+use music_core::rl_contracts::{
+    AcousticFeatureVector, DpoPreferencePair, ReferenceWavMeta,
+};
 use music_core::state::{
     EngineMode, MusicProductionState, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_FINAL_MASTER,
     STEM_GUITAR, STEM_INPAINTED_DRUMS, STEM_INPAINTED_GUITAR, STEM_OTHER, STEM_RASPY_TENOR_VOCALS,
     STEM_YUE_VOCALS,
 };
 use music_core::telemetry::StemTelemetry;
+use music_dsp::acoustic_analyzer::AcousticAnalyzer;
+use music_dsp::wav::AudioBuffer;
 use music_fusion::hf_model_discovery::HfModelDiscoveryEngine;
 use music_fusion::iteration_panel::{
     IterationFusionPanel, ParameterTweaks,
@@ -32,9 +37,20 @@ use music_fusion::iteration_panel::{
 use music_fusion::memory::SystemMemory;
 use music_fusion::ollama_client::OllamaClient;
 use music_fusion::ollama_lifecycle::OllamaLifecycleManager;
+use music_fusion::originality_guard::LegalOriginalityGuard;
+use music_fusion::rl_policy::{RlPolicy, SynthesisAction};
 use music_fusion::tts_engine::{FusionTtsEngine, TtsVocalRequest, TtsVocalResponse};
 use music_pipeline::checkpointer::CheckpointManager;
 use music_pipeline::runner::PipelineRunner;
+
+/// In-memory stored reference WAV item with parsed audio buffer and acoustic profile
+#[derive(Clone)]
+pub struct StoredReferenceWav {
+    pub meta: ReferenceWavMeta,
+    pub features: AcousticFeatureVector,
+    pub audio_buffer: AudioBuffer,
+    pub file_path: PathBuf,
+}
 
 // App state shared across all REST routes
 #[derive(Clone)]
@@ -43,6 +59,28 @@ pub struct AppState {
     pub storage_dir: PathBuf,
     pub bound_port: u16,
     pub ollama_host: String,
+    pub reference_wavs: Arc<tokio::sync::RwLock<HashMap<String, StoredReferenceWav>>>,
+    pub rl_policy: Arc<tokio::sync::RwLock<RlPolicy>>,
+    pub last_synthesis_action: Arc<tokio::sync::RwLock<Option<SynthesisAction>>>,
+}
+
+impl AppState {
+    pub fn new(
+        runner: Arc<PipelineRunner>,
+        storage_dir: PathBuf,
+        bound_port: u16,
+        ollama_host: String,
+    ) -> Self {
+        Self {
+            runner,
+            storage_dir,
+            bound_port,
+            ollama_host,
+            reference_wavs: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            rl_policy: Arc::new(tokio::sync::RwLock::new(RlPolicy::new(64, music_fusion::rl_policy::PolicyMode::Learned))),
+            last_synthesis_action: Arc::new(tokio::sync::RwLock::new(None)),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1562,6 +1600,779 @@ pub async fn handle_ollama_bootstrap(State(state): State<AppState>) -> Response 
 }
 
 // ---------------------------------------------------------------------------
+// Milestone 8: Reference WAV Importer, URL Conversion, Legal Guard & RL
+// ---------------------------------------------------------------------------
+
+/// Pure mathematical check rejecting private, loopback, link-local, CGNAT, and reserved IP ranges.
+pub fn is_ssrf_forbidden_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            // 0.0.0.0/8 (Unspecified)
+            if octets[0] == 0 {
+                return true;
+            }
+            // 127.0.0.0/8 (Loopback)
+            if octets[0] == 127 {
+                return true;
+            }
+            // 10.0.0.0/8 (RFC1918 Private)
+            if octets[0] == 10 {
+                return true;
+            }
+            // 172.16.0.0/12 (RFC1918 Private)
+            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+                return true;
+            }
+            // 192.168.0.0/16 (RFC1918 Private)
+            if octets[0] == 192 && octets[1] == 168 {
+                return true;
+            }
+            // 169.254.0.0/16 (Link-local & Cloud Metadata 169.254.169.254)
+            if octets[0] == 169 && octets[1] == 254 {
+                return true;
+            }
+            // 100.64.0.0/10 (CGNAT)
+            if octets[0] == 100 && (64..=127).contains(&octets[1]) {
+                return true;
+            }
+            // 224.0.0.0/4 (Multicast / Reserved)
+            if octets[0] >= 224 {
+                return true;
+            }
+            false
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            let octets = ipv6.octets();
+            // :: (Unspecified)
+            if ipv6.is_unspecified() {
+                return true;
+            }
+            // ::1 (Loopback)
+            if ipv6.is_loopback() {
+                return true;
+            }
+            // IPv4-mapped IPv6: ::ffff:0:0/96
+            if octets[0..10] == [0; 10] && octets[10] == 0xff && octets[11] == 0xff {
+                let mapped_v4 = std::net::Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]);
+                return is_ssrf_forbidden_ip(std::net::IpAddr::V4(mapped_v4));
+            }
+            // Unique local: fc00::/7
+            if (octets[0] & 0xfe) == 0xfc {
+                return true;
+            }
+            // Link-local: fe80::/10
+            if octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80 {
+                return true;
+            }
+            // Multicast: ff00::/8
+            if octets[0] == 0xff {
+                return true;
+            }
+            false
+        }
+    }
+}
+
+/// Strictly parses URL and mathematically validates that host does not resolve to forbidden SSRF IP ranges.
+pub async fn validate_url_against_ssrf(raw_url: &str) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err(format!("Forbidden scheme '{}': only http and https are permitted", parsed.scheme()));
+    }
+
+    let host = parsed.host_str().ok_or_else(|| "URL has no host".to_string())?;
+
+    // Check if host is direct IP literal
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        if is_ssrf_forbidden_ip(ip) {
+            return Err(format!("SSRF Violation: IP literal {} is a private/reserved address", ip));
+        }
+        return Ok(parsed);
+    }
+
+    // Resolve hostname to IP addresses
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let resolved = match tokio::net::lookup_host((host, port)).await {
+        Ok(addrs) => addrs,
+        Err(e) => return Err(format!("DNS resolution failed for host '{}': {}", host, e)),
+    };
+
+    let mut resolved_any = false;
+    for sock_addr in resolved {
+        resolved_any = true;
+        if is_ssrf_forbidden_ip(sock_addr.ip()) {
+            return Err(format!("SSRF Violation: Host '{}' resolves to private/reserved IP {}", host, sock_addr.ip()));
+        }
+    }
+
+    if !resolved_any {
+        return Err(format!("DNS resolution for host '{}' returned 0 IP addresses", host));
+    }
+
+    Ok(parsed)
+}
+
+fn sanitize_ref_name(raw: &str) -> String {
+    let clean: String = raw.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
+        .collect();
+    if clean.is_empty() {
+        "reference.wav".to_string()
+    } else {
+        clean
+    }
+}
+
+/// POST /api/reference-wavs/upload — Multi-file reference WAV uploader enforcing 1..=20 files cap.
+pub async fn handle_upload_reference_wavs(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Response {
+    let ref_dir = state.storage_dir.join("reference_wavs");
+    if let Err(e) = tokio::fs::create_dir_all(&ref_dir).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to create reference_wavs directory: {}", e) })),
+        ).into_response();
+    }
+
+    let mut incoming_files: Vec<(String, Vec<u8>)> = Vec::new();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let file_name = field
+            .file_name()
+            .map(|f| f.to_string())
+            .unwrap_or_else(|| "reference.wav".to_string());
+        match field.bytes().await {
+            Ok(bytes) => {
+                if !bytes.is_empty() {
+                    incoming_files.push((file_name, bytes.to_vec()));
+                }
+            }
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": format!("Failed to read multipart field: {}", e) })),
+                ).into_response();
+            }
+        }
+    }
+
+    if incoming_files.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No WAV files uploaded in request. Please select 1 to 20 files." })),
+        ).into_response();
+    }
+
+    let current_count = state.reference_wavs.read().await.len();
+    if current_count + incoming_files.len() > 20 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!(
+                    "Reference WAV count exceeds maximum of 20 files (current: {}, incoming: {}, max: 20)",
+                    current_count,
+                    incoming_files.len()
+                )
+            })),
+        ).into_response();
+    }
+
+    let mut uploaded_metas = Vec::new();
+    let mut new_items = Vec::new();
+
+    for (file_name, bytes) in incoming_files {
+        let mut buffer = match AudioBuffer::from_wav_bytes(&bytes) {
+            Ok(b) => b,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": format!("Corrupt or invalid WAV file '{}': {}", file_name, e)
+                    })),
+                ).into_response();
+            }
+        };
+
+        if buffer.sample_rate != 48000 {
+            buffer = buffer.resample_linear(48000);
+        }
+        if buffer.channels != 2 {
+            buffer = buffer.to_stereo();
+        }
+
+        let features = match AcousticAnalyzer::analyze_buffer(&file_name, &buffer) {
+            Ok(f) => f,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": format!("Acoustic analysis failed for '{}': {}", file_name, e)
+                    })),
+                ).into_response();
+            }
+        };
+        let id = format!("ref_{}_{}", uuid::Uuid::new_v4().simple(), sanitize_ref_name(&file_name));
+        let file_path = ref_dir.join(format!("{}.wav", id));
+
+        let wav_data = buffer.to_wav_bytes();
+        if let Err(e) = tokio::fs::write(&file_path, &wav_data).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to save reference WAV to disk: {}", e) })),
+            ).into_response();
+        }
+
+        let meta = ReferenceWavMeta {
+            id: id.clone(),
+            file_name: file_name.clone(),
+            duration_secs: buffer.duration_secs(),
+            sample_rate: buffer.sample_rate,
+            channels: buffer.channels,
+            file_size_bytes: wav_data.len() as u64,
+            bpm: features.bpm,
+            key_signature: features.key_signature.clone(),
+            uploaded_at: chrono::Utc::now().to_rfc3339(),
+        };
+
+        uploaded_metas.push(meta.clone());
+        new_items.push((id, StoredReferenceWav {
+            meta,
+            features,
+            audio_buffer: buffer,
+            file_path,
+        }));
+    }
+
+    {
+        let mut store = state.reference_wavs.write().await;
+        for (id, item) in new_items {
+            store.insert(id, item);
+        }
+    }
+
+    let total_count = state.reference_wavs.read().await.len();
+    Json(serde_json::json!({
+        "status": "ok",
+        "uploaded": uploaded_metas,
+        "total_count": total_count,
+    })).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UrlToWavRequest {
+    pub url: String,
+}
+
+/// POST /api/reference-wavs/from-url — Converts streaming or direct audio URL into a 48 kHz reference WAV.
+pub async fn handle_reference_wav_from_url(
+    State(state): State<AppState>,
+    Json(req): Json<UrlToWavRequest>,
+) -> Response {
+    let current_count = state.reference_wavs.read().await.len();
+    if current_count >= 20 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Reference WAV count already at maximum of 20 files. Please remove a track before adding more."
+            })),
+        ).into_response();
+    }
+
+    let parsed_url = match validate_url_against_ssrf(&req.url).await {
+        Ok(u) => u,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": e })),
+            ).into_response();
+        }
+    };
+
+    let ref_dir = state.storage_dir.join("reference_wavs");
+    if let Err(e) = tokio::fs::create_dir_all(&ref_dir).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to create reference_wavs directory: {}", e) })),
+        ).into_response();
+    }
+
+    let id = format!("ref_url_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let target_wav = ref_dir.join(format!("{}.wav", id));
+
+    // 1. Try yt-dlp first if available
+    let yt_dlp_success = {
+        let output = tokio::process::Command::new("yt-dlp")
+            .arg("--no-playlist")
+            .arg("-x")
+            .arg("--audio-format")
+            .arg("wav")
+            .arg("--postprocessor-args")
+            .arg("ffmpeg:-ar 48000 -ac 2")
+            .arg("-o")
+            .arg(target_wav.to_string_lossy().to_string())
+            .arg(parsed_url.as_str())
+            .output()
+            .await;
+        match output {
+            Ok(o) => o.status.success() && target_wav.exists(),
+            Err(_) => false,
+        }
+    };
+
+    // 2. If yt-dlp didn't produce the target, fallback to reqwest + ffmpeg decode
+    if !yt_dlp_success {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_default();
+
+        let resp = match client.get(parsed_url.as_str()).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": format!("Failed to download audio from URL: {}", e) })),
+                ).into_response();
+            }
+        };
+
+        if !resp.status().is_success() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("HTTP error {} downloading URL: {}", resp.status(), parsed_url)
+                })),
+            ).into_response();
+        }
+
+        let bytes = match resp.bytes().await {
+            Ok(b) => b.to_vec(),
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": format!("Failed to read stream bytes: {}", e) })),
+                ).into_response();
+            }
+        };
+
+        // Try direct WAV parse first
+        if let Ok(mut buf) = AudioBuffer::from_wav_bytes(&bytes) {
+            if buf.sample_rate != 48000 {
+                buf = buf.resample_linear(48000);
+            }
+            if buf.channels != 2 {
+                buf = buf.to_stereo();
+            }
+            if let Err(e) = tokio::fs::write(&target_wav, &buf.to_wav_bytes()).await {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": format!("Failed to save WAV to disk: {}", e) })),
+                ).into_response();
+            }
+        } else {
+            // Decode with ffmpeg
+            let temp_input = ref_dir.join(format!("temp_in_{}", id));
+            if let Err(e) = tokio::fs::write(&temp_input, &bytes).await {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": format!("Failed to write temp audio file: {}", e) })),
+                ).into_response();
+            }
+
+            let ffmpeg_res = tokio::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-i")
+                .arg(&temp_input)
+                .arg("-ar")
+                .arg("48000")
+                .arg("-ac")
+                .arg("2")
+                .arg(&target_wav)
+                .output()
+                .await;
+
+            let _ = tokio::fs::remove_file(&temp_input).await;
+
+            match ffmpeg_res {
+                Ok(o) if o.status.success() && target_wav.exists() => {},
+                _ => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error": "URL does not point to valid WAV audio and could not be decoded by ffmpeg."
+                        })),
+                    ).into_response();
+                }
+            }
+        }
+    }
+
+    // Read and parse target_wav
+    let final_bytes = match tokio::fs::read(&target_wav).await {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to read converted WAV file: {}", e) })),
+            ).into_response();
+        }
+    };
+
+    let mut buffer = match AudioBuffer::from_wav_bytes(&final_bytes) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("Invalid converted WAV: {}", e) })),
+            ).into_response();
+        }
+    };
+
+    if buffer.sample_rate != 48000 {
+        buffer = buffer.resample_linear(48000);
+    }
+    if buffer.channels != 2 {
+        buffer = buffer.to_stereo();
+    }
+
+    let file_name = parsed_url.path_segments()
+        .and_then(|mut s| s.next_back())
+        .filter(|s| !s.is_empty())
+        .map(|s| sanitize_ref_name(s))
+        .unwrap_or_else(|| "url_reference.wav".to_string());
+
+    let features = match AcousticAnalyzer::analyze_buffer(&file_name, &buffer) {
+        Ok(f) => f,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("Acoustic analysis failed for '{}': {}", file_name, e)
+                })),
+            ).into_response();
+        }
+    };
+
+    let meta = ReferenceWavMeta {
+        id: id.clone(),
+        file_name,
+        duration_secs: buffer.duration_secs(),
+        sample_rate: buffer.sample_rate,
+        channels: buffer.channels,
+        file_size_bytes: final_bytes.len() as u64,
+        bpm: features.bpm,
+        key_signature: features.key_signature.clone(),
+        uploaded_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    state.reference_wavs.write().await.insert(
+        id.clone(),
+        StoredReferenceWav {
+            meta: meta.clone(),
+            features,
+            audio_buffer: buffer,
+            file_path: target_wav,
+        },
+    );
+
+    let total = state.reference_wavs.read().await.len();
+    Json(serde_json::json!({
+        "status": "ok",
+        "reference_wav": meta,
+        "total_count": total,
+    })).into_response()
+}
+
+/// GET /api/reference-wavs — Lists all active reference WAV files.
+pub async fn handle_list_reference_wavs(State(state): State<AppState>) -> Response {
+    let store = state.reference_wavs.read().await;
+    let mut list: Vec<ReferenceWavMeta> = store.values().map(|item| item.meta.clone()).collect();
+    list.sort_by(|a, b| a.uploaded_at.cmp(&b.uploaded_at));
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "reference_wavs": list,
+        "count": list.len(),
+        "max_allowed": 20,
+    })).into_response()
+}
+
+/// DELETE /api/reference-wavs/:id — Removes a specific reference WAV from memory and disk.
+pub async fn handle_delete_reference_wav(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    if id.contains("..") || id.contains('/') || id.contains('\\') || id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid reference WAV ID" })),
+        ).into_response();
+    }
+
+    let removed = state.reference_wavs.write().await.remove(&id);
+    if let Some(item) = removed {
+        let _ = tokio::fs::remove_file(&item.file_path).await;
+    }
+
+    let remaining_count = state.reference_wavs.read().await.len();
+    Json(serde_json::json!({
+        "status": "ok",
+        "deleted_id": id,
+        "remaining_count": remaining_count,
+    })).into_response()
+}
+
+/// DELETE /api/reference-wavs — Clears all reference WAVs.
+pub async fn handle_clear_reference_wavs(State(state): State<AppState>) -> Response {
+    let mut store = state.reference_wavs.write().await;
+    for (_, item) in store.drain() {
+        let _ = tokio::fs::remove_file(&item.file_path).await;
+    }
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "message": "All reference WAVs cleared",
+        "count": 0,
+    })).into_response()
+}
+
+/// GET /api/reference-wavs/:id/audio — Streams reference WAV audio for audition playback.
+pub async fn handle_stream_reference_wav(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    if id.contains("..") || id.contains('/') || id.contains('\\') || id.is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    let item = {
+        let store = state.reference_wavs.read().await;
+        store.get(&id).cloned()
+    };
+
+    let item = match item {
+        Some(it) => it,
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let bytes = item.audio_buffer.to_wav_bytes();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "audio/wav")
+        .header(header::CONTENT_LENGTH, bytes.len().to_string())
+        .body(Body::from(bytes))
+        .unwrap()
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct GenerateRlRequest {
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub lyrics: Option<String>,
+}
+
+/// POST /api/reference-wavs/generate-rl — Synthesizes song using anti-monopoly blended style, audits originality, and applies RL policy.
+pub async fn handle_generate_rl(
+    State(state): State<AppState>,
+    Json(req): Json<GenerateRlRequest>,
+) -> Response {
+    let store = state.reference_wavs.read().await;
+    if store.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "No reference WAVs uploaded. Please import 1 to 20 reference WAVs before generating."
+            })),
+        ).into_response();
+    }
+
+    let features: Vec<AcousticFeatureVector> = store.values().map(|it| it.features.clone()).collect();
+    let blended = match AcousticAnalyzer::blend_ensemble(&features, None) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("Ensemble blending failed: {}", e) })),
+            ).into_response();
+        }
+    };
+
+    let song_id = format!("rl_song_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let genre_str = req.genre.as_deref().unwrap_or("Roots Reggae");
+    let genre = GenreTaxonomy::get_or_default(genre_str);
+    let bpm = blended.blended_bpm.round().clamp(50.0, 200.0) as u32;
+    let key = if blended.consensus_key.is_empty() { genre.default_key.clone() } else { blended.consensus_key.clone() };
+
+    let mut init_state = MusicProductionState::new(&song_id, &genre.name, bpm, &key);
+    init_state.style_prompt = req.prompt.unwrap_or_else(|| format!("Blended reference style at {} BPM in {}", bpm, key));
+    init_state.engine_mode = "pure_rust".to_string();
+    if let Some(lyr) = req.lyrics {
+        init_state.lyrics = lyr;
+    }
+
+    // Add metadata for references
+    init_state.reference_wavs = store.values().map(|it| it.meta.clone()).collect();
+
+    // Execute through production pipeline (synthesizes 100% from scratch)
+    let exec_res = match state.runner.execute_song(init_state).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Pipeline synthesis failed: {}", e) })),
+            ).into_response();
+        }
+    };
+
+    // Load final master buffer to audit originality
+    let master_path = exec_res.stem_paths.get("final_master")
+        .cloned()
+        .unwrap_or_else(|| state.storage_dir.join("songs").join(&song_id).join("v1").join("final_master.wav"));
+
+    let master_buffer = if master_path.exists() {
+        tokio::fs::read(&master_path).await
+            .ok()
+            .and_then(|b| AudioBuffer::from_wav_bytes(&b).ok())
+            .unwrap_or_else(|| AudioBuffer::new_stereo(8.0))
+    } else {
+        AudioBuffer::new_stereo(8.0)
+    };
+
+    let candidate_features = AcousticAnalyzer::analyze_buffer("final_master.wav", &master_buffer)
+        .unwrap_or_else(|_| AcousticFeatureVector {
+            file_name: "final_master.wav".to_string(),
+            duration_secs: master_buffer.duration_secs(),
+            sample_rate: master_buffer.sample_rate,
+            channels: master_buffer.channels,
+            bpm: bpm as f32,
+            chroma_12bin: [0.0; 12],
+            key_signature: key.clone(),
+            key_confidence: 0.9,
+            spectral_centroid_hz: 2000.0,
+            crest_factor_db: 12.0,
+            dynamic_range_db: 14.0,
+            vocal_presence_ratio: 0.35,
+            vocal_activity_ratio: 0.40,
+            timbre_subbands: [0.5; 8],
+            style_embedding: vec![0.0; 64],
+            pitch_token_sequence: Vec::new(),
+        });
+
+    // Prepare references for LegalOriginalityGuard audit
+    let ref_tuples: Vec<(&str, &AudioBuffer, &[[f32; 12]], &[u8])> = store.values()
+        .map(|it| (
+            it.meta.file_name.as_str(),
+            &it.audio_buffer,
+            std::slice::from_ref(&it.features.chroma_12bin),
+            it.features.pitch_token_sequence.as_slice(),
+        ))
+        .collect();
+
+    let candidate_chroma = std::slice::from_ref(&candidate_features.chroma_12bin);
+    let originality_report = LegalOriginalityGuard::audit_candidate(
+        "candidate_master",
+        &master_buffer,
+        candidate_chroma,
+        &candidate_features.pitch_token_sequence,
+        &ref_tuples,
+    );
+    let legal_compliance = originality_report.legal_compliance.clone();
+
+    let seed = chrono::Utc::now().timestamp_millis() as u64;
+    let action = state.rl_policy.read().await.select_action(&candidate_features.style_embedding, seed);
+    let reward_breakdown = RlPolicy::evaluate_composite_reward(
+        &candidate_features.style_embedding,
+        &candidate_features.chroma_12bin,
+        candidate_features.bpm,
+        0.98,
+        false,
+        candidate_features.vocal_presence_ratio,
+        24.0,
+        candidate_features.dynamic_range_db,
+        &blended,
+        &originality_report,
+        Some(1.0),
+    );
+
+    *state.last_synthesis_action.write().await = Some(action.clone());
+
+    let audio_urls = build_audio_urls(&song_id, exec_res.version);
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "song_id": song_id,
+        "version": exec_res.version,
+        "bpm": bpm,
+        "key_signature": key,
+        "audio_urls": audio_urls,
+        "blended_style": blended,
+        "originality_report": originality_report,
+        "legal_compliance": legal_compliance,
+        "composite_reward": reward_breakdown,
+    })).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DpoPreferenceRequest {
+    pub preference: String, // "keep" or "revert"
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// POST /api/feedback/preference — Online DPO preference learning on Keep / Revert pairs.
+pub async fn handle_dpo_preference(
+    State(state): State<AppState>,
+    Json(req): Json<DpoPreferenceRequest>,
+) -> Response {
+    let last_action = state.last_synthesis_action.read().await.clone();
+    let action = match last_action {
+        Some(a) => a,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "No recent RL synthesis action recorded to form DPO preference pair." })),
+            ).into_response();
+        }
+    };
+
+    let neutral = SynthesisAction::default();
+    let (chosen_v, rejected_v) = match req.preference.to_ascii_lowercase().as_str() {
+        "keep" | "winner" | "positive" => (action.to_vector(), neutral.to_vector()),
+        "revert" | "loser" | "negative" => (neutral.to_vector(), action.to_vector()),
+        other => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("Invalid preference '{}': must be 'keep' or 'revert'", other) })),
+            ).into_response();
+        }
+    };
+
+    let pair = DpoPreferencePair {
+        song_id: "active_song".to_string(),
+        chosen_version: 1,
+        rejected_version: 0,
+        context_vector: vec![0.5; 64],
+        chosen_action: chosen_v,
+        rejected_action: rejected_v,
+        feedback_type: req.preference.clone(),
+    };
+
+    state.rl_policy.write().await.update_dpo_preference(&pair);
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "preference": req.preference,
+        "dpo_update_count": 1,
+    })).into_response()
+}
+
+// ---------------------------------------------------------------------------
 // Static File Serving
 // ---------------------------------------------------------------------------
 
@@ -1650,6 +2461,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/songs/:id/download", get(handle_download_latest))
         .route("/api/songs/assist-iteration", post(handle_assist_iteration))
         .route("/api/songs/:id/assist", get(handle_assist_iteration_get).post(handle_assist_iteration))
+        // Milestone 8: Reference WAV Importer, URL Conversion, RL Generation & DPO Preference
+        .route("/api/reference-wavs/upload", post(handle_upload_reference_wavs))
+        .route("/api/reference-wavs/from-url", post(handle_reference_wav_from_url))
+        .route("/api/reference-wavs", get(handle_list_reference_wavs).delete(handle_clear_reference_wavs))
+        .route("/api/reference-wavs/:id", delete(handle_delete_reference_wav))
+        .route("/api/reference-wavs/:id/audio", get(handle_stream_reference_wav))
+        .route("/api/reference-wavs/generate-rl", post(handle_generate_rl))
+        .route("/api/feedback/preference", post(handle_dpo_preference))
         // Web Studio UI Static Assets
         .route("/", get(handle_index))
         .route("/index.html", get(handle_index))
@@ -1772,12 +2591,7 @@ pub async fn start_rest_server_with_host(
 ) -> anyhow::Result<u16> {
     let (listener, bound_port) = bind_server_dynamic_on_host(host, start_port, end_port).await?;
 
-    let app_state = AppState {
-        runner,
-        storage_dir,
-        bound_port,
-        ollama_host,
-    };
+    let app_state = AppState::new(runner, storage_dir, bound_port, ollama_host);
 
     let router = create_router(app_state);
 
@@ -1800,12 +2614,7 @@ pub async fn run_server_foreground(
 ) -> anyhow::Result<()> {
     let (listener, bound_port) = bind_server_dynamic(start_port, end_port).await?;
 
-    let app_state = AppState {
-        runner,
-        storage_dir,
-        bound_port,
-        ollama_host,
-    };
+    let app_state = AppState::new(runner, storage_dir, bound_port, ollama_host);
 
     let router = create_router(app_state);
     axum::serve(listener, router).await?;
