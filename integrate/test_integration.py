@@ -31,8 +31,11 @@ async def test_suite():
     for m in ollama:
         print(f"  - {m}")
 
-    best = select_best_local_model("auto")
-    print(f"\nBest Selected Engine: {json.dumps(best, indent=2)}")
+    best = select_best_local_model("auto", task_type="general")
+    print(f"\nBest Selected General Engine: {json.dumps(best, indent=2)}")
+
+    security_best = select_best_local_model("security", task_type="security")
+    print(f"\nBest Selected Security/Pentest Engine: {json.dumps(security_best, indent=2)}")
 
     print("\n=== 2. Running Local Agent Test Query ===")
     prompt = "Respond in 5 words or less: Local Antigravity Engine operational."

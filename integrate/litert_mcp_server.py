@@ -39,7 +39,8 @@ async def get_local_ai_status() -> str:
 
         litert_models = local_engine.get_available_litert_models()
         ollama_models = local_engine.get_available_ollama_models()
-        best_selection = local_engine.select_best_local_model("auto")
+        best_selection = local_engine.select_best_local_model("auto", task_type="general")
+        security_selection = local_engine.select_best_local_model("security", task_type="security")
 
         status_report = {
             "status": "online",
@@ -50,6 +51,7 @@ async def get_local_ai_status() -> str:
                 "used_ram_percent": f"{mem.percent}%",
             },
             "selected_active_engine": best_selection,
+            "selected_security_engine": security_selection,
             "engines": {
                 "litert": {
                     "available": bool(litert_models or os.path.exists(local_engine.GEMMA4_DEFAULT_PATH)),
@@ -82,7 +84,7 @@ async def run_local_agent(
     
     Args:
         prompt: The task instruction or question to send to the local agent.
-        model_preference: 'auto' (best fit), 'litert' (Gemma 4 26B LiteRT), or 'ollama' (local Ollama).
+        model_preference: 'auto' (RAM-sized best fit), 'security' (security/abliterated tier), 'litert', or a specific Ollama model name.
         workspace: Optional workspace directory path for file tools.
         allow_write_tools: Whether to allow the local agent to edit files or run commands.
     """
@@ -104,6 +106,7 @@ async def audit_file_offline(
     file_path: str,
     audit_type: str = "security_and_bugs",
     workspace: str = "",
+    model_preference: str = "security",
 ) -> str:
     """
     Audits a local code file completely offline for vulnerabilities, logic bugs,
@@ -113,6 +116,7 @@ async def audit_file_offline(
         file_path: Absolute or workspace-relative path to the file to audit.
         audit_type: 'security_and_bugs', 'performance', or 'refactor'.
         workspace: Optional project workspace root.
+        model_preference: 'security' (default, uses security/abliterated model), 'auto', or explicit model name.
     """
     try:
         p = Path(file_path)
@@ -132,11 +136,13 @@ async def audit_file_offline(
             "3. Actionable remediation steps with diff/snippet recommendations"
         )
 
+        is_sec = "security" in audit_type.lower() or model_preference.lower() == "security"
         return await local_engine.run_local_agent(
             prompt=prompt,
-            model_preference="auto",
+            model_preference=model_preference,
             workspace=workspace or str(p.parent),
             allow_write_tools=False,
+            task_type="security" if is_sec else "general",
         )
     except Exception as e:
         return f"Offline audit error: {str(e)}"
@@ -147,6 +153,7 @@ async def run_security_gauntlet(
     target_file: str,
     test_file: str = "",
     workspace: str = "",
+    model_preference: str = "security",
 ) -> str:
     """
     Executes the 3-step Adversarial Security Gauntlet on a target module offline:
@@ -158,12 +165,14 @@ async def run_security_gauntlet(
         target_file: Target source file to audit and patch.
         test_file: Optional unit test file to validate against.
         workspace: Workspace root.
+        model_preference: 'security' (default, uses security/abliterated tier), 'auto', or explicit model name.
     """
     try:
         return await local_engine.run_offline_security_gauntlet(
             target_file=target_file,
             test_file=test_file if test_file.strip() else None,
             workspace=workspace.strip() if workspace else None,
+            model_preference=model_preference,
         )
     except Exception as e:
         return f"Security gauntlet error: {str(e)}"
