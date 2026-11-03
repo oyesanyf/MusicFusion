@@ -49,14 +49,8 @@ $pythonExe = if (Test-Path "C:\Python314\python.exe") {
 # Optional Pre-Ship Test Verification Gate
 if (-not $SkipTest) {
     Write-Host "[0/5] Executing deterministic benchmark suite and regression tests..." -ForegroundColor Magenta
-    Remove-Item "target\debug\deps\benchmarks_r4-*.exe" -Force -ErrorAction SilentlyContinue
-    cargo test -p quorum-daemon --test benchmarks_r4 --no-run 2>$null
-    Get-ChildItem -Path "target\debug\deps\benchmarks_r4-*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
-        try {
-            Set-AuthenticodeSignature -FilePath $_.FullName -Certificate (Get-Item Cert:\CurrentUser\My\9A6D3B509500813058EC63183476464FAC8F015B) -ErrorAction SilentlyContinue | Out-Null
-        } catch {}
-    }
-    cargo test -p quorum-daemon --test benchmarks_r4 -- --test-threads=2
+    Remove-Item "target\debug\deps\benchmarks_r4*" -Force -ErrorAction SilentlyContinue
+    cargo test -p quorum-daemon --test benchmarks_r4 -- --test-threads=1
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Benchmark verification failed. Aborting PR shipping."
         exit $LASTEXITCODE
