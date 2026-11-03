@@ -1025,7 +1025,36 @@ impl DeterministicOfflineSynthesisEngine {
                     }
                 }
 
-                let opening = if !grounded_summary.is_empty() {
+                // A title/heading line ("FEMI OYESANYA, CISSP", "SIMPLE LEASE AGREEMENT") is not a description:
+                // use the first prose line of the top excerpt instead when one exists.
+                if !Self::is_sentence_like(&grounded_summary) {
+                    if let Some(prose) = cleaned_first
+                        .lines()
+                        .map(str::trim)
+                        .find(|l| Self::is_sentence_like(l) && !l.contains("fileciteturn0file0"))
+                    {
+                        grounded_summary = prose.to_string();
+                    }
+                }
+
+                // Prefer the subject's role as stated in the documents themselves, e.g.
+                // "between Angela Davis (landlord) and ..." -> "Angela Davis is the landlord ...".
+                // Never glue an unrelated first line (such as a document title) onto "X is a".
+                let subject_name = prefix.trim_end().strip_suffix(" is").map(|s| s.trim().to_string());
+                let role_opening = subject_name.as_deref().and_then(|subj| {
+                    Self::subject_role_from_chunks(subj, &matched_chunk_refs).map(|(role, cites)| {
+                        let cite_str = cites.iter().map(|n| format!("**[{n}]**")).collect::<Vec<_>>().join(", ");
+                        format!("{subj} is identified as the {role} in the retrieved documents {cite_str}.")
+                    })
+                });
+                let opening = if let Some(ro) = role_opening {
+                    ro
+                } else if subject_name.is_some() && !Self::is_sentence_like(&grounded_summary) {
+                    format!(
+                        "{} appears in the following retrieved documents **[1]**.",
+                        subject_name.as_deref().unwrap_or("This subject")
+                    )
+                } else if !grounded_summary.is_empty() {
                     let clean_sum = grounded_summary.trim_end_matches('.');
                     let prefix_trimmed = prefix.trim_end();
                     if clean_sum.to_ascii_lowercase().starts_with(&prefix_trimmed.to_ascii_lowercase()) {
@@ -1117,6 +1146,63 @@ impl DeterministicOfflineSynthesisEngine {
     /// Extracts and formats an affirmative question-restating prefix from an interrogative user prompt.
     /// Converts questions like "Who is femi" into "Femi is ", "What is RedactX" into "RedactX is ",
     /// and "Where did Femi study" into "Femi studied at ".
+    /// Find a short parenthetical role written right after the subject's name in the retrieved
+    /// text, e.g. "Angela Davis (landlord)". Returns the most frequent role and the 1-based
+    /// citation numbers of the chunks that state it.
+    pub fn subject_role_from_chunks(subject: &str, chunks: &[&ScoredChunk]) -> Option<(String, Vec<usize>)> {
+        let subj_l = subject.trim().to_ascii_lowercase();
+        if subj_l.len() < 3 {
+            return None;
+        }
+        let mut counts: Vec<(String, Vec<usize>)> = Vec::new();
+        for (idx, c) in chunks.iter().enumerate().take(8) {
+            let text = &c.chunk.text_content;
+            let low = text.to_ascii_lowercase();
+            let mut from = 0;
+            while let Some(pos) = low[from..].find(&subj_l) {
+                let after = from + pos + subj_l.len();
+                from = after;
+                let rest = &text[after..];
+                let rest_t = rest.trim_start();
+                if !rest_t.starts_with('(') {
+                    continue;
+                }
+                let Some(close) = rest_t.find(')') else { continue };
+                let inner = rest_t[1..close].trim();
+                let words: Vec<&str> = inner.split_whitespace().collect();
+                if words.is_empty()
+                    || words.len() > 3
+                    || inner.len() > 30
+                    || !inner.chars().all(|ch| ch.is_alphabetic() || ch == ' ' || ch == '-')
+                {
+                    continue;
+                }
+                let role = inner.to_ascii_lowercase();
+                match counts.iter_mut().find(|(r, _)| *r == role) {
+                    Some((_, cites)) => {
+                        if !cites.contains(&(idx + 1)) {
+                            cites.push(idx + 1);
+                        }
+                    }
+                    None => counts.push((role, vec![idx + 1])),
+                }
+            }
+        }
+        counts.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        counts.into_iter().next()
+    }
+
+    /// True when a line reads like prose (mixed case with at least one lowercase word), not an
+    /// ALL-CAPS title such as "SIMPLE LEASE AGREEMENT".
+    pub fn is_sentence_like(line: &str) -> bool {
+        let letters: Vec<char> = line.chars().filter(|c| c.is_alphabetic()).collect();
+        if letters.len() < 12 {
+            return false;
+        }
+        let lower = letters.iter().filter(|c| c.is_lowercase()).count();
+        lower * 2 > letters.len() && line.split_whitespace().count() >= 4
+    }
+
     pub fn format_question_restated_prefix(prompt: &str) -> String {
         let trimmed = prompt.trim();
         if trimmed.is_empty() {
@@ -5247,6 +5333,43 @@ mod tests {
         assert_eq!(cits_cigna.len(), 1);
         assert!(resp_cigna.contains("Cigna Coverage Dispute.docx"));
         assert!(!resp_cigna.contains("```python"));
+    }
+
+    #[test]
+    fn test_fallback_role_extraction_avoids_title_as_identity() {
+        let mk = |path: &str, text: &str| {
+            ScoredChunk::new(
+                DocumentChunk::new(
+                    format!("{path}:0"),
+                    path.to_string(),
+                    path,
+                    1,
+                    1,
+                    0,
+                    vec![0.0; 768],
+                    text,
+                    None,
+                )
+                .unwrap(),
+                0.9,
+                "local",
+                false,
+            )
+        };
+        let a = mk(
+            "Susan lease.doc",
+            "SIMPLE LEASE AGREEMENT\nThis agreement, made and entered into this 15th day of January 2018 between Angela Davis (landlord) and Casey Ringgold (tenant)",
+        );
+        let b = mk("Grace lease.doc", "between Angela Davis (landlord) and Grace Bridges (tenant)");
+        let refs = vec![&a, &b];
+        let (role, cites) =
+            DeterministicOfflineSynthesisEngine::subject_role_from_chunks("Angela Davis", &refs).expect("role");
+        assert_eq!(role, "landlord");
+        assert_eq!(cites, vec![1, 2]);
+        assert!(!DeterministicOfflineSynthesisEngine::is_sentence_like("SIMPLE LEASE AGREEMENT"));
+        assert!(DeterministicOfflineSynthesisEngine::is_sentence_like(
+            "Angela Davis manages residential rental properties in New Orleans."
+        ));
     }
 
     #[test]
