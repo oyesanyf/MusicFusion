@@ -929,6 +929,25 @@ impl DeterministicOfflineSynthesisEngine {
                 return (llm_orchestrated, llm_citations);
             }
 
+            // 1b. Fast-model retry: the primary model (often 26B+ on CPU) timed out or failed, so retry with up
+            // to two smaller installed models over the strongest excerpts before giving up on LLM synthesis.
+            if matched_chunk_refs.len() > 0 {
+                let installed = Self::probe_installed_ollama_models_default();
+                if !installed.is_empty() {
+                    let hw = crate::hardware::HardwareTelemetry::probe();
+                    let failed_model = Self::resolve_ollama_model_tag(model_tag, &hw, &installed);
+                    let top_refs = &matched_chunk_refs[..matched_chunk_refs.len().min(5)];
+                    for fast in crate::answer_orchestrator::fast_fallback_models(&installed, &failed_model).iter().take(2) {
+                        tracing::warn!(failed = %failed_model, retry = %fast, "Primary synthesis failed; retrying with faster local model");
+                        if let Some((text, cits)) =
+                            Self::query_local_ollama_chat(&effective_question, history, top_refs, fast, telemetry_tx)
+                        {
+                            return (text, cits);
+                        }
+                    }
+                }
+            }
+
             // 2. Deterministic offline fallback (used in unit tests or if local Ollama daemon is unreachable)
             let prefix = Self::format_question_restated_prefix(prompt_eff);
 
@@ -1073,7 +1092,17 @@ impl DeterministicOfflineSynthesisEngine {
                 answer_parts.push(opening);
             }
 
-            answer_parts.extend(body_paragraphs);
+            // LangExtract-style grounded composition: structured, span-grounded facts and key passages
+            // replace raw excerpt dumps whenever anything can be grounded.
+            let fallback_subject = prefix.trim_end().strip_suffix(" is").map(|s| s.trim().to_string());
+            match crate::answer_orchestrator::render_grounded_sections(
+                prompt_eff,
+                fallback_subject.as_deref(),
+                &matched_chunk_refs,
+            ) {
+                Some(sections) => answer_parts.push(sections),
+                None => answer_parts.extend(body_paragraphs),
+            }
 
             // Add end-of-response sources block with accuracy scores (zero line numbers!)
             let raw_answer = answer_parts.join("\n\n");

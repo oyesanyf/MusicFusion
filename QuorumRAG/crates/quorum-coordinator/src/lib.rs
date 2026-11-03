@@ -1,5 +1,6 @@
 pub mod acl;
 pub mod agentic;
+pub mod answer_orchestrator;
 pub mod cache;
 pub mod config;
 pub mod coordinator;

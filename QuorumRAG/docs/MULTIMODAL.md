@@ -70,6 +70,23 @@ the picture and cite it.
   allows), and the answer falls back to metadata only.
 - Each image costs about 8 to 10 seconds with `moondream` on this machine.
 
+## Answer orchestration when the LLM is slow or unavailable
+
+`crates/quorum-coordinator/src/answer_orchestrator.rs` keeps answers meaningful in three stages:
+
+1. **Primary synthesis.** The configured local model writes the grounded answer (unchanged).
+2. **Fast-model retry.** If the primary model fails or times out (for example `gemma4:26b` on CPU while
+   the machine is busy), up to two smaller installed models (`qwen2.5:7b`, `glm4:9b`, `gemma2:9b`, ...)
+   retry over the 5 strongest excerpts.
+3. **LangExtract-style grounded composition.** If no model answers, facts are extracted from the cleaned
+   excerpts: the subject's role ("Angela Davis (landlord)"), other parties, addresses, phone numbers,
+   emails, labelled amounts ("late fee of $50.00"), and dates. Each candidate is grounded to an exact
+   character span with `langextract::extraction::ground_extraction`, and ungrounded candidates are dropped
+   by `filter_grounded`. The same fact found in several documents is merged with all its citations. The
+   answer opens with the documented role, followed by **Key facts from the documents** and
+   **Relevant passages** (verbatim sentences). Raw excerpt dumps and ALL-CAPS document titles are no longer
+   used as the answer.
+
 ## Web UI: clickable attachments
 
 In `crates/quorum-ui/assets/app.js`:
