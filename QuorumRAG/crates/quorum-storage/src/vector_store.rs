@@ -61,11 +61,19 @@ impl VectorStore {
                 .map_err(|e| StorageError::Lance(format!("Create table error: {}", e)))?
         };
 
+        // An IVF_PQ index persisted by a previous run must be detected, otherwise the first insert
+        // after every restart would retrain the whole vector index over the full table.
+        let has_vector_index = table
+            .list_indices()
+            .await
+            .map(|ix| ix.iter().any(|i| i.columns.iter().any(|c| c == "vector")))
+            .unwrap_or(false);
+
         Ok(Self {
             table: Arc::new(RwLock::new(table)),
             _db: db,
             config: config.clone(),
-            ivf_index_built: std::sync::atomic::AtomicBool::new(false),
+            ivf_index_built: std::sync::atomic::AtomicBool::new(has_vector_index),
         })
     }
 
@@ -160,6 +168,24 @@ impl VectorStore {
             .await
             .map_err(|e| StorageError::Lance(format!("Delete error: {}", e)))?;
         Ok(before_count)
+    }
+
+    /// Deletes all chunks for any of `file_paths` with a single `IN (...)` predicate.
+    pub(crate) async fn delete_by_file_paths(&self, file_paths: &[String]) -> Result<(), StorageError> {
+        if file_paths.is_empty() {
+            return Ok(());
+        }
+        let list = file_paths
+            .iter()
+            .map(|p| format!("'{}'", p.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let table = self.table.read().await;
+        table
+            .delete(&format!("file_path IN ({list})"))
+            .await
+            .map_err(|e| StorageError::Lance(format!("Delete error: {}", e)))?;
+        Ok(())
     }
 
     /// Creates an IVF_PQ index over the vector column using Cosine distance.

@@ -27,6 +27,11 @@ pub enum CandidateKind {
         format_label: String,
         mime_type: String,
     },
+    /// Audio file -> routed to AudioIndexer (ID3 tags, MPEG frame sync, lyrics, track info).
+    Audio {
+        format_label: String,
+        mime_type: String,
+    },
 }
 
 /// Filter decision with explicit audit rationale.
@@ -176,6 +181,24 @@ impl ClassifierRouter {
             };
         }
 
+        // 5b. Audio Ingestion Routing Invariant:
+        // DO NOT SKIP AUDIO! Audio files (MP3, WAV, FLAC, OGG, M4A, AAC, WMA, AIFF, OPUS)
+        // must route to AudioIndexer for rich metadata, ID3, and companion lyrics indexing.
+        if identity.category == FileCategory::Audio
+            || Self::is_audio_mime(&identity.mime_type)
+            || Self::is_audio_label(&identity.label)
+        {
+            return FilterDecision::Accept {
+                identity: identity.clone(),
+                kind: CandidateKind::Audio {
+                    format_label: identity.label,
+                    mime_type: identity.mime_type,
+                },
+                size_bytes: size,
+                mtime_secs: mtime,
+            };
+        }
+
         // 6. Text / Source Code / Structured Data Routing
         if self.config.exclude_source_code && identity.category == FileCategory::Code {
             return FilterDecision::SkipBinary { identity };
@@ -196,7 +219,7 @@ impl ClassifierRouter {
             };
         }
 
-        // 7. Non-indexable compiled binaries (PE, ELF, Mach-O, DEX, WASM, Archives, Audio, Video)
+        // 7. Non-indexable compiled binaries (PE, ELF, Mach-O, DEX, WASM, Archives, Video)
         debug!(
             path = %path.display(),
             label = %identity.label,
@@ -228,6 +251,40 @@ impl ClassifierRouter {
         matches!(
             label,
             "png" | "jpeg" | "jpg" | "webp" | "gif" | "bmp" | "svg" | "tiff"
+        )
+    }
+
+    /// Fast helper to confirm if a MIME type represents a supported audio format.
+    pub fn is_audio_mime(mime: &str) -> bool {
+        mime.starts_with("audio/")
+            || matches!(
+                mime,
+                "audio/mpeg"
+                    | "audio/mp3"
+                    | "audio/wav"
+                    | "audio/vnd.wave"
+                    | "audio/x-wav"
+                    | "audio/wave"
+                    | "audio/flac"
+                    | "audio/x-flac"
+                    | "audio/ogg"
+                    | "audio/vorbis"
+                    | "audio/mp4"
+                    | "audio/m4a"
+                    | "audio/x-m4a"
+                    | "audio/aac"
+                    | "audio/x-ms-wma"
+                    | "audio/aiff"
+                    | "audio/x-aiff"
+                    | "audio/opus"
+            )
+    }
+
+    /// Fast helper to confirm if a label represents an audio format.
+    pub fn is_audio_label(label: &str) -> bool {
+        matches!(
+            label.to_ascii_lowercase().as_str(),
+            "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "wma" | "aiff" | "aif" | "opus"
         )
     }
 

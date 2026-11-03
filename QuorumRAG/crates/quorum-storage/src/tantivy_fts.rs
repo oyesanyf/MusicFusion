@@ -338,7 +338,11 @@ impl TantivyFtsIndex {
                 "in", "on", "at", "with", "from", "by", "about", "go", "fo", "went",
                 "attend", "attended", "tell", "me", "can", "you", "please", "his", "her", "their",
             ];
-            let sanitized: String = trimmed
+            // Remove conversational framing ("show me the file that contains a ...",
+            // "are there pictures taken in ...") so only the subject drives BM25.
+            let subject = crate::query_framing::strip_conversational_framing(trimmed);
+            let subject_src: &str = if subject.is_empty() { trimmed } else { subject.as_str() };
+            let sanitized: String = subject_src
                 .chars()
                 .map(|c| if c.is_alphanumeric() || c == '_' { c } else { ' ' })
                 .collect();
@@ -420,8 +424,13 @@ impl TantivyFtsIndex {
                 continue;
             }
 
-            let is_low_priority_code_or_repo = path_l.contains("\\harfile\\")
-                || path_l.contains("/harfile/")
+            // Indexed media (audio/image chunks) are user content even inside a repo tree such as
+            // D:\harfile\music, so only code/config files under the repo root are demoted.
+            let is_media_chunk = chunk.text_content.trim_start().starts_with("[Audio Document:")
+                || chunk.text_content.trim_start().starts_with("[Image Document:")
+                || chunk.text_content.trim_start().starts_with("[Video Document:");
+            let is_low_priority_code_or_repo = (!is_media_chunk
+                && (path_l.contains("\\harfile\\") || path_l.contains("/harfile/")))
                 || file_l.ends_with(".rs")
                 || file_l.ends_with(".py")
                 || file_l.ends_with(".js")
@@ -459,6 +468,27 @@ impl TantivyFtsIndex {
         });
 
         Ok(scored_chunks)
+    }
+
+    /// Returns the lowest `access_tier` among chunks whose stored `file_path` equals `file_path`
+    /// exactly, or `None` when the path is not part of the index.
+    pub(crate) fn indexed_path_min_tier(&self, file_path: &str) -> Result<Option<u8>, StorageError> {
+        self.reload_with_retry(SyncCheck::None)?;
+        let searcher = self.reader.searcher();
+        let term = Term::from_field_text(self.field_file_path, file_path);
+        let query = TermQuery::new(term, IndexRecordOption::Basic);
+        let hits = searcher
+            .search(&query, &TopDocs::with_limit(64).order_by_score())
+            .map_err(|e| StorageError::Tantivy(e.to_string()))?;
+        let mut min_tier: Option<u8> = None;
+        for (_score, addr) in hits {
+            let doc: TantivyDocument = searcher
+                .doc(addr)
+                .map_err(|e| StorageError::Tantivy(e.to_string()))?;
+            let chunk = self.doc_to_chunk(&doc);
+            min_tier = Some(min_tier.map_or(chunk.access_tier, |t: u8| t.min(chunk.access_tier)));
+        }
+        Ok(min_tier)
     }
 
     /// Checks if a chunk hash already exists in the Tantivy index.

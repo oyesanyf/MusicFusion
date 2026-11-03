@@ -16,6 +16,7 @@ pub mod scatter_gather;
 pub mod telemetry;
 pub mod tpm;
 pub mod types;
+pub mod vision;
 pub mod volatile;
 
 pub use acl::{AccessTierPolicy, AttestationTier, PeerAclManager, PeerAttestationRecord};

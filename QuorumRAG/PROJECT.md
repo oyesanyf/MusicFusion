@@ -88,6 +88,13 @@ QuorumRAG is a production-grade, local-first, peer-to-peer retrieval-augmented g
 | 55 | Deterministic 7-Metric Benchmark Suite & Fault Regressions | `tests/benchmarks_r4.rs` (latency, disk I/O, CPU, RSS memory, doc/image index, binary exclusion, consensus) & Byzantine regression tests | M10 | follow-up (R4) |
 | 56 | Solo Developer PR Shipping & Squash-Merge | Clean branch, atomic commits, automated test suite verification, PR with 7-metric table, self-review & merge into main | M10 | follow-up (R4) |
 | 57 | Source Code & Temp File Ingestion Exclusion & RAG Isolation | Ingestion strictly indexes documents and images while excluding FileCategory::Code, source code extensions, and temp/lock files (~*, .tmp, .bak); default exclude_source_code: true; purge/skip code/temp chunks in reindex/retrieval | M8.5 | follow-up req |
+| 58 | Executable-Only Binary Filter | `SkipBinary` restricted to compiled executables/shared libraries (PE, ELF, Mach-O, bytecode); audio and images are indexed | M16 | user (multimodal) |
+| 59 | Audio Indexing | ID3v1/ID3v2 tags, USLT lyrics, MPEG/WAV/FLAC stream properties, companion lyric files (`audio_indexer.rs`) | M16 | user (multimodal) |
+| 60 | EXIF GPS + Offline Reverse Geocoding | TIFF IFD/GPS IFD 0x8825 parsing, XMP/IPTC location, embedded gazetteer with haversine radius matching (`exif.rs`, `reverse_geocoder.rs`) | M16 | user (multimodal) |
+| 61 | Query Framing + Media Intent | Conversational framing stripped before BM25; requested modality ranked first (`query_framing.rs`, coordinator retrieve) | M16 | user (multimodal) |
+| 62 | Query-Time Vision | Top cited local images sent to a local Ollama vision model; descriptions ground the answer, cached by BLAKE3 (`vision.rs`) | M16 | user (multimodal) |
+| 63 | Media Streaming, Open-File, Export | `GET /api/media` (Range, index-gated), `POST /api/open-file` (loopback), `POST /api/export` (PDF 1.4 / DOCX) | M16 | user (multimodal) |
+| 64 | Clickable Multimodal UI | Inline image gallery + lightbox, audio/video players, clickable sources and `[n]` citations, Save File PDF/Word menu | M16 | user (multimodal) |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
@@ -300,3 +307,7 @@ To leverage existing fusion intelligence from `d:\harfile\fusion`, QuorumRAG dir
 3. **Preserve Classifier Tests**: `FileTypeClassifier::classify_bytes` in `quorum-classifier` retains `FileCategory::Code` identification capability for classifier unit tests.
 4. **Configuration Default**: `IngestConfig::exclude_source_code` defaults to `true` unless a test or explicit flag overrides it.
 5. **RAG Search Isolation**: Any source code chunks in existing indexes are filtered/skipped during reindexing or retrieval so RAG queries return only user documents and images.
+
+
+## Multimodal RAG (Milestone M16)
+See `docs/MULTIMODAL.md` for formats, the GPS/geocoder design and coverage limits, query-time vision, the `/api/media`, `/api/open-file`, and `/api/export` security model, reindex instructions, and known open issues.

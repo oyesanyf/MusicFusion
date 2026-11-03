@@ -1160,7 +1160,7 @@ impl FileTypeClassifier {
             "sqlite" | "sqlite3" | "db" => FileIdentity::new("sqlite", "application/vnd.sqlite3", FileCategory::Data, "SQLite database", false, base_score, ClassifierEngine::ExtensionFallback),
             "bat" | "cmd" => FileIdentity::new("batch", "text/x-msdos-batch", FileCategory::Code, "Windows batch script", true, base_score, ClassifierEngine::ExtensionFallback),
             // Executables / Binaries / System Libraries / Intermediate Artifacts
-            "exe" | "dll" | "sys" | "ocx" | "cpl" | "scr" | "msi" | "drv" => FileIdentity::new(
+            "exe" | "dll" | "sys" | "ocx" | "cpl" | "scr" | "msi" | "drv" | "efi" => FileIdentity::new(
                 "pebin",
                 "application/x-dosexec",
                 FileCategory::Executable,
@@ -1169,11 +1169,11 @@ impl FileTypeClassifier {
                 base_score,
                 ClassifierEngine::ExtensionFallback,
             ),
-            "so" | "dylib" | "ko" => FileIdentity::new(
+            "so" | "dylib" | "ko" | "bundle" | "kext" | "framework" => FileIdentity::new(
                 "dylib",
                 "application/octet-stream",
                 FileCategory::Executable,
-                "Shared library or kernel module binary",
+                "Shared library, kernel module, or framework binary",
                 false,
                 base_score,
                 ClassifierEngine::ExtensionFallback,
@@ -1196,11 +1196,11 @@ impl FileTypeClassifier {
                 base_score,
                 ClassifierEngine::ExtensionFallback,
             ),
-            "class" => FileIdentity::new(
+            "class" | "dex" => FileIdentity::new(
                 "class",
                 "application/java-vm",
                 FileCategory::Executable,
-                "Java compiled bytecode",
+                "Java / Android compiled bytecode",
                 false,
                 base_score,
                 ClassifierEngine::ExtensionFallback,
@@ -1241,6 +1241,27 @@ impl FileTypeClassifier {
                 base_score,
                 ClassifierEngine::ExtensionFallback,
             ),
+            // Audio formats
+            "mp3" => FileIdentity::new("mp3", "audio/mpeg", FileCategory::Audio, "MP3 audio file", false, base_score, ClassifierEngine::ExtensionFallback),
+            "wav" => FileIdentity::new("wav", "audio/vnd.wave", FileCategory::Audio, "WAV audio stream", false, base_score, ClassifierEngine::ExtensionFallback),
+            "flac" => FileIdentity::new("flac", "audio/flac", FileCategory::Audio, "FLAC lossless audio", false, base_score, ClassifierEngine::ExtensionFallback),
+            "ogg" => FileIdentity::new("ogg", "audio/ogg", FileCategory::Audio, "Ogg multimedia container", false, base_score, ClassifierEngine::ExtensionFallback),
+            "m4a" => FileIdentity::new("m4a", "audio/mp4", FileCategory::Audio, "M4A audio file", false, base_score, ClassifierEngine::ExtensionFallback),
+            "aac" => FileIdentity::new("aac", "audio/aac", FileCategory::Audio, "AAC audio stream", false, base_score, ClassifierEngine::ExtensionFallback),
+            "wma" => FileIdentity::new("wma", "audio/x-ms-wma", FileCategory::Audio, "Windows Media Audio", false, base_score, ClassifierEngine::ExtensionFallback),
+            "aiff" | "aif" => FileIdentity::new("aiff", "audio/x-aiff", FileCategory::Audio, "AIFF audio file", false, base_score, ClassifierEngine::ExtensionFallback),
+            "opus" => FileIdentity::new("opus", "audio/opus", FileCategory::Audio, "Opus audio stream", false, base_score, ClassifierEngine::ExtensionFallback),
+            // Image formats
+            "png" => FileIdentity::new("png", "image/png", FileCategory::Image, "PNG image", false, base_score, ClassifierEngine::ExtensionFallback),
+            "jpg" | "jpeg" => FileIdentity::new("jpeg", "image/jpeg", FileCategory::Image, "JPEG image", false, base_score, ClassifierEngine::ExtensionFallback),
+            "webp" => FileIdentity::new("webp", "image/webp", FileCategory::Image, "WebP image", false, base_score, ClassifierEngine::ExtensionFallback),
+            "gif" => FileIdentity::new("gif", "image/gif", FileCategory::Image, "GIF image", false, base_score, ClassifierEngine::ExtensionFallback),
+            "bmp" => FileIdentity::new("bmp", "image/bmp", FileCategory::Image, "Bitmap image (BMP)", false, base_score, ClassifierEngine::ExtensionFallback),
+            "svg" => FileIdentity::new("svg", "image/svg+xml", FileCategory::Image, "SVG vector image", true, base_score, ClassifierEngine::ExtensionFallback),
+            "tiff" | "tif" => FileIdentity::new("tiff", "image/tiff", FileCategory::Image, "TIFF image", false, base_score, ClassifierEngine::ExtensionFallback),
+            "ico" => FileIdentity::new("ico", "image/x-icon", FileCategory::Image, "Icon file (ICO)", false, base_score, ClassifierEngine::ExtensionFallback),
+            "avif" => FileIdentity::new("avif", "image/avif", FileCategory::Image, "AVIF image", false, base_score, ClassifierEngine::ExtensionFallback),
+            "heic" => FileIdentity::new("heic", "image/heic", FileCategory::Image, "High Efficiency Image Container (HEIC)", false, base_score, ClassifierEngine::ExtensionFallback),
             // Archives
             "zip" => FileIdentity::new("zip", "application/zip", FileCategory::Archive, "ZIP archive", false, base_score, ClassifierEngine::ExtensionFallback),
             "tar" => FileIdentity::new("tar", "application/x-tar", FileCategory::Archive, "TAR archive", false, base_score, ClassifierEngine::ExtensionFallback),
@@ -1254,10 +1275,11 @@ impl FileTypeClassifier {
 
 /// Standard compiled binary and executable file extensions for zero-overhead fast-path exclusion.
 pub const COMPILED_BINARY_EXTENSIONS: &[&str] = &[
-    "exe", "dll", "sys", "ocx", "cpl", "scr", "msi", "drv",
-    "lib", "exp", "ilk", "pdb", "obj", "class",
-    "pyc", "pyo", "pyd",
-    "so", "dylib", "o", "a", "bin", "ko",
+    "exe", "dll", "sys", "drv", "ocx", "scr", "cpl", "efi", "obj", "lib", "pdb", "exp", "ilk", "msi",
+    "so", "ko", "o", "a",
+    "dylib", "bundle", "kext", "framework",
+    "wasm", "dex", "class", "pyc", "pyo", "pyd",
+    "bin",
 ];
 
 /// Returns true if the file extension matches a known compiled binary, executable, library, or debug database.
@@ -1268,26 +1290,32 @@ pub fn is_binary_executable_extension(ext: &str) -> bool {
         "exe"
             | "dll"
             | "sys"
-            | "ocx"
-            | "cpl"
-            | "scr"
-            | "msi"
             | "drv"
+            | "ocx"
+            | "scr"
+            | "cpl"
+            | "efi"
+            | "obj"
             | "lib"
+            | "pdb"
             | "exp"
             | "ilk"
-            | "pdb"
-            | "obj"
+            | "msi"
+            | "so"
+            | "ko"
+            | "o"
+            | "a"
+            | "dylib"
+            | "bundle"
+            | "kext"
+            | "framework"
+            | "wasm"
+            | "dex"
             | "class"
             | "pyc"
             | "pyo"
             | "pyd"
-            | "so"
-            | "dylib"
-            | "o"
-            | "a"
             | "bin"
-            | "ko"
     )
 }
 

@@ -352,9 +352,14 @@ impl RetrieveMeshNode {
                     || file_l.starts_with(".~lock")
                     || file_l == "chat.html"
                     || (file_l.starts_with("conversations-") && file_l.ends_with(".json"))
-                    || path_l.contains("\\harfile\\")
-                    || path_l.contains("/harfile/")
                 {
+                    return false;
+                }
+                // Repo trees are excluded as code, except indexed media (e.g. D:\harfile\music\*.mp3).
+                let is_media = text_l.starts_with("[audio document:")
+                    || text_l.starts_with("[image document:")
+                    || text_l.starts_with("[video document:");
+                if !is_media && (path_l.contains("\\harfile\\") || path_l.contains("/harfile/")) {
                     return false;
                 }
                 // Exclude coding tutorials / Google Colab notebooks / fenced code dumps when user did not ask for code
@@ -732,13 +737,21 @@ impl RetrieveMeshNode {
                 && paired
                     .iter()
                     .any(|(_, crit)| crit.is_relevant && crit.prompt_entity_hits >= required_prompt_hits);
+            // A question that asks for a modality ("the song ...", "pictures of ...") keeps that media's
+            // chunks whenever they lexically match, even if a text document scores higher on entities.
+            let media_prefix = quorum_storage::query_framing::media_content_prefix(
+                quorum_storage::query_framing::detect_media_intent(&state.original_prompt),
+            );
             if any_lexical_match {
-                paired.retain(|(_, crit)| {
-                    crit.is_relevant
-                        && crit.weighted_hits > 0
-                        && crit.intent_bonus > -100
-                        && (!any_prompt_entity_match || crit.prompt_entity_hits >= required_prompt_hits)
-                        && (!any_proper_match || crit.proper_ok)
+                paired.retain(|(c, crit)| {
+                    let wanted_media = media_prefix
+                        .map_or(false, |p| c.chunk.text_content.trim_start().starts_with(p) && crit.weighted_hits > 0);
+                    wanted_media
+                        || (crit.is_relevant
+                            && crit.weighted_hits > 0
+                            && crit.intent_bonus > -100
+                            && (!any_prompt_entity_match || crit.prompt_entity_hits >= required_prompt_hits)
+                            && (!any_proper_match || crit.proper_ok))
                 });
 
                 // Zero string allocation comparator: sorts using precomputed total_score
@@ -774,6 +787,17 @@ impl RetrieveMeshNode {
 
         // Apply Maximal Marginal Relevance (MMR) candidate diversity selection (default lambda = 0.70)
         chunks = apply_mmr_selection(chunks, effective_vector, top_k, 0.70);
+
+        // Requested modality first (stable; other chunks are kept to ground the answer).
+        if let Some(prefix) = quorum_storage::query_framing::media_content_prefix(
+            quorum_storage::query_framing::detect_media_intent(&state.original_prompt),
+        ) {
+            let (mut media, rest): (Vec<ScoredChunk>, Vec<ScoredChunk>) = chunks
+                .into_iter()
+                .partition(|c| c.chunk.text_content.trim_start().starts_with(prefix));
+            media.extend(rest);
+            chunks = media;
+        }
 
         chunks.truncate(top_k);
         state.retrieved_chunks = chunks;

@@ -493,11 +493,15 @@
       citationsEl._hasSourcesHeading = false;
       citationsEl._nextIndex = 0;
       citationsEl.innerHTML = '';
+      citationsEl._records = [];
+      citationsEl._gallery = null;
+      citationsEl._suppressMedia = answerSaysNoMatch(bodyEl._rawMarkdown || bodyEl.innerText || '');
       for (const cit of pending) {
         if (cit && cit.file_path && !String(cit.file_path).startsWith('Local Neural')) {
           appendCitation(citationsEl, cit);
         }
       }
+      linkInlineCitations(bodyEl, citationsEl);
       // 3. Render browser-style Response Action Toolbar (Copy, Regenerate, Read Aloud, Helpful/Not Helpful)
       if (actionsEl) {
         renderResponseActionsBar(actionsEl, bodyEl, citationsEl, headerEl, text, turnHistorySnapshot);
@@ -864,10 +868,324 @@
     }
   }
 
+  // ---- Multimodal media helpers (clickable inline attachments, lightbox, open/download) ----
+  const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'tif', 'tiff'];
+  const AUDIO_EXTS = ['mp3', 'wav', 'flac', 'ogg', 'oga', 'm4a', 'aac', 'opus', 'wma', 'aiff', 'aif'];
+  const VIDEO_EXTS = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'ogv', 'avi'];
+  const PREVIEW_EXTS = ['pdf', 'txt', 'md', 'csv', 'json', 'log'];
+  const LINE_REF_RE = /\(Lines?\s*\d+(\s*[\u2013\u2014\-]\s*\d+)?\)/gi;
+  const COLON_RANGE_RE = /:(\d+)\s*[\u2013\u2014\-]\s*(\d+)/g;
+
+  function fileExt(path) {
+    const name = String(path || '').split(/[\\/]/).pop() || '';
+    const i = name.lastIndexOf('.');
+    return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
+  }
+  function mediaKind(path) {
+    const ext = fileExt(path);
+    if (IMAGE_EXTS.includes(ext)) return 'image';
+    if (AUDIO_EXTS.includes(ext)) return 'audio';
+    if (VIDEO_EXTS.includes(ext)) return 'video';
+    if (PREVIEW_EXTS.includes(ext)) return 'preview';
+    return 'document';
+  }
+  function mediaUrl(path, download) {
+    return '/api/media?path=' + encodeURIComponent(String(path || '')) + (download ? '&download=1' : '');
+  }
+  function kindIcon(kind) {
+    return { image: '\u{1F5BC}\uFE0F', audio: '\u{1F3B5}', video: '\u{1F3AC}', preview: '\u{1F4C4}', document: '\u{1F4C4}' }[kind] || '\u{1F4C4}';
+  }
+  async function openInSystemViewer(path, btn) {
+    try {
+      const res = await fetch('/api/open-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: String(path || '') })
+      });
+      if (btn) btn.textContent = res.ok ? '\u2713 Opened' : (res.status === 403 ? '\u26A0 Not allowed' : '\u26A0 Failed');
+    } catch (_) {
+      if (btn) btn.textContent = '\u26A0 Failed';
+    }
+  }
+  async function copyText(text, btn, doneLabel) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(String(text || ''));
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = String(text || '');
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      if (btn) btn.textContent = doneLabel || '\u2713 Copied';
+    } catch (_) {}
+  }
+
+  function ensureLightbox() {
+    let lb = document.getElementById('qr-media-lightbox');
+    if (lb) return lb;
+    lb = document.createElement('div');
+    lb.id = 'qr-media-lightbox';
+    lb.className = 'qr-lightbox hidden';
+    lb.setAttribute('role', 'dialog');
+    lb.setAttribute('aria-modal', 'true');
+    lb.innerHTML = `
+      <div class="qr-lightbox-panel">
+        <div class="qr-lightbox-head">
+          <strong class="qr-lightbox-title"></strong>
+          <button type="button" class="qr-lightbox-close" aria-label="Close">\u2715</button>
+        </div>
+        <div class="qr-lightbox-body"></div>
+        <div class="qr-lightbox-path"></div>
+        <div class="qr-lightbox-actions"></div>
+      </div>`;
+    lb.addEventListener('click', (ev) => {
+      if (ev.target === lb || ev.target.classList.contains('qr-lightbox-close')) closeLightbox();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && !lb.classList.contains('hidden')) closeLightbox();
+    });
+    document.body.appendChild(lb);
+    return lb;
+  }
+  function closeLightbox() {
+    const lb = document.getElementById('qr-media-lightbox');
+    if (!lb) return;
+    lb.classList.add('hidden');
+    const body = lb.querySelector('.qr-lightbox-body');
+    if (body) body.innerHTML = '';
+  }
+  function buildActionButtons(container, rec, inLightbox) {
+    const mk = (label, title, onClick) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'qr-file-action';
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); onClick(b); });
+      container.appendChild(b);
+      return b;
+    };
+    if (rec.local) {
+      if (!inLightbox && rec.kind !== 'document') {
+        mk('\u{1F441} Preview', 'Preview this file here', () => openFilePreview(rec));
+      }
+      mk('\u2197 Open', 'Open the original file in a new browser tab', () => window.open(mediaUrl(rec.filePath, false), '_blank', 'noopener'));
+      mk('\u2B07 Download', 'Download this file', () => {
+        const a = document.createElement('a');
+        a.href = mediaUrl(rec.filePath, true);
+        a.download = rec.fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      });
+      mk('\u{1F5A5} Open in App', 'Open in your default application (this computer only)', (b) => openInSystemViewer(rec.filePath, b));
+    }
+    mk('\u{1F4CB} Copy Path', 'Copy the full file path', (b) => copyText(rec.filePath, b, '\u2713 Path Copied'));
+  }
+  function openFilePreview(rec) {
+    if (!rec || !rec.local) return;
+    if (rec.kind === 'document') {
+      window.open(mediaUrl(rec.filePath, false), '_blank', 'noopener');
+      return;
+    }
+    const lb = ensureLightbox();
+    lb.querySelector('.qr-lightbox-title').textContent = `[${rec.citeNum}] ${rec.fileName}`;
+    lb.querySelector('.qr-lightbox-path').textContent = rec.filePath;
+    const body = lb.querySelector('.qr-lightbox-body');
+    body.innerHTML = '';
+    const url = mediaUrl(rec.filePath, false);
+    let el;
+    if (rec.kind === 'image') {
+      el = document.createElement('img');
+      el.alt = rec.fileName;
+    } else if (rec.kind === 'audio') {
+      el = document.createElement('audio');
+      el.controls = true;
+      el.autoplay = true;
+    } else if (rec.kind === 'video') {
+      el = document.createElement('video');
+      el.controls = true;
+      el.autoplay = true;
+    } else {
+      el = document.createElement('iframe');
+      el.setAttribute('sandbox', '');
+      el.title = rec.fileName;
+    }
+    el.className = 'qr-lightbox-media';
+    el.src = url;
+    body.appendChild(el);
+    const actions = lb.querySelector('.qr-lightbox-actions');
+    actions.innerHTML = '';
+    buildActionButtons(actions, rec, true);
+    lb.classList.remove('hidden');
+    const closeBtn = lb.querySelector('.qr-lightbox-close');
+    if (closeBtn) closeBtn.focus();
+  }
+
+  function ensureGallery(citationsEl) {
+    if (citationsEl._gallery && citationsEl.contains(citationsEl._gallery)) return citationsEl._gallery;
+    const g = document.createElement('div');
+    g.className = 'qr-media-gallery';
+    citationsEl.insertBefore(g, citationsEl.firstChild);
+    citationsEl._gallery = g;
+    return g;
+  }
+  function appendMediaCard(citationsEl, rec) {
+    if (!rec.local || !['image', 'audio', 'video'].includes(rec.kind)) return;
+    if (citationsEl._suppressMedia) return;
+    const gallery = ensureGallery(citationsEl);
+    const card = document.createElement('figure');
+    card.className = `qr-media-card qr-media-${rec.kind}`;
+    card.dataset.citeNum = String(rec.citeNum);
+    const url = mediaUrl(rec.filePath, false);
+    const caption = document.createElement('figcaption');
+    const link = document.createElement('a');
+    link.href = url;
+    link.className = 'qr-media-title';
+    link.textContent = `[${rec.citeNum}] ${kindIcon(rec.kind)} ${rec.fileName}`;
+    link.title = rec.filePath;
+    link.addEventListener('click', (ev) => { ev.preventDefault(); openFilePreview(rec); });
+    caption.appendChild(link);
+    if (rec.kind === 'image') {
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.alt = rec.fileName;
+      img.src = url;
+      img.tabIndex = 0;
+      img.addEventListener('click', () => openFilePreview(rec));
+      img.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') openFilePreview(rec); });
+      // Never leave a broken placeholder: drop the card if the file cannot be served.
+      img.addEventListener('error', () => card.remove());
+      card.appendChild(img);
+    } else {
+      const player = document.createElement(rec.kind === 'audio' ? 'audio' : 'video');
+      player.controls = true;
+      player.preload = 'metadata';
+      player.src = url;
+      player.addEventListener('error', () => card.remove());
+      card.appendChild(player);
+    }
+    card.appendChild(caption);
+    gallery.appendChild(card);
+  }
+
+  function showSourceInspector(citationsEl, rec) {
+    let inspector = citationsEl.querySelector('.source-inspector-card');
+    if (inspector && inspector.dataset.citeNum === String(rec.citeNum)) {
+      inspector.remove();
+      return;
+    }
+    if (!inspector) {
+      inspector = document.createElement('div');
+      inspector.className = 'source-inspector-card';
+      citationsEl.appendChild(inspector);
+    }
+    inspector.dataset.citeNum = String(rec.citeNum);
+    inspector.innerHTML = '';
+    const title = document.createElement('a');
+    title.href = rec.local ? mediaUrl(rec.filePath, false) : '#';
+    title.className = 'qr-inspector-title';
+    title.textContent = `[${rec.citeNum}] ${kindIcon(rec.kind)} ${rec.fileName} (${rec.scorePct}%)`;
+    title.addEventListener('click', (ev) => { ev.preventDefault(); openFilePreview(rec); });
+    inspector.appendChild(title);
+    const pathLink = document.createElement('a');
+    pathLink.href = rec.local ? mediaUrl(rec.filePath, false) : '#';
+    pathLink.className = 'qr-inspector-path';
+    pathLink.textContent = rec.filePath;
+    pathLink.title = rec.local ? 'Open this file' : 'Remote peer file (path only)';
+    pathLink.addEventListener('click', (ev) => { ev.preventDefault(); openFilePreview(rec); });
+    inspector.appendChild(pathLink);
+    if (rec.local && rec.kind === 'image') {
+      const thumb = document.createElement('img');
+      thumb.className = 'qr-inspector-thumb';
+      thumb.src = mediaUrl(rec.filePath, false);
+      thumb.alt = rec.fileName;
+      thumb.addEventListener('click', () => openFilePreview(rec));
+      thumb.addEventListener('error', () => thumb.remove());
+      inspector.appendChild(thumb);
+    } else if (rec.local && (rec.kind === 'audio' || rec.kind === 'video')) {
+      const player = document.createElement(rec.kind);
+      player.controls = true;
+      player.preload = 'metadata';
+      player.src = mediaUrl(rec.filePath, false);
+      player.className = 'qr-inspector-player';
+      inspector.appendChild(player);
+    }
+    if (rec.snippet) {
+      const sn = document.createElement('div');
+      sn.className = 'qr-inspector-snippet';
+      sn.textContent = rec.snippet;
+      inspector.appendChild(sn);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'qr-inspector-actions';
+    buildActionButtons(actions, rec, false);
+    inspector.appendChild(actions);
+  }
+
+  function focusCitation(citationsEl, citeNum) {
+    const rec = (citationsEl._records || []).find(r => r.citeNum === citeNum);
+    if (!rec) return;
+    const badge = citationsEl.querySelector(`.citation-badge[data-cite-num="${citeNum}"]`);
+    const card = citationsEl.querySelector(`.qr-media-card[data-cite-num="${citeNum}"]`);
+    const target = card || badge;
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      target.classList.add('qr-cite-pulse');
+      setTimeout(() => target.classList.remove('qr-cite-pulse'), 1600);
+    }
+    showSourceInspector(citationsEl, rec);
+  }
+
+  // Turn literal [n] markers in the rendered answer into clickable citation buttons.
+  function linkInlineCitations(bodyEl, citationsEl) {
+    if (!bodyEl || !citationsEl || !(citationsEl._records || []).length) return;
+    const max = citationsEl._records.length;
+    const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    while (walker.nextNode()) {
+      if (/\[\d+\]/.test(walker.currentNode.nodeValue)) nodes.push(walker.currentNode);
+    }
+    for (const node of nodes) {
+      if (node.parentElement && node.parentElement.closest('code, .inline-cite-badge')) continue;
+      const frag = document.createDocumentFragment();
+      const parts = node.nodeValue.split(/(\[\d+\])/);
+      for (const part of parts) {
+        const m = /^\[(\d+)\]$/.exec(part);
+        const n = m ? parseInt(m[1], 10) : 0;
+        if (m && n >= 1 && n <= max) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'inline-cite-badge';
+          b.dataset.citeNum = String(n);
+          b.textContent = `[${n}]`;
+          const rec = citationsEl._records[n - 1];
+          b.title = rec ? `${rec.fileName}\n${rec.filePath}` : '';
+          b.addEventListener('click', () => focusCitation(citationsEl, n));
+          frag.appendChild(b);
+        } else if (part) {
+          frag.appendChild(document.createTextNode(part));
+        }
+      }
+      node.parentNode.replaceChild(frag, node);
+    }
+  }
+
+  // Answers that explicitly say nothing matched must not show unrelated images.
+  function answerSaysNoMatch(text) {
+    return /\b(no matching|did not find|could not find|couldn'?t find|were not found|was not found|do(?:es)? not contain|no (?:pictures?|photos?|images?|files?|documents?) (?:were |was )?(?:found|taken|matched))/i.test(String(text || ''));
+  }
+
   function appendCitation(citationsEl, cit) {
     if (!citationsEl || !cit) return;
     if (!citationsEl._seenFiles) {
       citationsEl._seenFiles = new Set();
+    }
+    if (!citationsEl._records) {
+      citationsEl._records = [];
     }
     if (!citationsEl._hasSourcesHeading && !citationsEl.querySelector('.sources-heading')) {
       citationsEl._hasSourcesHeading = true;
@@ -880,13 +1198,10 @@
       label.textContent = 'Sources';
       citationsEl.appendChild(label);
     }
-    const fileName = String(cit.file_path || '').split(/[\\/]/).pop() || cit.file_path;
-    let cleanFileName = fileName.trim();
-    cleanFileName = cleanFileName
-      .replace(/\(Lines?\s*\d+(\s*[–—\-]\s*\d+)?\)/gi, '')
-      .replace(/:(\d+)\s*[–—\-]\s*(\d+)/g, '')
-      .trim();
-    const peerId = (cit.peer_id || cit.source_peer || 'local').trim();
+    const rawPath = String(cit.file_path || '').replace(LINE_REF_RE, '').trim();
+    const fileName = rawPath.split(/[\\/]/).pop() || rawPath;
+    const cleanFileName = fileName.replace(LINE_REF_RE, '').replace(COLON_RANGE_RE, '').trim();
+    const peerId = String(cit.peer_id || cit.source_peer || 'local').trim();
     const dedupKey = peerId.toLowerCase() + '::' + cleanFileName.toLowerCase();
     if (!cleanFileName || citationsEl._seenFiles.has(dedupKey)) {
       return;
@@ -898,49 +1213,31 @@
     let scorePct = rawScore > 1 ? Math.round(rawScore) : Math.round(rawScore * 100);
     scorePct = Math.max(0, Math.min(100, scorePct));
 
-    const peerLabel = peerId !== 'local' && peerId.length > 0
+    const isLocal = peerId === '' || peerId.toLowerCase() === 'local';
+    const peerLabel = !isLocal
       ? ` [Peer: ${peerId.length > 8 ? peerId.slice(0, 8) + '...' : peerId}]`
       : '';
+    const kind = mediaKind(rawPath);
+    const rec = {
+      citeNum,
+      fileName: cleanFileName,
+      filePath: rawPath,
+      scorePct,
+      snippet: cit.snippet || '',
+      kind,
+      local: isLocal
+    };
+    citationsEl._records.push(rec);
 
     const badge = document.createElement('button');
     badge.type = 'button';
     badge.className = 'citation-badge';
-    badge.title = `[${citeNum}] ${cit.file_path}${peerLabel}\nRelevance: ${scorePct}%\n${cit.snippet || ''}`.trim();
-    badge.innerHTML = `<span class="cite-index" style="font-weight:700;opacity:0.9;">[${citeNum}]</span> <span>📄 ${escapeHtml(cleanFileName + peerLabel)}</span> <span class="score-pill" style="opacity:0.85; font-size:11px; margin-left:3px; padding:1px 6px; border-radius:4px; background:rgba(66,133,244,0.2); font-weight:600;">· ${scorePct}%</span>`;
-    badge.addEventListener('click', () => {
-      let inspector = citationsEl.querySelector('.source-inspector-card');
-      if (inspector && inspector.dataset.citeNum === String(citeNum)) {
-        inspector.remove();
-        return;
-      }
-      if (!inspector) {
-        inspector = document.createElement('div');
-        inspector.className = 'source-inspector-card';
-        inspector.style.cssText = 'width:100%;margin-top:8px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color,rgba(128,128,128,0.3));background:rgba(128,128,128,0.08);font-size:12px;line-height:1.5;';
-        citationsEl.appendChild(inspector);
-      }
-      inspector.dataset.citeNum = String(citeNum);
-      inspector.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
-          <strong>[${citeNum}] ${escapeHtml(cleanFileName)} (${scorePct}%)</strong>
-          <button type="button" class="btn-copy-source-path" style="padding:2px 8px;border-radius:5px;border:1px solid rgba(128,128,128,0.35);background:transparent;color:inherit;cursor:pointer;font-size:11px;">📋 Copy Path</button>
-        </div>
-        <div style="opacity:0.8;word-break:break-all;margin-bottom:4px;">${escapeHtml(cit.file_path || '')}</div>
-        ${cit.snippet ? `<div style="opacity:0.9;font-style:italic;border-left:2px solid var(--accent);padding-left:8px;margin-top:6px;">${escapeHtml(cit.snippet)}</div>` : ''}
-      `;
-      const copyPathBtn = inspector.querySelector('.btn-copy-source-path');
-      if (copyPathBtn) {
-        copyPathBtn.addEventListener('click', async () => {
-          try {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              await navigator.clipboard.writeText(String(cit.file_path || ''));
-              copyPathBtn.textContent = '✓ Path Copied';
-            }
-          } catch (_) {}
-        });
-      }
-    });
+    badge.dataset.citeNum = String(citeNum);
+    badge.title = `[${citeNum}] ${rec.filePath}${peerLabel}\nRelevance: ${scorePct}%\nClick to preview, open, or download`;
+    badge.innerHTML = `<span class="cite-index" style="font-weight:700;opacity:0.9;">[${citeNum}]</span> <span>${kindIcon(kind)} ${escapeHtml(cleanFileName + peerLabel)}</span> <span class="score-pill" style="opacity:0.85; font-size:11px; margin-left:3px; padding:1px 6px; border-radius:4px; background:rgba(66,133,244,0.2); font-weight:600;">\u00B7 ${scorePct}%</span>`;
+    badge.addEventListener('click', () => showSourceInspector(citationsEl, rec));
     citationsEl.appendChild(badge);
+    appendMediaCard(citationsEl, rec);
   }
 
   function updateTelemetryStep(state) {
@@ -1118,35 +1415,123 @@
       window.speechSynthesis.speak(utterance);
     });
 
-    // 4. Save File Button (💾 Save File)
+    // 4. Save File Button (\u{1F4BE} Save File) with PDF / Word / Both / Markdown export
+    const saveWrap = document.createElement('div');
+    saveWrap.className = 'save-file-wrap';
     const btnSave = document.createElement('button');
     btnSave.type = 'button';
     btnSave.className = 'response-action-btn save-file-btn btn-save-response';
-    btnSave.title = 'Save response and citations as Markdown file';
-    btnSave.innerHTML = '<span>💾</span><span>Save File</span>';
-    btnSave.addEventListener('click', () => {
+    btnSave.title = 'Save this answer as PDF, Word (.docx), or Markdown';
+    btnSave.setAttribute('aria-haspopup', 'menu');
+    btnSave.setAttribute('aria-expanded', 'false');
+    const saveLabelHtml = '<span>\u{1F4BE}</span><span>Save File</span><span style="opacity:0.7;font-size:10px;">\u25BE</span>';
+    btnSave.innerHTML = saveLabelHtml;
+    const saveMenu = document.createElement('div');
+    saveMenu.className = 'save-file-menu hidden';
+    saveMenu.setAttribute('role', 'menu');
+    const saveOptions = [
+      ['pdf', '\u{1F4D5} Save as PDF (.pdf)'],
+      ['docx', '\u{1F4D8} Save as Word (.docx)'],
+      ['both', '\u{1F4DA} Save Both (.pdf & .docx)'],
+      ['md', '\u{1F4DD} Save as Markdown (.md)']
+    ];
+
+    const buildExportPayload = (format) => {
       const markdown = stripSourcesFooterMarkdown(bodyEl._rawMarkdown || bodyEl.innerText || '');
-      let citationsText = '';
-      if (citationsEl && citationsEl.innerText) {
-        citationsText = '\n\n---\n### Sources\n' + citationsEl.innerText.trim();
+      const records = (citationsEl && citationsEl._records) || [];
+      const showsMedia = citationsEl && !citationsEl._suppressMedia;
+      return {
+        title: `QuorumRAG - ${(turnPrompt || 'Answer').slice(0, 80)}`,
+        prompt: turnPrompt || '',
+        markdown_content: markdown,
+        sources: records.map(r => ({ cite_num: r.citeNum, file_name: r.fileName, file_path: r.filePath, score_pct: r.scorePct })),
+        attached_media: showsMedia ? records.filter(r => r.local && r.kind === 'image').map(r => r.filePath) : [],
+        format
+      };
+    };
+    const safeBase = () => 'quorumrag-' + (turnPrompt || 'response').toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 40);
+    const saveBlob = async (blob, filename, mime, ext) => {
+      if (window.showSaveFilePicker) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: filename,
+            types: [{ description: ext.toUpperCase() + ' document', accept: { [mime]: ['.' + ext] } }]
+          });
+          const w = await handle.createWritable();
+          await w.write(blob);
+          await w.close();
+          return true;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return false;
+        }
       }
-      const fullContent = `# QuorumRAG Response\n\n**Prompt**: ${turnPrompt || 'Query'}\n\n${markdown}${citationsText}\n`;
-      const blob = new Blob([fullContent], { type: 'text/markdown;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const safePrompt = (turnPrompt || 'response')
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]/g, '_')
-        .slice(0, 30);
-      a.download = `quorumrag-response-${safePrompt}-${Date.now()}.md`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
-      btnSave.classList.add('active');
-      setTimeout(() => btnSave.classList.remove('active'), 1500);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return true;
+    };
+    const exportOne = async (format) => {
+      const mimes = {
+        pdf: 'application/pdf',
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        md: 'text/markdown'
+      };
+      const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildExportPayload(format))
+      });
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      return saveBlob(blob, `${safeBase()}.${format}`, mimes[format], format);
+    };
+    const closeSaveMenu = () => {
+      saveMenu.classList.add('hidden');
+      btnSave.setAttribute('aria-expanded', 'false');
+    };
+    for (const [fmt, label] of saveOptions) {
+      const opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'save-file-option';
+      opt.setAttribute('role', 'menuitem');
+      opt.dataset.format = fmt;
+      opt.textContent = label;
+      opt.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        closeSaveMenu();
+        btnSave.innerHTML = '<span>\u23F3</span><span>Saving...</span>';
+        try {
+          if (fmt === 'both') {
+            await exportOne('pdf');
+            await exportOne('docx');
+          } else {
+            await exportOne(fmt);
+          }
+          btnSave.innerHTML = '<span>\u2713</span><span>Saved</span>';
+          btnSave.classList.add('active');
+        } catch (err) {
+          btnSave.innerHTML = '<span>\u26A0</span><span>Save failed</span>';
+          btnSave.title = String((err && err.message) || err);
+        }
+        setTimeout(() => { btnSave.innerHTML = saveLabelHtml; btnSave.classList.remove('active'); }, 2200);
+      });
+      saveMenu.appendChild(opt);
+    }
+    btnSave.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const hidden = saveMenu.classList.toggle('hidden');
+      btnSave.setAttribute('aria-expanded', hidden ? 'false' : 'true');
     });
+    document.addEventListener('click', (ev) => {
+      if (!saveWrap.contains(ev.target)) closeSaveMenu();
+    });
+    saveWrap.appendChild(btnSave);
+    saveWrap.appendChild(saveMenu);
 
     // 5. Clear Button (🗑️ Clear)
     const btnClear = document.createElement('button');
@@ -1202,7 +1587,7 @@
     actionsEl.appendChild(btnCopy);
     actionsEl.appendChild(btnRegenerate);
     actionsEl.appendChild(btnSpeak);
-    actionsEl.appendChild(btnSave);
+    actionsEl.appendChild(saveWrap);
     actionsEl.appendChild(btnClear);
     actionsEl.appendChild(btnUp);
     actionsEl.appendChild(btnDown);

@@ -5,7 +5,7 @@ use axum::routing::{get, post};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
-use crate::handlers::{cache, chat, drift, health, langextract, mesh, reindex, settings};
+use crate::handlers::{cache, chat, drift, export, health, langextract, media, mesh, reindex, settings};
 use crate::state::DaemonState;
 
 /// Constructs the complete Axum 0.7 web server Router.
@@ -22,6 +22,11 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         .route("/api/chat/cancel", post(chat::cancel_chat_handler))
         .route("/api/chat/spellcheck", post(chat::spellcheck_handler))
         .route("/api/query", post(chat::query_handler))
+
+        // Multimodal media streaming, system viewer launch, and PDF/DOCX export
+        .route("/api/media", get(media::serve_media_handler))
+        .route("/api/open-file", post(media::open_file_handler))
+        .route("/api/export", post(export::export_handler))
 
         // ChatGPT Settings, OshoosiClaw P2P Mesh, Shared Folders & HIPAA PHI DLP Endpoints
         .route("/api/settings", get(settings::get_settings_handler).post(settings::update_settings_handler))
