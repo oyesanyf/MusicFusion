@@ -242,12 +242,12 @@ async fn test_adversarial_dedup_hydration_empty_storage() {
 }
 
 #[test]
-fn test_adversarial_fast_path_binary_exclusion_all_23_extensions_mixed_case_no_io() {
+fn test_adversarial_fast_path_binary_exclusion_all_29_extensions_mixed_case_no_io() {
     let router = ClassifierRouter::new(IngestConfig::default());
 
-    // All 23 binary extensions from COMPILED_BINARY_EXTENSIONS
+    // All 29 binary extensions from COMPILED_BINARY_EXTENSIONS
     let base_extensions = COMPILED_BINARY_EXTENSIONS;
-    assert_eq!(base_extensions.len(), 23);
+    assert_eq!(base_extensions.len(), 29);
 
     // Generate adversarial mixed-case and uppercase variations
     for &ext in base_extensions {

@@ -18,6 +18,7 @@ pub(crate) mod arrow_interop;
 pub mod config;
 pub mod engine;
 pub mod error;
+pub mod query_framing;
 pub(crate) mod tantivy_fts;
 pub(crate) mod vector_store;
 

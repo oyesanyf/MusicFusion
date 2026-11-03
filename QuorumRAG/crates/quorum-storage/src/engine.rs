@@ -306,7 +306,9 @@ impl StorageEngine {
         max_tier: u8,
         top_k: usize,
     ) -> Result<Vec<ScoredChunk>, StorageError> {
-        self.fts_index.search(query, max_tier, top_k)
+        let mut hits = self.fts_index.search(query, max_tier, top_k)?;
+        prioritize_media_intent(query, &mut hits);
+        Ok(hits)
     }
 
     /// Hybrid search combining vector search and BM25 full-text search with negative chunk exclusion filtering.
@@ -380,6 +382,7 @@ impl StorageEngine {
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.chunk.chunk_id.cmp(&b.chunk.chunk_id))
         });
+        prioritize_media_intent(text, &mut combined);
         combined.truncate(top_k);
 
         Ok(combined)
@@ -436,6 +439,12 @@ impl StorageEngine {
         }
     }
 
+    /// Lowest access tier of chunks indexed for exactly this `file_path`, or `None` if unindexed.
+    /// Used to gate media streaming so only indexed files can ever be served.
+    pub fn indexed_path_min_tier(&self, file_path: &str) -> Result<Option<u8>, StorageError> {
+        self.fts_index.indexed_path_min_tier(file_path)
+    }
+
     /// Checks if a chunk's BLAKE3 hash already exists in storage.
     pub async fn has_chunk_hash(&self, blake3_hash: &str) -> Result<bool, StorageError> {
         if self.fts_index.has_chunk_hash(blake3_hash)? {
@@ -449,6 +458,19 @@ impl StorageEngine {
         let lance_deleted = self.vector_store.delete_by_file_path(file_path).await?;
         let tantivy_deleted = self.fts_index.delete_by_file_path(file_path)?;
         Ok(lance_deleted.max(tantivy_deleted))
+    }
+
+    /// Removes existing chunks for several files at once (used before re-inserting re-indexed files,
+    /// so a reindex replaces stale chunks instead of duplicating them).
+    pub async fn delete_by_file_paths(&self, file_paths: &[String]) -> Result<(), StorageError> {
+        if file_paths.is_empty() {
+            return Ok(());
+        }
+        self.vector_store.delete_by_file_paths(file_paths).await?;
+        for p in file_paths {
+            self.fts_index.delete_by_file_path(p)?;
+        }
+        Ok(())
     }
 
     /// Performs maintenance: compacts small Lance files, cleans up older snapshots, and merges Tantivy segments.
@@ -568,4 +590,19 @@ impl StorageEngine {
         let t = self.fts_index.delete_by_chunk_id(chunk_id)?;
         Ok(l.max(t))
     }
+}
+
+/// When the question explicitly asks for a modality ("pictures of ...", "the song ..."),
+/// move chunks produced by that media indexer ahead of other hits, preserving relative order.
+/// Chunks of other modalities are kept (never dropped) so documents still ground the answer.
+pub(crate) fn prioritize_media_intent(query: &str, hits: &mut Vec<ScoredChunk>) {
+    let intent = crate::query_framing::detect_media_intent(query);
+    let Some(prefix) = crate::query_framing::media_content_prefix(intent) else {
+        return;
+    };
+    let (mut media, rest): (Vec<ScoredChunk>, Vec<ScoredChunk>) = std::mem::take(hits)
+        .into_iter()
+        .partition(|h| h.chunk.text_content.trim_start().starts_with(prefix));
+    media.extend(rest);
+    *hits = media;
 }

@@ -328,7 +328,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
     }
 
     // 5. Axum 0.7 server with graceful shutdown
-    axum::serve(listener, app)
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(shutdown::shutdown_signal(shutdown_notify))
         .await?;
 

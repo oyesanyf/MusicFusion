@@ -580,12 +580,15 @@ impl DeterministicOfflineSynthesisEngine {
             {
                 continue;
             }
+            let raw_head = scored.chunk.text_content.trim_start();
+            let is_media_chunk = raw_head.starts_with("[Audio Document:")
+                || raw_head.starts_with("[Image Document:")
+                || raw_head.starts_with("[Video Document:");
             if !requests_code
                 && (SOURCE_CODE_EXTENSIONS
                     .iter()
                     .any(|ext| file_l.ends_with(ext))
-                    || path_l.contains("\\harfile\\")
-                    || path_l.contains("/harfile/")
+                    || (!is_media_chunk && (path_l.contains("\\harfile\\") || path_l.contains("/harfile/")))
                     || text_l.contains("```python")
                     || text_l.contains("```javascript")
                     || text_l.contains("```js")
@@ -4132,6 +4135,55 @@ impl DeterministicOfflineSynthesisEngine {
             }
         }
 
+        // Query-time multimodal inspection: let a local vision model look at the actual pixels of the top
+        // cited local image files, so answers describe what images show rather than only their metadata.
+        let mut vision_notes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let image_targets: Vec<&ScoredChunk> = active_excerpts
+            .iter()
+            .copied()
+            .filter(|c| {
+                crate::vision::is_image_chunk_text(&c.chunk.text_content)
+                    && (c.source_peer.is_empty() || c.source_peer.eq_ignore_ascii_case("local"))
+                    && std::path::Path::new(&c.chunk.file_path).is_file()
+            })
+            .take(3)
+            .collect();
+        if !image_targets.is_empty() {
+            if let Some(vision_model) = crate::vision::pick_vision_model(&installed_models) {
+                let question = clean_prompt_for_prefix.to_string();
+                let results: Vec<(String, Option<String>)> = std::thread::scope(|s| {
+                    let handles: Vec<_> = image_targets
+                        .iter()
+                        .map(|c| {
+                            let vm = vision_model.clone();
+                            let path = c.chunk.file_path.clone();
+                            let id = c.chunk.chunk_id.clone();
+                            let q = question.clone();
+                            s.spawn(move || {
+                                let d = crate::vision::describe_image_file(&addr, host_port, &vm, std::path::Path::new(&path), &q);
+                                (id, d)
+                            })
+                        })
+                        .collect();
+                    handles.into_iter().filter_map(|h| h.join().ok()).collect()
+                });
+                for (id, desc) in results {
+                    if let Some(d) = desc {
+                        vision_notes.insert(id, d);
+                    }
+                }
+                tracing::info!(
+                    vision_model = %vision_model,
+                    images = image_targets.len(),
+                    described = vision_notes.len(),
+                    "Query-time multimodal image inspection complete"
+                );
+            } else if Self::model_fits_free_memory("moondream", &hw) {
+                // No vision model installed: fetch the small one in the background for next time.
+                let _ = Self::trigger_background_ollama_pull("moondream");
+            }
+        }
+
         // ~6000 characters of evidence in total: a single stitched parent document gets a long window instead of
         // its first 750 characters only.
         let excerpt_count = active_excerpts.len().clamp(1, 8);
@@ -4161,6 +4213,14 @@ impl DeterministicOfflineSynthesisEngine {
                 } else {
                     Self::answer_focused_window(prompt, &cleaned, per_excerpt_chars)
                 };
+                let compact_text = match vision_notes.get(&c.chunk.chunk_id) {
+                    Some(v) => format!(
+                        "{}\nVisual Content (what the image actually shows, from a local vision model): {}",
+                        compact_text.trim(),
+                        v
+                    ),
+                    None => compact_text,
+                };
                 format!(
                     "[{}] Source File: {}\n{}",
                     doc_num,
@@ -4173,7 +4233,13 @@ impl DeterministicOfflineSynthesisEngine {
 
         let source_corpus: String = active_excerpts
             .iter()
-            .map(|c| Self::clean_chunk_text(&c.chunk.text_content))
+            .map(|c| {
+                let base = Self::clean_chunk_text(&c.chunk.text_content);
+                match vision_notes.get(&c.chunk.chunk_id) {
+                    Some(v) => format!("{base}\n{v}"),
+                    None => base,
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -4214,6 +4280,12 @@ impl DeterministicOfflineSynthesisEngine {
         };
 
         let max_doc_num = unique_file_chunks.len().max(1);
+        let vision_directive = if vision_notes.is_empty() {
+            ""
+        } else {
+            " Some excerpts include 'Visual Content' written by a local vision model that looked at the actual image file: use it to describe what each image shows (subjects, appearance, setting), cite that image's number, and never claim the documents lack a description when Visual Content is present."
+        };
+        let continuation_guard_note = format!("{}{}", continuation_guard_note, vision_directive);
         let user_content = format!(
             "Reference Excerpts (numbered [1] through [{}], for your use only; never repeat this label):\n{}\n\nUser Question: {}\n\n\
             INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across the relevant source documents above to answer ONLY the User Question. {} and cite source documents inline using ONLY valid bracketed numbers `[1]` through `[{}]`. Write flowing prose paragraphs (not a bullet list of file names), start with a full sentence rather than a heading, and never repeat any sentence or paragraph.{}{}",

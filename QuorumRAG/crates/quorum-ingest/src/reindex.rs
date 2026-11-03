@@ -18,6 +18,7 @@ use crate::config::{ChunkerConfig, IngestConfig, ReindexOptions};
 use crate::crawler::{DiscoveredCandidate, FilesystemCrawler};
 use crate::dedup::{DedupAction, FileCatalogEntry, TwoLevelDedupEngine};
 use crate::document_extractor::DocumentExtractor;
+use crate::audio_indexer::AudioIndexer;
 use crate::error::IngestError;
 use crate::image_indexer::ImageIndexer;
 use quorum_classifier::FileTypeClassifier;
@@ -187,6 +188,17 @@ impl ReindexWorker {
         });
 
         Ok(task_id)
+    }
+
+    /// Delete previously stored chunks for every file in this batch so re-indexed files are replaced,
+    /// not duplicated (e.g. an image re-indexed with new GPS/location metadata).
+    async fn replace_existing_file_chunks(storage: &StorageEngine, batch: &[DocumentChunk]) {
+        let mut paths: Vec<String> = batch.iter().map(|c| c.file_path.clone()).collect();
+        paths.sort();
+        paths.dedup();
+        if let Err(e) = storage.delete_by_file_paths(&paths).await {
+            warn!("Failed to remove stale chunks before reindex insert: {}", e);
+        }
     }
 
     /// Cooperative cancellation of an ongoing reindex task.
@@ -504,11 +516,47 @@ impl ReindexWorker {
                             }
                         }
                     }
+                    CandidateKind::Audio { .. } => {
+                        let bytes = match std::fs::read(path) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                warn!("Failed to read audio file '{}': {}", path.display(), e);
+                                let mut lock = progress.write().await;
+                                if let Some(ref mut p) = *lock {
+                                    p.files_failed += 1;
+                                }
+                                continue;
+                            }
+                        };
+
+                        if let Ok(doc_chunk) = AudioIndexer::index_audio(
+                            path,
+                            &bytes,
+                            &candidate.file_identity,
+                            access_tier,
+                            embedder.as_ref(),
+                        ) {
+                            let file_b3 = doc_chunk.document_id.clone();
+                            dedup.register_entry(FileCatalogEntry {
+                                file_path: path.clone(),
+                                file_blake3: file_b3,
+                                mtime_secs: candidate.mtime_secs,
+                                size_bytes: candidate.size_bytes,
+                                chunk_hashes: vec![doc_chunk.blake3_hash.clone()],
+                            });
+                            batch_chunks.push(doc_chunk);
+                            let mut lock = progress.write().await;
+                            if let Some(ref mut p) = *lock {
+                                p.chunks_newly_embedded += 1;
+                            }
+                        }
+                    }
                 }
 
                 // If micro-batch is full, flush to storage
                 if batch_chunks.len() >= options.batch_size {
                     if !options.dry_run {
+                        Self::replace_existing_file_chunks(&storage, &batch_chunks).await;
                         let _ = storage.insert_chunks(&batch_chunks).await?;
                         let _ = storage.bump_index_epoch("reindex_micro_batch");
                     }
@@ -524,6 +572,7 @@ impl ReindexWorker {
 
             // Flush remaining micro-batch
             if !batch_chunks.is_empty() && !options.dry_run {
+                Self::replace_existing_file_chunks(&storage, &batch_chunks).await;
                 let _ = storage.insert_chunks(&batch_chunks).await?;
                 let _ = storage.bump_index_epoch("reindex_final_flush");
                 batch_chunks.clear();

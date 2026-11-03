@@ -35,6 +35,27 @@ pub struct ImageMetadata {
     pub user_comment: Option<String>,
     pub path_tokens: Vec<String>,
     pub extracted_text: Option<String>,
+    /// Camera software (EXIF 0x0131), e.g. "Windows Camera".
+    #[serde(default)]
+    pub software: Option<String>,
+    /// EXIF GPS date stamp (0x001D), `YYYY:MM:DD`.
+    #[serde(default)]
+    pub gps_date_stamp: Option<String>,
+    /// Keywords from Windows XPKeywords, XMP dc:subject, or IPTC 2:25.
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Human-readable location: XMP/IPTC tagged place, else reverse-geocoded GPS.
+    #[serde(default)]
+    pub location_name: Option<String>,
+    /// How `location_name` was derived: "xmp/iptc", "gps", or "gps-near".
+    #[serde(default)]
+    pub location_source: Option<String>,
+    /// Lowercase location search tokens (city, county, state, code, country).
+    #[serde(default)]
+    pub location_tokens: Vec<String>,
+    /// Visual description produced by a local vision model (query-time or reindex enrichment).
+    #[serde(default)]
+    pub visual_description: Option<String>,
 }
 
 /// Image Indexing Engine handling all Magika-classified images.
@@ -83,6 +104,90 @@ impl ImageIndexer {
             1.0
         };
 
+        // Structured TIFF/EXIF IFD parsing (JPEG APP1, PNG eXIf, WebP EXIF, bare TIFF):
+        // fills camera fields and the GPS IFD (0x8825) that the header scan above cannot read.
+        let mut exif = exif;
+        let mut software = None;
+        let mut gps_date_stamp = None;
+        let mut keywords: Vec<String> = Vec::new();
+        if let Some(tiff) = crate::exif::find_tiff_in_image(bytes) {
+            let ex = crate::exif::parse_tiff(tiff);
+            exif.camera_make = ex.camera_make.or(exif.camera_make);
+            exif.camera_model = ex.camera_model.or(exif.camera_model);
+            exif.date_time_original = ex.date_time_original.or(exif.date_time_original);
+            exif.iso_speed = ex.iso_speed.or(exif.iso_speed);
+            exif.f_number = ex.f_number.or(exif.f_number);
+            exif.exposure_time = ex.exposure_time.or(exif.exposure_time);
+            exif.focal_length_mm = ex.focal_length_mm.or(exif.focal_length_mm);
+            exif.gps_latitude = ex.gps_latitude.or(exif.gps_latitude);
+            exif.gps_longitude = ex.gps_longitude.or(exif.gps_longitude);
+            if exif.user_comment.is_none() {
+                exif.user_comment = ex.image_description;
+            }
+            software = ex.software;
+            gps_date_stamp = ex.gps_date_stamp;
+            keywords.extend(ex.keywords);
+        }
+
+        // Photographer/app-assigned location text (XMP packet, IPTC-IIM APP13).
+        let scan = &bytes[..bytes.len().min(1024 * 1024)];
+        let xmp = crate::exif::parse_xmp(scan);
+        let iptc = crate::exif::parse_iptc(scan);
+        for k in xmp.keywords.iter().chain(iptc.keywords.iter()) {
+            if !keywords.iter().any(|x| x.eq_ignore_ascii_case(k)) {
+                keywords.push(k.clone());
+            }
+        }
+        if exif.user_comment.is_none() {
+            exif.user_comment = xmp.description.clone().or(iptc.description.clone());
+        }
+        let tagged_city = xmp.city.clone().or(iptc.city.clone());
+        let tagged_state = xmp.state.clone().or(iptc.state.clone());
+        let tagged_country = xmp.country.clone().or(iptc.country.clone());
+        let tagged_sub = xmp.sublocation.clone().or(iptc.sublocation.clone());
+
+        let mut location_name = None;
+        let mut location_source = None;
+        let mut location_tokens: Vec<String> = Vec::new();
+        let push_tokens = |s: &str, out: &mut Vec<String>| {
+            for w in s.split(|c: char| !c.is_alphanumeric()) {
+                let w = w.to_lowercase();
+                if w.len() >= 2 && !out.contains(&w) {
+                    out.push(w);
+                }
+            }
+        };
+        let tagged_parts: Vec<String> = [tagged_sub, tagged_city.clone(), tagged_state, tagged_country]
+            .into_iter()
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        if !tagged_parts.is_empty() {
+            let name = tagged_parts.join(", ");
+            push_tokens(&name, &mut location_tokens);
+            if let Some(c) = &tagged_city {
+                let joined: String = c.chars().filter(|ch| ch.is_alphanumeric()).collect::<String>().to_lowercase();
+                if joined.len() >= 2 && !location_tokens.contains(&joined) {
+                    location_tokens.push(joined);
+                }
+            }
+            location_name = Some(name);
+            location_source = Some("xmp/iptc".to_string());
+        }
+        if let (Some(lat), Some(lon)) = (exif.gps_latitude, exif.gps_longitude) {
+            if let Some(geo) = crate::reverse_geocoder::resolve_location(lat, lon) {
+                for t in &geo.tokens {
+                    if !location_tokens.contains(t) {
+                        location_tokens.push(t.clone());
+                    }
+                }
+                if location_name.is_none() {
+                    location_source = Some(if geo.within { "gps" } else { "gps-near" }.to_string());
+                    location_name = Some(geo.display_name);
+                }
+            }
+        }
+
         ImageMetadata {
             mime_type: identity.mime_type.clone(),
             format_name: identity.label.to_uppercase(),
@@ -105,6 +210,13 @@ impl ImageIndexer {
             user_comment: exif.user_comment,
             path_tokens,
             extracted_text: exif.extracted_text,
+            software,
+            gps_date_stamp,
+            keywords,
+            location_name,
+            location_source,
+            location_tokens,
+            visual_description: None,
         }
     }
 
@@ -384,7 +496,36 @@ impl ImageIndexer {
         }
 
         if let (Some(lat), Some(lon)) = (meta.gps_latitude, meta.gps_longitude) {
-            lines.push(format!("Geotagged Location: {:.4}° N, {:.4}° W", lat, lon));
+            let ns = if lat < 0.0 { 'S' } else { 'N' };
+            let ew = if lon < 0.0 { 'W' } else { 'E' };
+            lines.push(format!(
+                "GPS Coordinates: {:.5}° {}, {:.5}° {}",
+                lat.abs(),
+                ns,
+                lon.abs(),
+                ew
+            ));
+        }
+        if let Some(ref place) = meta.location_name {
+            let how = match meta.location_source.as_deref() {
+                Some("xmp/iptc") => "tagged location",
+                Some("gps") => "taken in (from GPS)",
+                Some("gps-near") => "taken (from GPS)",
+                _ => "location",
+            };
+            lines.push(format!("Location ({}): {}", how, place));
+        }
+        if !meta.location_tokens.is_empty() {
+            lines.push(format!("Location Tags: {}", meta.location_tokens.join(", ")));
+        }
+        if let Some(ref sw) = meta.software {
+            lines.push(format!("Software: {}", sw));
+        }
+        if !meta.keywords.is_empty() {
+            lines.push(format!("Keywords: {}", meta.keywords.join(", ")));
+        }
+        if let Some(ref vis) = meta.visual_description {
+            lines.push(format!("Visual Description: {}", vis));
         }
 
         if !meta.path_tokens.is_empty() {
@@ -450,4 +591,41 @@ struct ParsedExif {
     gps_longitude: Option<f64>,
     user_comment: Option<String>,
     extracted_text: Option<String>,
+}
+
+#[cfg(test)]
+mod geotag_tests {
+    use super::*;
+    use crate::exif::test_support::{jpeg_with_tiff, tiff_with_gps};
+    use quorum_classifier::{ClassifierEngine, FileCategory, FileIdentity};
+
+    fn jpeg_identity() -> FileIdentity {
+        FileIdentity::new("jpeg", "image/jpeg", FileCategory::Image, "JPEG", false, 1.0, ClassifierEngine::HeaderInspection)
+    }
+
+    #[test]
+    fn gps_jpeg_resolves_to_la_grange_in_search_text() {
+        // 41 48' 56" N, 87 52' 11" W  => La Grange, Illinois
+        let jpeg = jpeg_with_tiff(&tiff_with_gps([41, 48, 56], b'N', [87, 52, 11], b'W'));
+        let path = Path::new(r"C:\photos\IMG_4021.JPG");
+        let meta = ImageIndexer::extract_metadata(path, &jpeg, &jpeg_identity());
+        assert_eq!(meta.width, 1);
+        assert_eq!(meta.camera_make.as_deref(), Some("TestCam"));
+        assert!(meta.gps_latitude.unwrap() > 41.8);
+        assert!(meta.gps_longitude.unwrap() < -87.8);
+        assert_eq!(meta.location_source.as_deref(), Some("gps"));
+        assert!(meta.location_name.as_deref().unwrap().starts_with("La Grange, Illinois"));
+        let text = ImageIndexer::build_search_text(&meta, path);
+        assert!(text.contains("Location (taken in (from GPS)): La Grange, Illinois"), "{text}");
+        assert!(text.contains("41.81556° N, 87.86972° W"), "{text}");
+        assert!(meta.location_tokens.iter().any(|t| t == "grange"));
+    }
+
+    #[test]
+    fn image_without_gps_has_no_location() {
+        let jpeg = jpeg_with_tiff(b"II*\0\x08\0\0\0\0\0\0\0\0\0");
+        let meta = ImageIndexer::extract_metadata(Path::new("a.jpg"), &jpeg, &jpeg_identity());
+        assert!(meta.gps_latitude.is_none());
+        assert!(meta.location_name.is_none());
+    }
 }

@@ -35,6 +35,7 @@ pub struct CrawlerStats {
     pub files_scanned: usize,
     pub files_accepted_text: usize,
     pub files_accepted_image: usize,
+    pub files_accepted_audio: usize,
     pub files_skipped_size: usize,
     pub files_skipped_binary: usize,
     pub files_skipped_hidden: usize,
@@ -47,6 +48,7 @@ struct AtomicCrawlerStats {
     files_scanned: AtomicUsize,
     files_accepted_text: AtomicUsize,
     files_accepted_image: AtomicUsize,
+    files_accepted_audio: AtomicUsize,
     files_skipped_size: AtomicUsize,
     files_skipped_binary: AtomicUsize,
     files_skipped_hidden: AtomicUsize,
@@ -60,6 +62,7 @@ impl AtomicCrawlerStats {
             files_scanned: AtomicUsize::new(0),
             files_accepted_text: AtomicUsize::new(0),
             files_accepted_image: AtomicUsize::new(0),
+            files_accepted_audio: AtomicUsize::new(0),
             files_skipped_size: AtomicUsize::new(0),
             files_skipped_binary: AtomicUsize::new(0),
             files_skipped_hidden: AtomicUsize::new(0),
@@ -73,6 +76,7 @@ impl AtomicCrawlerStats {
             files_scanned: self.files_scanned.load(Ordering::Relaxed),
             files_accepted_text: self.files_accepted_text.load(Ordering::Relaxed),
             files_accepted_image: self.files_accepted_image.load(Ordering::Relaxed),
+            files_accepted_audio: self.files_accepted_audio.load(Ordering::Relaxed),
             files_skipped_size: self.files_skipped_size.load(Ordering::Relaxed),
             files_skipped_binary: self.files_skipped_binary.load(Ordering::Relaxed),
             files_skipped_hidden: self.files_skipped_hidden.load(Ordering::Relaxed),
@@ -377,6 +381,9 @@ impl FilesystemCrawler {
                     }
                     CandidateKind::Image { .. } => {
                         stats.files_accepted_image.fetch_add(1, Ordering::Relaxed);
+                    }
+                    CandidateKind::Audio { .. } => {
+                        stats.files_accepted_audio.fetch_add(1, Ordering::Relaxed);
                     }
                 }
 

@@ -16,6 +16,7 @@ use crate::config::{ChunkerConfig, DriftFixOptions, IngestConfig, ReindexOptions
 use crate::dedup::{DedupAction, FileCatalogEntry, TwoLevelDedupEngine};
 use crate::document_extractor::DocumentExtractor;
 use crate::drift_healer::DriftHealer;
+use crate::audio_indexer::AudioIndexer;
 use crate::error::IngestError;
 use crate::image_indexer::ImageIndexer;
 use crate::reindex::ReindexWorker;
@@ -207,6 +208,30 @@ impl IngestEngine {
             CandidateKind::Image { .. } => {
                 let bytes = std::fs::read(path)?;
                 let doc_chunk = ImageIndexer::index_image(
+                    path,
+                    &bytes,
+                    &identity,
+                    access_tier,
+                    self.embedder.as_ref(),
+                )?;
+
+                let file_b3 = doc_chunk.document_id.clone();
+                let _ = self.storage.delete_by_file_path(&path_str).await;
+                let _ = self.storage.insert_chunks(std::slice::from_ref(&doc_chunk)).await?;
+
+                self.dedup.register_entry(FileCatalogEntry {
+                    file_path: path.to_path_buf(),
+                    file_blake3: file_b3,
+                    mtime_secs,
+                    size_bytes,
+                    chunk_hashes: vec![doc_chunk.blake3_hash.clone()],
+                });
+
+                vec![doc_chunk]
+            }
+            CandidateKind::Audio { .. } => {
+                let bytes = std::fs::read(path)?;
+                let doc_chunk = AudioIndexer::index_audio(
                     path,
                     &bytes,
                     &identity,

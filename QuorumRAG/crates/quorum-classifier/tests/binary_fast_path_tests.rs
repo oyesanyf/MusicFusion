@@ -10,8 +10,8 @@ use tempfile::NamedTempFile;
 fn test_fast_path_binary_extensions_all_mapped() {
     let classifier = FileTypeClassifier::new();
 
-    // Verify all 23 compiled binary extensions
-    assert_eq!(COMPILED_BINARY_EXTENSIONS.len(), 23);
+    // Verify all 29 compiled binary extensions
+    assert_eq!(COMPILED_BINARY_EXTENSIONS.len(), 29);
 
     for &ext in COMPILED_BINARY_EXTENSIONS {
         // Must match helper function with or without leading dot
@@ -64,4 +64,52 @@ fn test_open_file_with_retry_fails_cleanly_on_missing_file() {
     let non_existent = std::path::Path::new("Z:\\nonexistent_m7_test_file.xyz");
     let res = FileTypeClassifier::open_file_with_retry(non_existent);
     assert!(res.is_err(), "Expected error for missing file");
+}
+
+#[test]
+fn test_audio_extensions_classified_and_not_binary_executable() {
+    let classifier = FileTypeClassifier::new();
+    let audio_exts = [
+        "mp3", "wav", "flac", "ogg", "m4a", "aac", "wma", "aiff", "aif", "opus",
+    ];
+
+    for ext in audio_exts {
+        assert!(
+            !is_binary_executable_extension(ext),
+            "Audio extension '{}' must NOT be classified as executable binary",
+            ext
+        );
+        let filename = format!("track.{}", ext);
+        let id = classifier.classify_by_extension(&filename, 1.0);
+        assert_eq!(
+            id.category,
+            FileCategory::Audio,
+            "Audio extension '{}' did not map to FileCategory::Audio",
+            ext
+        );
+    }
+}
+
+#[test]
+fn test_image_extensions_classified_and_not_binary_executable() {
+    let classifier = FileTypeClassifier::new();
+    let image_exts = [
+        "png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "tiff", "tif", "ico", "avif", "heic",
+    ];
+
+    for ext in image_exts {
+        assert!(
+            !is_binary_executable_extension(ext),
+            "Image extension '{}' must NOT be classified as executable binary",
+            ext
+        );
+        let filename = format!("picture.{}", ext);
+        let id = classifier.classify_by_extension(&filename, 1.0);
+        assert_eq!(
+            id.category,
+            FileCategory::Image,
+            "Image extension '{}' did not map to FileCategory::Image",
+            ext
+        );
+    }
 }
