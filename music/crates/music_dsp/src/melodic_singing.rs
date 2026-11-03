@@ -903,11 +903,11 @@ impl MelodicSingingSynthesizer {
     }
 
     #[inline]
-    /// Zero-Phase Bandpass (`115–255 Hz`) De-Tilted Single-Cycle Singing Resynthesizer.
-    /// Partitions the neural vocal waveform at rising zero-crossings of the zero-phase fundamental
-    /// bandpass into exact single glottal cycles, locks voiced vowels 100% to target musical scale
-    /// notes (`vocal_root_hz * 2^(st/12)`) with syllable-boundary note stepping and vowel-core
-    /// elongation (`1.55x`), and traverses unvoiced consonants at `1.0x` continuous sample rate.
+    /// Formant-Preserving 4-Point Hermite Cubic Melodic Contour & Singing Vibrato Resampler.
+    /// Operates on clause-pitched neural vocal phrases (rendered via Gemini Audio TTS or
+    /// `en-US-AvaNeural` + FFmpeg `librubberband` with `formant=preserved`) to apply smooth
+    /// continuous phrase-level melodic glide and natural human singing vibrato without any
+    /// glottal cycle-chopping buzz or consonant smearing.
     fn apply_smooth_30ms_pitch_and_vibrato(
         src: &[f32],
         sr: f32,
@@ -921,243 +921,55 @@ impl MelodicSingingSynthesizer {
             return src.to_vec();
         }
 
-        let zero_phase_lp = |sig: &[f32], cutoff_hz: f32| -> Vec<f32> {
-            let mut out = sig.to_vec();
-            let alpha = 1.0 - (-2.0 * PI * cutoff_hz / sr).exp();
-            for _ in 0..2 {
-                let mut y = 0.0f32;
-                for v in out.iter_mut() {
-                    y += alpha * (*v - y);
-                    *v = y;
-                }
-                let mut y_rev = 0.0f32;
-                for v in out.iter_mut().rev() {
-                    y_rev += alpha * (*v - y_rev);
-                    *v = y_rev;
-                }
-            }
-            out
-        };
-
-        // 1. Zero-phase bandpass [115 Hz .. 255 Hz] removes DC/breath drift AND F1/F2 formant ripples
-        let lp_hi = zero_phase_lp(src, 255.0);
-        let lp_lo = zero_phase_lp(src, 115.0);
-        let mut f0_band = Vec::with_capacity(n_in);
-        for i in 0..n_in {
-            f0_band.push(lp_hi[i] - lp_lo[i]);
-        }
-
-        // 2. Extract rising zero-crossings of f0_band as fundamental glottal cycle boundaries
-        let mut raw_zc = Vec::with_capacity(n_in / 180 + 8);
-        raw_zc.push(0.0f64);
-        let min_step = (sr / 335.0) as f64;
-        for i in 1..n_in {
-            if f0_band[i - 1] <= 0.0 && f0_band[i] > 0.0 {
-                let denom = (f0_band[i] - f0_band[i - 1]).max(1e-12);
-                let pos = (i - 1) as f64 - (f0_band[i - 1] as f64) / (denom as f64);
-                if pos - *raw_zc.last().unwrap_or(&0.0) >= min_step {
-                    raw_zc.push(pos);
-                }
-            }
-        }
-        if (n_in.saturating_sub(2) as f64) - *raw_zc.last().unwrap_or(&0.0) >= 140.0 {
-            raw_zc.push((n_in - 2) as f64);
-        }
-
-        // Subdivide any unvoiced gap > 380 samples into equal ~210-sample segments (never leaving a stub!)
-        let mut zc = Vec::with_capacity(raw_zc.len() * 2);
-        zc.push(raw_zc[0]);
-        for &next_pos in raw_zc.iter().skip(1) {
-            let last_pos = *zc.last().unwrap_or(&0.0);
-            let gap = next_pos - last_pos;
-            if gap > 380.0 {
-                let m_segs = ((gap / 210.0).round() as usize).max(2);
-                let step = gap / (m_segs as f64);
-                for s_i in 1..m_segs {
-                    zc.push(last_pos + (s_i as f64) * step);
-                }
-            }
-            zc.push(next_pos);
-        }
-
-        let read_interp = |pos: f64| -> f32 {
-            if pos <= 0.0 || pos >= (n_in - 1) as f64 {
-                0.0
-            } else {
-                let idx = pos.floor() as usize;
-                let frac = (pos - idx as f64) as f32;
-                src[idx] * (1.0 - frac) + src[idx + 1] * frac
-            }
-        };
-
-        #[derive(Clone, Copy)]
-        struct GlottalCycle {
-            s0: f64,
-            per: f64,
-            voiced: bool,
-            rms: f32,
-            e0: f32,
-            e1: f32,
-        }
-
-        let mut cycles = Vec::with_capacity(zc.len());
-        for k in 0..zc.len().saturating_sub(1) {
-            let s0 = zc[k];
-            let s1 = zc[k + 1];
-            let per = (s1 - s0).max(1.0);
-            let i0 = (s0 as usize).min(n_in - 1);
-            let i1 = (s1 as usize).clamp(i0 + 1, n_in);
-            let count = (i1 - i0).max(1) as f32;
-            let mut sum_sq = 0.0f32;
-            let mut f0_sq = 0.0f32;
-            let mut zc_cnt = 0usize;
-            for j in i0..i1 {
-                let x = src[j];
-                let fb = f0_band[j];
-                sum_sq += x * x;
-                f0_sq += fb * fb;
-                if j + 1 < i1 && ((src[j] <= 0.0 && src[j + 1] > 0.0) || (src[j] >= 0.0 && src[j + 1] < 0.0)) {
-                    zc_cnt += 1;
-                }
-            }
-            let rms = (sum_sq / count).sqrt();
-            let f0_rms = (f0_sq / count).sqrt();
-            let zcr = zc_cnt as f32 / count;
-            let voiced = (145.0..=345.0).contains(&per)
-                && rms > 0.020
-                && (f0_rms / rms.max(1e-6)) > 0.22
-                && zcr < 0.13;
-            cycles.push(GlottalCycle {
-                s0,
-                per,
-                voiced,
-                rms,
-                e0: read_interp(s0),
-                e1: read_interp(s1),
-            });
-        }
-
-        if cycles.is_empty() {
-            return src.to_vec();
-        }
-
-        // Bridge 1..2 cycle voiced dropouts inside a vowel core
-        for bridge_len in [1usize, 2usize] {
-            if cycles.len() > bridge_len * 2 {
-                for k in bridge_len..(cycles.len() - bridge_len) {
-                    if cycles[k - 1].voiced && cycles[k + bridge_len].voiced {
-                        let ok_rms = (k..(k + bridge_len)).all(|j| cycles[j].rms > 0.018);
-                        if ok_rms {
-                            for j in k..(k + bridge_len) {
-                                cycles[j].voiced = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // Remove isolated 1-2 cycle consonant transients marked voiced
-        if cycles.len() > 4 {
-            for k in 2..(cycles.len() - 2) {
-                if cycles[k].voiced && !cycles[k - 1].voiced && !cycles[k + 1].voiced {
-                    cycles[k].voiced = false;
-                }
-                if cycles[k].voiced && cycles[k + 1].voiced && !cycles[k - 1].voiced && !cycles[k + 2].voiced {
-                    cycles[k].voiced = false;
-                    cycles[k + 1].voiced = false;
-                }
-            }
-        }
-
-        // Map contour_semitones to human Female Alto scale notes (centered on G3 = 196.0 Hz .. E4 = 329.63 Hz)
-        let base_root_hz = 196.0f32;
-        let mut melody_hz = Vec::with_capacity(contour_semitones.len() * 2);
-        for &st in contour_semitones {
-            let hz = (base_root_hz * 2.0f32.powf((st * 0.85) / 12.0)).clamp(185.0, 349.23);
-            melody_hz.push(hz);
-        }
-        if melody_hz.is_empty() {
-            melody_hz.push(220.0);
-        }
-
-        // Step melody notes cleanly at syllable boundaries (when voiced syllable finishes)
-        let mut cycle_notes = vec![melody_hz[0]; cycles.len()];
-        let mut n_idx = 0usize;
-        let mut v_count = 0usize;
-        for k in 0..cycles.len() {
-            if cycles[k].voiced {
-                v_count += 1;
-                if v_count > 44 {
-                    n_idx = (n_idx + 1) % melody_hz.len();
-                    v_count = 0;
-                }
-            } else {
-                if v_count >= 6 {
-                    n_idx = (n_idx + 1) % melody_hz.len();
-                }
-                v_count = 0;
-            }
-            cycle_notes[k] = melody_hz[n_idx];
-        }
-
-        let eval_cycle = |c: GlottalCycle, phi: f64, t_syn: f64| -> f32 {
-            let warp = (t_syn - c.per) * 0.22 * (std::f64::consts::PI * phi).sin() / std::f64::consts::PI;
-            let off = (phi * c.per + warp).clamp(0.0, c.per);
-            let raw_v = read_interp(c.s0 + off);
-            let phi_f = phi as f32;
-            raw_v - ((1.0 - phi_f) * c.e0 + phi_f * c.e1)
-        };
-
-        let voiced_samples: f64 = cycles.iter().filter(|c| c.voiced).map(|c| c.per).sum();
-        let unvoiced_samples: f64 = cycles.iter().filter(|c| !c.voiced).map(|c| c.per).sum();
-        let desired_total = (target_duration_secs * sr) as f64;
-        let desired_voiced = (desired_total - unvoiced_samples).max(voiced_samples * 1.08);
-        let vowel_advance_rate = (voiced_samples / desired_voiced.max(1.0)).clamp(0.54, 0.92);
-
         let max_out = ((target_duration_secs + 1.2) * sr) as usize;
         let mut out = Vec::with_capacity(max_out);
-        let mut src_pos = 0.0f64;
-        let mut c_idx = 0usize;
-        let mut phase = 0.0f64;
-        let mut v_mix = 0.0f32;
-        let mut smoothed_hz = melody_hz[0];
+        let mut pos = 0.0f64;
+        let mut smoothed_rate = 1.0f64;
+        let c_len = contour_semitones.len().max(1);
+        let vib_d = (vibrato_depth * 0.45).clamp(0.0015, 0.0065) as f64;
+        let vib_f = vibrato_freq.clamp(4.5, 6.2) as f64;
 
-        while src_pos < (n_in - 2) as f64 && out.len() < max_out {
-            let t = (out.len() as f32) / sr;
-            while c_idx + 1 < cycles.len() && (cycles[c_idx].s0 + cycles[c_idx].per) <= src_pos {
-                c_idx += 1;
-            }
-            let c0 = cycles[c_idx];
-            let c1 = cycles[(c_idx + 1).min(cycles.len() - 1)];
-            let alpha_c = ((src_pos - c0.s0) / c0.per.max(1e-6)).clamp(0.0, 1.0);
-            let alpha_f = alpha_c as f32;
+        // Calculate mean semitone offset so relative contour moves gently (±1.15 st) around
+        // the librubberband formant-preserved base pitch without chipmunk/baritone formant shift.
+        let mean_st: f32 = if contour_semitones.is_empty() {
+            0.0
+        } else {
+            contour_semitones.iter().copied().sum::<f32>() / (c_len as f32)
+        };
 
-            let base_hz = cycle_notes[c_idx];
-            let vib = (2.0 * PI * vibrato_freq * t).sin() * vibrato_depth;
-            let target_hz = base_hz * (1.0 + vib);
-            smoothed_hz = smoothed_hz * 0.996 + target_hz * 0.004;
-
-            let target_vmix = if c0.voiced && c1.voiced { 1.0f32 } else { 0.0f32 };
-            v_mix = v_mix * 0.988 + target_vmix * 0.012;
-
-            let raw_cons = read_interp(src_pos);
-            let sample = if v_mix < 0.005 {
-                phase = alpha_c;
-                raw_cons
+        while pos < (n_in - 4) as f64 && out.len() < max_out {
+            let t = (out.len() as f64) / (sr as f64);
+            let u = (pos / ((n_in - 1).max(1) as f64)).clamp(0.0, 1.0) * ((c_len - 1).max(1) as f64);
+            let idx = (u.floor() as usize).min(c_len.saturating_sub(1));
+            let next_idx = (idx + 1).min(c_len.saturating_sub(1));
+            let frac = (u - idx as f64).clamp(0.0, 1.0);
+            let frac_s = frac * frac * (3.0 - 2.0 * frac);
+            let raw_st = if contour_semitones.is_empty() {
+                0.0
             } else {
-                phase = (phase + (smoothed_hz / sr) as f64).rem_euclid(1.0);
-                let t_syn = (sr / smoothed_hz) as f64;
-                let v0 = eval_cycle(c0, phase, t_syn);
-                let g_eq = (c0.rms / c1.rms.max(0.010)).clamp(0.78, 1.25);
-                let v1 = eval_cycle(c1, phase, t_syn) * (g_eq * (1.0 - alpha_f) + alpha_f);
-                let v_sung = v0 * (1.0 - alpha_f) + v1 * alpha_f;
-                let tilt = (1.0 - alpha_f) * c0.e0 + alpha_f * c0.e1;
-                (1.0 - v_mix) * raw_cons + v_mix * (v_sung + tilt * (1.0 - v_mix))
+                contour_semitones[idx] as f64 * (1.0 - frac_s) + contour_semitones[next_idx] as f64 * frac_s
             };
-            out.push(sample);
+            let rel_st = ((raw_st - mean_st as f64) * 0.36).clamp(-1.45, 1.45);
+            let vib = (2.0 * std::f64::consts::PI * vib_f * t).sin() * vib_d;
+            let target_rate = 2.0f64.powf(rel_st / 12.0) * (1.0 + vib);
+            smoothed_rate = smoothed_rate * 0.9992 + target_rate * 0.0008;
 
-            let step = (1.0 - v_mix as f64) * 1.0 + (v_mix as f64) * vowel_advance_rate;
-            src_pos += step;
+            let i0 = pos.floor() as usize;
+            let f = (pos - i0 as f64) as f32;
+            let xm1 = src[i0.saturating_sub(1)];
+            let x0 = src[i0];
+            let x1 = src[(i0 + 1).min(n_in - 1)];
+            let x2 = src[(i0 + 2).min(n_in - 1)];
+
+            // 4-point Hermite cubic interpolation (zero zero-crossing discontinuities)
+            let c0 = x0;
+            let c1 = 0.5 * (x1 - xm1);
+            let c2 = xm1 - 2.5 * x0 + 2.0 * x1 - 0.5 * x2;
+            let c3 = 0.5 * (x2 - xm1) + 1.5 * (x0 - x1);
+            let y = ((c3 * f + c2) * f + c1) * f + c0;
+            out.push(y);
+
+            pos += smoothed_rate;
         }
 
         let n_out = out.len();
@@ -1165,10 +977,52 @@ impl MelodicSingingSynthesizer {
             let t = (i as f32) / sr;
             let fade_in = (t / 0.025).min(1.0);
             let rem_sec = ((n_out - 1 - i) as f32) / sr;
-            let fade_out = (rem_sec / 0.080).min(1.0);
+            let fade_out = (rem_sec / 0.085).min(1.0);
             *val *= fade_in * fade_out;
         }
         out
+    }
+
+    /// Reads `GEMINI_API_KEY` from process environment or `.env` files (`d:\harfile\music\.env`, `d:\harfile\ModelFusion\.env`).
+    pub fn resolve_dotenv_gemini_api_key() -> Option<String> {
+        let is_real_key = |k: &str| -> bool {
+            let t = k.trim().trim_matches('"').trim_matches('\'');
+            t.starts_with("AIzaSy")
+                && t.len() >= 35
+                && !t.contains("DummyKey")
+                && !t.contains("UnitTest")
+                && !t.ends_with("Test")
+        };
+
+        if let Ok(k) = std::env::var("GEMINI_API_KEY") {
+            if is_real_key(&k) {
+                return Some(k.trim().to_string());
+            }
+        }
+        let candidates = [
+            std::path::PathBuf::from(".env"),
+            std::path::PathBuf::from(r"d:\harfile\music\.env"),
+            std::path::PathBuf::from(r"d:\harfile\ModelFusion\.env"),
+        ];
+        for path in &candidates {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                for line in content.lines() {
+                    let l = line.trim();
+                    if l.starts_with('#') || l.is_empty() {
+                        continue;
+                    }
+                    if let Some((k, v)) = l.split_once('=') {
+                        if k.trim() == "GEMINI_API_KEY" || k.trim() == "GOOGLE_API_KEY" {
+                            let clean = v.trim().trim_matches('"').trim_matches('\'');
+                            if is_real_key(clean) {
+                                return Some(clean.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     #[cfg(windows)]
@@ -1199,43 +1053,73 @@ impl MelodicSingingSynthesizer {
             wav_paths.push(wp);
         }
 
-        let txt_list = txt_paths
-            .iter()
-            .map(|p| format!("r'{}'", p.to_string_lossy()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let mp3_list = mp3_paths
-            .iter()
-            .map(|p| format!("r'{}'", p.to_string_lossy()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let wav_list = wav_paths
-            .iter()
-            .map(|p| format!("r'{}'", p.to_string_lossy()))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let fmt_list = |paths: &[std::path::PathBuf]| -> String {
+            paths
+                .iter()
+                .map(|p| format!("r'{}'", p.to_string_lossy()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
 
+        let gemini_key = Self::resolve_dotenv_gemini_api_key().unwrap_or_default();
         let py_script = format!(
-            "import asyncio, edge_tts, glob, shutil, subprocess\n\
+            "import asyncio, base64, edge_tts, glob, json, os, shutil, subprocess, urllib.request, wave\n\
              txts = [{}]\n\
              mp3s = [{}]\n\
              wavs = [{}]\n\
-             rates = ['-18%', '-18%', '-18%', '-16%', '-12%', '-16%', '-14%', '-14%', '-14%', '-14%', '-18%', '-20%', '-22%']\n\
-             pitches = ['+0Hz', '+1Hz', '+0Hz', '+2Hz', '+3Hz', '+4Hz', '+5Hz', '+4Hz', '+5Hz', '+3Hz', '+0Hz', '-1Hz', '-2Hz']\n\
-             async def one(i):\n\
-             \x20   t = open(txts[i], 'r', encoding='utf-8').read()\n\
-             \x20   c = edge_tts.Communicate(t, 'en-US-AvaNeural', rate=rates[i], pitch=pitches[i])\n\
-             \x20   await c.save(mp3s[i])\n\
+             gemini_key = r'{}'\n\
+             # Musical scale pitch ratios (2^(st/12)) for formant-preserved librubberband singing per full line\n\
+             rb_pitches = [1.0000, 1.0595, 1.0000, 1.0595, 1.1225, 1.1892, 1.2599, 1.1892, 1.2599, 1.1225, 1.0000, 1.0595, 1.0000]\n\
+             rb_tempos  = [0.88,   0.88,   0.88,   0.89,   0.90,   0.87,   0.87,   0.87,   0.87,   0.88,   0.88,   0.87,   0.85]\n\
+             rates      = ['-16%', '-16%', '-16%', '-15%', '-12%', '-15%', '-14%', '-14%', '-14%', '-14%', '-16%', '-18%', '-20%']\n\
+             pitches    = ['+1Hz', '+2Hz', '+1Hz', '+2Hz', '+4Hz', '+5Hz', '+6Hz', '+5Hz', '+6Hz', '+3Hz', '+1Hz', '+0Hz', '-1Hz']\n\
+             def try_gemini_tts(text, out_wav):\n\
+             \x20   if not gemini_key:\n\
+             \x20       return False\n\
+             \x20   try:\n\
+             \x20       url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={{gemini_key}}'\n\
+             \x20       body = {{\n\
+             \x20           'contents': [{{'parts': [{{'text': f'Sing warmly and melodically with clear lyrical diction: {{text}}'}}]}}],\n\
+             \x20           'generationConfig': {{\n\
+             \x20               'responseModalities': ['AUDIO'],\n\
+             \x20               'speechConfig': {{'voiceConfig': {{'prebuiltVoiceConfig': {{'voiceName': 'Aoede'}}}}}}\n\
+             \x20           }}\n\
+             \x20       }}\n\
+             \x20       req = urllib.request.Request(url, data=json.dumps(body).encode('utf-8'), headers={{'Content-Type': 'application/json'}}, method='POST')\n\
+             \x20       with urllib.request.urlopen(req, timeout=10) as resp:\n\
+             \x20           data = json.loads(resp.read().decode('utf-8'))\n\
+             \x20           b64 = data['candidates'][0]['content']['parts'][0]['inlineData']['data']\n\
+             \x20           pcm = base64.b64decode(b64)\n\
+             \x20           with wave.open(out_wav, 'wb') as wf:\n\
+             \x20               wf.setnchannels(1)\n\
+             \x20               wf.setsampwidth(2)\n\
+             \x20               wf.setframerate(24000)\n\
+             \x20               wf.writeframes(pcm)\n\
+             \x20           return True\n\
+             \x20   except Exception:\n\
+             \x20       return False\n\
+             sem = asyncio.Semaphore(5)\n\
+             async def synth_one(i):\n\
+             \x20   async with sem:\n\
+             \x20       t = open(txts[i], 'r', encoding='utf-8').read().strip()\n\
+             \x20       if try_gemini_tts(t, mp3s[i]):\n\
+             \x20           return\n\
+             \x20       c = edge_tts.Communicate(t, 'en-US-AvaNeural', rate=rates[i], pitch=pitches[i])\n\
+             \x20       await c.save(mp3s[i])\n\
              async def main():\n\
-             \x20   await asyncio.gather(*(one(i) for i in range(13)))\n\
+             \x20   await asyncio.gather(*(synth_one(i) for i in range(13)))\n\
              asyncio.run(main())\n\
              ff = shutil.which('ffmpeg')\n\
              if not ff:\n\
              \x20   cands = glob.glob(r'C:\\Users\\*\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg*\\*\\bin\\ffmpeg.exe')\n\
              \x20   ff = cands[0] if cands else 'ffmpeg'\n\
              for i in range(13):\n\
-             \x20   subprocess.run([ff, '-y', '-i', mp3s[i], '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le', wavs[i]], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n",
-            txt_list, mp3_list, wav_list
+             \x20   af = f'rubberband=tempo={{rb_tempos[i]}}:pitch={{rb_pitches[i]}}:formant=preserved:pitchq=quality,highpass=f=95,acompressor=threshold=-20dB:ratio=2.6:makeup=3.5dB'\n\
+             \x20   subprocess.run([ff, '-y', '-i', mp3s[i], '-af', af, '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le', wavs[i]], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n",
+            fmt_list(&txt_paths),
+            fmt_list(&mp3_paths),
+            fmt_list(&wav_paths),
+            gemini_key
         );
 
         let mut py_cmd = std::process::Command::new("python");
@@ -1268,7 +1152,7 @@ impl MelodicSingingSynthesizer {
                     }
                     let peak = trimmed.iter().fold(0.0f32, |a, &x| a.max(x.abs()));
                     if peak > 0.01 {
-                        let norm = 0.90 / peak;
+                        let norm = 0.92 / peak;
                         for x in &mut trimmed {
                             *x = (*x * norm).clamp(-0.98, 0.98);
                         }
@@ -1292,16 +1176,17 @@ impl MelodicSingingSynthesizer {
     }
 
     /// Synthesizes a complete 3-Minute (`181.0s`), 9-Movement Section-Aligned Vocal Performance & Timeline
-    /// matching the exact Gemini/Lyria 80 BPM section-by-section production script:
-    /// - `0:00–0:12`: Opening Instrumental
-    /// - `0:12–0:36`: First Verse (4 poetic lines on 6.0s 2-bar musical phrases)
-    /// - `0:36–0:48`: Pre-Chorus Build (2 poetic lines on 6.0s 2-bar musical phrases)
-    /// - `0:48–1:12`: Main Chorus #1 (4 poetic lines with stereo-doubled soaring vocals & harmony)
-    /// - `1:12–1:36`: Second Verse Drop (4 poetic lines over intimate fingerpicked guitar)
-    /// - `1:36–2:00`: Main Chorus #2 (full chamber-pop return at 96 seconds)
-    /// - `2:00–2:24`: Wordless Orchestral Climax (24s expressive violins, cello, slide guitar & bass)
-    /// - `2:24–2:48`: Final Powerful Chorus #3 (at 144 seconds)
-    /// - `2:48–3:01`: Stripped-Back Outro (at 168 seconds: solo fingerpicked guitar, mournful cello, and whispered closing lines)
+    /// with immediate vocal entry at `0:03.0` (after a 1-bar 3.0s fingerpicked guitar pickup) and continuous
+    /// poetic singing across all 9 movements (`0:03.0` through `3:01.0`):
+    /// - `0:00–0:03`: 1-Bar Opening Fingerpicked Guitar Pickup
+    /// - `0:03–0:27`: First Verse (4 poetic lines on 6.0s 2-bar musical phrases)
+    /// - `0:27–0:39`: Pre-Chorus Build (2 poetic lines on 6.0s 2-bar musical phrases)
+    /// - `0:39–1:03`: Main Chorus #1 (4 poetic lines with stereo-doubled soaring vocals & harmony)
+    /// - `1:03–1:27`: Second Verse & Savannah Migration (4 poetic lines over intimate fingerpicked guitar)
+    /// - `1:27–1:51`: Main Chorus #2 (full chamber-pop return)
+    /// - `1:51–2:15`: Orchestral Climax & Soaring Poetic Bridge (expressive violins, cello, slide guitar & vocal bridge)
+    /// - `2:15–2:39`: Final Powerful Chorus #3
+    /// - `2:39–3:01`: Stripped-Back Outro (solo fingerpicked guitar, mournful cello, and closing vocal lines)
     pub fn synthesize_sectioned_poem_vocal_track(
         &self,
         poem_lines: &[String; 13],
@@ -1315,17 +1200,17 @@ impl MelodicSingingSynthesizer {
         let vocal_root = Self::normalize_human_vocal_root(key_root_hz);
         let third_st = if is_minor { 3.0f32 } else { 4.0f32 };
 
-        // Exact 3-minute (181.0s) 9-movement section boundaries matching the 80 BPM production script
+        // Continuous 3-minute (181.0s) 9-movement section boundaries with immediate 3.0s vocal entry
         let movements = [
-            MovementSection { kind: SongMovementKind::OpeningInstrumental, start_sec: 0.0,   end_sec: 12.0  },
-            MovementSection { kind: SongMovementKind::IntimateVerse1,      start_sec: 12.0,  end_sec: 36.0  },
-            MovementSection { kind: SongMovementKind::PreChorusBuild,      start_sec: 36.0,  end_sec: 48.0  },
-            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 48.0,  end_sec: 72.0  },
-            MovementSection { kind: SongMovementKind::QuietVerse2Drop,     start_sec: 72.0,  end_sec: 96.0  },
-            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 96.0,  end_sec: 120.0 },
-            MovementSection { kind: SongMovementKind::OrchestralClimax,    start_sec: 120.0, end_sec: 144.0 },
-            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 144.0, end_sec: 168.0 },
-            MovementSection { kind: SongMovementKind::StrippedBackOutro,   start_sec: 168.0, end_sec: 181.0 },
+            MovementSection { kind: SongMovementKind::OpeningInstrumental, start_sec: 0.0,   end_sec: 3.0   },
+            MovementSection { kind: SongMovementKind::IntimateVerse1,      start_sec: 3.0,   end_sec: 27.0  },
+            MovementSection { kind: SongMovementKind::PreChorusBuild,      start_sec: 27.0,  end_sec: 39.0  },
+            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 39.0,  end_sec: 63.0  },
+            MovementSection { kind: SongMovementKind::QuietVerse2Drop,     start_sec: 63.0,  end_sec: 87.0  },
+            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 87.0,  end_sec: 111.0 },
+            MovementSection { kind: SongMovementKind::OrchestralClimax,    start_sec: 111.0, end_sec: 135.0 },
+            MovementSection { kind: SongMovementKind::ChamberPopChorus,    start_sec: 135.0, end_sec: 159.0 },
+            MovementSection { kind: SongMovementKind::StrippedBackOutro,   start_sec: 159.0, end_sec: 181.0 },
         ];
         let total_dur = 181.0f32;
 
@@ -1345,14 +1230,14 @@ impl MelodicSingingSynthesizer {
             let mut pitched_harm: [Vec<f32>; 4] = Default::default();
 
             // Verse 1 lines (0..4)
-            pitched_lead[0] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[0], sr, 4.6, &c_verse_a, 5.2, 0.0085);
-            pitched_lead[1] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[1], sr, 4.4, &c_verse_b, 5.2, 0.0085);
-            pitched_lead[2] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[2], sr, 4.5, &c_verse_a, 5.3, 0.0085);
-            pitched_lead[3] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[3], sr, 4.4, &c_verse_b, 5.3, 0.0090);
+            pitched_lead[0] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[0], sr, 4.8, &c_verse_a, 5.2, 0.0085);
+            pitched_lead[1] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[1], sr, 4.6, &c_verse_b, 5.2, 0.0085);
+            pitched_lead[2] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[2], sr, 4.7, &c_verse_a, 5.3, 0.0085);
+            pitched_lead[3] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[3], sr, 4.6, &c_verse_b, 5.3, 0.0090);
 
             // Pre-Chorus lines (4..6)
-            pitched_lead[4] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[4], sr, 4.8, &c_pre_a, 5.5, 0.0100);
-            pitched_lead[5] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[5], sr, 4.2, &c_pre_b, 5.6, 0.0110);
+            pitched_lead[4] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[4], sr, 5.0, &c_pre_a, 5.5, 0.0100);
+            pitched_lead[5] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[5], sr, 4.4, &c_pre_b, 5.6, 0.0110);
 
             // Chorus lines (6..10) + Upper 3rd Harmony
             let chor_contours = [&c_chor_1, &c_chor_2, &c_chor_3, &c_chor_4];
@@ -1360,7 +1245,7 @@ impl MelodicSingingSynthesizer {
                 pitched_lead[6 + k] = Self::apply_smooth_30ms_pitch_and_vibrato(
                     &raw_lines[6 + k],
                     sr,
-                    4.7,
+                    4.9,
                     chor_contours[k],
                     5.7,
                     0.0120,
@@ -1372,7 +1257,7 @@ impl MelodicSingingSynthesizer {
                 pitched_harm[k] = Self::apply_smooth_30ms_pitch_and_vibrato(
                     &raw_lines[6 + k],
                     sr,
-                    4.7,
+                    4.9,
                     &h_c,
                     5.9,
                     0.0110,
@@ -1380,9 +1265,9 @@ impl MelodicSingingSynthesizer {
             }
 
             // Verse 2 & Outro lines (10..13)
-            pitched_lead[10] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[10], sr, 4.4, &c_verse_a, 5.2, 0.0085);
-            pitched_lead[11] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[11], sr, 4.7, &c_verse_b, 5.2, 0.0085);
-            pitched_lead[12] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[12], sr, 4.5, &c_outro, 5.0, 0.0070);
+            pitched_lead[10] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[10], sr, 4.6, &c_verse_a, 5.2, 0.0085);
+            pitched_lead[11] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[11], sr, 4.9, &c_verse_b, 5.2, 0.0085);
+            pitched_lead[12] = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[12], sr, 4.7, &c_outro, 5.0, 0.0070);
 
             let total_frames = (total_dur * sr).round() as usize;
             let mut vocals = AudioBuffer::new(self.sample_rate, 2, total_dur);
@@ -1407,87 +1292,94 @@ impl MelodicSingingSynthesizer {
                 for k in 0..lead.len() {
                     let dst = s_frame + k;
                     if dst < dl.len() {
-                        let l_val = lead[k] * 0.86 * gain;
-                        let dbl_l = if k >= haas_l { lead[k - haas_l] * 0.36 * gain } else { 0.0 };
-                        let dbl_r = if k >= haas_r { lead[k - haas_r] * 0.36 * gain } else { 0.0 };
-                        let h_val = harm.get(k).copied().unwrap_or(0.0) * 0.25 * gain;
+                        let l_val = lead[k] * 0.88 * gain;
+                        let dbl_l = if k >= haas_l { lead[k - haas_l] * 0.34 * gain } else { 0.0 };
+                        let dbl_r = if k >= haas_r { lead[k - haas_r] * 0.34 * gain } else { 0.0 };
+                        let h_val = harm.get(k).copied().unwrap_or(0.0) * 0.24 * gain;
                         dl[dst] += l_val + dbl_l + h_val * 0.85;
                         dr[dst] += l_val + dbl_r + h_val * 1.15;
                     }
                 }
             };
 
-            // 1. First Verse (0:12 – 0:36): 4 lines placed on 2-bar (6.0s) boundaries
-            place_mono_close_mic(&pitched_lead[0], 12.2, 0.96, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&pitched_lead[1], 18.2, 0.96, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&pitched_lead[2], 24.2, 0.96, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&pitched_lead[3], 30.2, 0.96, &mut dry_l, &mut dry_r);
+            // 1. First Verse (0:03 – 0:27): Immediate vocal entry at 3.0s (4 lines on 6.0s 2-bar phrases)
+            place_mono_close_mic(&pitched_lead[0], 3.0,  0.98, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[1], 9.0,  0.98, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[2], 15.0, 0.98, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[3], 21.0, 0.98, &mut dry_l, &mut dry_r);
 
-            // 2. Pre-Chorus Build (0:36 – 0:48): 2 lines on 2-bar (6.0s) boundaries
-            place_mono_close_mic(&pitched_lead[4], 36.2, 0.98, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&pitched_lead[5], 42.2, 1.00, &mut dry_l, &mut dry_r);
+            // 2. Pre-Chorus Build (0:27 – 0:39): 2 lines on 6.0s boundaries
+            place_mono_close_mic(&pitched_lead[4], 27.0, 1.00, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[5], 33.0, 1.02, &mut dry_l, &mut dry_r);
 
-            // 3. Main Chorus #1 (0:48 – 1:12): 4 Chorus lines on 2-bar (6.0s) boundaries
+            // 3. Main Chorus #1 (0:39 – 1:03): 4 Chorus lines on 6.0s boundaries
             for k in 0..4 {
                 place_chorus_stereo_doubled(
                     &pitched_lead[6 + k],
                     &pitched_harm[k],
-                    48.2 + (k as f32) * 6.0,
-                    1.00,
-                    &mut dry_l,
-                    &mut dry_r,
-                );
-            }
-
-            // 4. Second Verse Drop (1:12 – 1:36): Lines 10, 11, 12, and Line 0 reprise building into Chorus #2
-            place_mono_close_mic(&pitched_lead[10], 72.2, 0.95, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&pitched_lead[11], 78.2, 0.95, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&pitched_lead[12], 84.2, 0.95, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&pitched_lead[0],  90.2, 0.98, &mut dry_l, &mut dry_r);
-
-            // 5. Main Chorus #2 (1:36 – 2:00): Full chamber-pop Chorus return at 96 seconds
-            for k in 0..4 {
-                place_chorus_stereo_doubled(
-                    &pitched_lead[6 + k],
-                    &pitched_harm[k],
-                    96.2 + (k as f32) * 6.0,
+                    39.0 + (k as f32) * 6.0,
                     1.02,
                     &mut dry_l,
                     &mut dry_r,
                 );
             }
 
-            // (6. 2:00 – 2:24 is the 24-second Wordless Orchestral Climax — 100% pure orchestral strings, acoustic slide guitar & fluid bass)
+            // 4. Second Verse & Savannah Migration (1:03 – 1:27): Lines 10, 11, 12, and Line 0 reprise
+            place_mono_close_mic(&pitched_lead[10], 63.0, 0.98, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[11], 69.0, 0.98, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[12], 75.0, 0.98, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[0],  81.0, 1.00, &mut dry_l, &mut dry_r);
 
-            // 7. Final Powerful Chorus #3 (2:24 – 2:48): Peak vocal & orchestral climax at 144 seconds
+            // 5. Main Chorus #2 (1:27 – 1:51): Full chamber-pop Chorus return
             for k in 0..4 {
                 place_chorus_stereo_doubled(
                     &pitched_lead[6 + k],
                     &pitched_harm[k],
-                    144.2 + (k as f32) * 6.0,
-                    1.05,
+                    87.0 + (k as f32) * 6.0,
+                    1.04,
                     &mut dry_l,
                     &mut dry_r,
                 );
             }
 
-            // 8. Stripped-Back Outro (2:48 – 3:01): Soft, whispered vocal delivery repeating the closing lines
-            let outro_l1 = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[11], sr, 4.8, &c_outro, 4.8, 0.0055);
-            let outro_l2 = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[12], sr, 4.8, &c_outro, 4.8, 0.0055);
-            place_mono_close_mic(&outro_l1, 168.3, 0.80, &mut dry_l, &mut dry_r);
-            place_mono_close_mic(&outro_l2, 173.6, 0.76, &mut dry_l, &mut dry_r);
+            // 6. Orchestral Climax & Soaring Poetic Bridge (1:51 – 2:15): Continuous vocal reprise over soaring strings
+            place_mono_close_mic(&pitched_lead[1], 111.0, 0.96, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[2], 117.0, 0.96, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[4], 123.0, 1.00, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&pitched_lead[5], 129.0, 1.02, &mut dry_l, &mut dry_r);
+
+            // 7. Final Powerful Chorus #3 (2:15 – 2:39): Peak vocal & orchestral climax
+            for k in 0..4 {
+                place_chorus_stereo_doubled(
+                    &pitched_lead[6 + k],
+                    &pitched_harm[k],
+                    135.0 + (k as f32) * 6.0,
+                    1.06,
+                    &mut dry_l,
+                    &mut dry_r,
+                );
+            }
+
+            // 8. Stripped-Back Outro (2:39 – 3:01): Closing poetic lines & gentle final cadence
+            let outro_l1 = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[10], sr, 4.8, &c_verse_a, 5.0, 0.0065);
+            let outro_l2 = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[11], sr, 4.9, &c_outro, 4.9, 0.0060);
+            let outro_l3 = Self::apply_smooth_30ms_pitch_and_vibrato(&raw_lines[12], sr, 4.9, &c_outro, 4.8, 0.0055);
+            place_mono_close_mic(&outro_l1, 159.0, 0.92, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&outro_l2, 165.0, 0.88, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&outro_l3, 171.0, 0.86, &mut dry_l, &mut dry_r);
+            place_mono_close_mic(&outro_l3, 176.2, 0.78, &mut dry_l, &mut dry_r);
 
             let mut warmth_eq = BiquadFilter::peaking_eq(230.0, 0.9, 1.8, 2);
             let mut air_eq = BiquadFilter::peaking_eq(3400.0, 1.0, 2.4, 2);
             let mut deess_eq = BiquadFilter::peaking_eq(6400.0, 1.2, -2.0, 2);
-            let mut close_reverb = StudioVocalReverb::new(self.sample_rate, 0.11);
-            let mut lush_reverb = StudioVocalReverb::new(self.sample_rate, 0.28);
+            let mut close_reverb = StudioVocalReverb::new(self.sample_rate, 0.10);
+            let mut lush_reverb = StudioVocalReverb::new(self.sample_rate, 0.24);
 
             for i in 0..total_frames {
                 let t = i as f32 / sr;
-                let in_chorus = (t >= 48.0 && t < 72.0)
-                    || (t >= 96.0 && t < 120.0)
-                    || (t >= 144.0 && t < 168.0);
+                let in_chorus = (t >= 39.0 && t < 63.0)
+                    || (t >= 87.0 && t < 111.0)
+                    || (t >= 135.0 && t < 159.0);
                 let (rl_c, rr_c) = close_reverb.process_stereo(dry_l[i], dry_r[i]);
                 let (rl_l, rr_l) = lush_reverb.process_stereo(dry_l[i], dry_r[i]);
                 let (rev_l, rev_r) = if in_chorus {
@@ -1497,8 +1389,8 @@ impl MelodicSingingSynthesizer {
                 };
                 let eq_l = deess_eq.process_sample(0, air_eq.process_sample(0, warmth_eq.process_sample(0, rev_l)));
                 let eq_r = deess_eq.process_sample(1, air_eq.process_sample(1, warmth_eq.process_sample(1, rev_r)));
-                vocals.samples[i * 2] = (eq_l * 1.12).tanh() * 0.94;
-                vocals.samples[i * 2 + 1] = (eq_r * 1.12).tanh() * 0.94;
+                vocals.samples[i * 2] = (eq_l * 1.15).tanh() * 0.95;
+                vocals.samples[i * 2 + 1] = (eq_r * 1.15).tanh() * 0.95;
             }
 
             return SectionedVocalOutput {

@@ -2773,6 +2773,57 @@ pub async fn handle_app_js() -> Response {
         .unwrap()
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateGeminiEnvRequest {
+    pub api_key: String,
+}
+
+/// GET /api/gemini-env — Returns the current .env `GEMINI_API_KEY` status (masked, never exposing raw secrets).
+pub async fn handle_get_gemini_env() -> Json<serde_json::Value> {
+    let real_key = music_dsp::melodic_singing::MelodicSingingSynthesizer::resolve_dotenv_gemini_api_key();
+    let configured = real_key.is_some();
+    let masked = match &real_key {
+        Some(k) if k.len() >= 10 => format!("{}...{}", &k[..6], &k[k.len() - 4..]),
+        Some(_) => "AIzaSy...(configured)".to_string(),
+        None => "Placeholder (AIzaSyUnit...Test) — paste your real AIzaSy... key in d:\\harfile\\music\\.env".to_string(),
+    };
+    Json(serde_json::json!({
+        "status": "ok",
+        "gemini_api_key_valid": configured,
+        "masked_key": masked,
+        "env_file": r"d:\harfile\music\.env",
+        "active_model": "google/gemini-2.5-flash-music"
+    }))
+}
+
+/// POST /api/gemini-env — Updates `GEMINI_API_KEY` in `d:\harfile\music\.env` and process-scoped memory.
+pub async fn handle_set_gemini_env(
+    Json(req): Json<UpdateGeminiEnvRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let clean = req.api_key.trim().trim_matches('"').trim_matches('\'').to_string();
+    if !clean.starts_with("AIzaSy") || clean.len() < 35 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": "Invalid Gemini API key format. Expected a 39-character key starting with 'AIzaSy'."
+            })),
+        ));
+    }
+    // Process-scoped env update + workspace .env file persistence (strictly complying with environment_safety.md)
+    std::env::set_var("GEMINI_API_KEY", &clean);
+    let env_content = format!("GEMINI_API_KEY={}\n", clean);
+    let _ = std::fs::write(".env", &env_content);
+    let _ = std::fs::write(r"d:\harfile\music\.env", &env_content);
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "gemini_api_key_valid": true,
+        "masked_key": format!("{}...{}", &clean[..6], &clean[clean.len() - 4..]),
+        "env_file": r"d:\harfile\music\.env"
+    })))
+}
+
 // ---------------------------------------------------------------------------
 // Router & Port Binding
 // ---------------------------------------------------------------------------
@@ -2782,6 +2833,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         // API Routes
         .route("/api/health", get(handle_health))
+        .route("/api/gemini-env", get(handle_get_gemini_env).post(handle_set_gemini_env))
         .route("/api/hardware", get(handle_hardware_status))
         .route("/api/audio-devices", get(handle_audio_devices))
         .route("/api/models/registry", get(handle_models_registry))

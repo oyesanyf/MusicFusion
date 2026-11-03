@@ -1397,17 +1397,17 @@ impl ReferenceRlSynthesizer {
             };
 
             let (ac_gain, str_gain, dr_gain, ba_gain, solo_gain) = match mov {
-                SongMovementKind::OpeningInstrumental => (0.64, 0.44, 0.46, 0.48, 0.44),
+                SongMovementKind::OpeningInstrumental => (0.56, 0.36, 0.32, 0.38, 0.0),
                 SongMovementKind::IntimateVerse1 | SongMovementKind::QuietVerse2Drop => {
                     // Backing instruments drop way back so the close-mic voice sits in clean, uncluttered space!
-                    (0.34, 0.12, 0.24, 0.28, 0.0)
+                    (0.30, 0.10, 0.20, 0.24, 0.0)
                 }
-                SongMovementKind::PreChorusBuild => (0.50, 0.40, 0.52, 0.46, 0.18),
-                SongMovementKind::ChamberPopChorus => (0.58, 0.46, 0.56, 0.54, 0.26),
-                SongMovementKind::OrchestralClimax => (0.56, 0.54, 0.58, 0.58, 0.82),
+                SongMovementKind::PreChorusBuild => (0.44, 0.34, 0.44, 0.40, 0.0),
+                SongMovementKind::ChamberPopChorus => (0.50, 0.42, 0.48, 0.46, 0.16),
+                SongMovementKind::OrchestralClimax => (0.48, 0.48, 0.48, 0.48, 0.28),
                 SongMovementKind::StrippedBackOutro => {
                     // Only fingerpicked acoustic guitar, mournful solo cello, and whispered vocal!
-                    (0.48, 0.42, 0.0, 0.0, 0.0)
+                    (0.42, 0.38, 0.0, 0.0, 0.0)
                 }
             };
 
@@ -1429,8 +1429,8 @@ impl ReferenceRlSynthesizer {
             let inst_l = (raw_inst_l * (1.0 - vocal_active_blend) + carved_l * vocal_active_blend) * inst_duck;
             let inst_r = (raw_inst_r * (1.0 - vocal_active_blend) + carved_r * vocal_active_blend) * inst_duck;
 
-            let mix_l = vl * 0.96 + inst_l;
-            let mix_r = vr * 0.96 + inst_r;
+            let mix_l = vl * 1.12 + inst_l;
+            let mix_r = vr * 1.12 + inst_r;
 
             raw_master.samples[i * 2] = mix_l.tanh() * 0.95;
             raw_master.samples[i * 2 + 1] = mix_r.tanh() * 0.95;

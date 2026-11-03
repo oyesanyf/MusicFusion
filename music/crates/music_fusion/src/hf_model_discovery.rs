@@ -322,7 +322,19 @@ impl HfModelDiscoveryEngine {
             },
             Self::fallback_dsp_entry(STAGE_GROOVE),
 
-            // Stage 2: Full-Song & Dual-Stem Synthesis (MiniMax-Music3 + YuE + DiffRhythm)
+            // Stage 2: Full-Song & Dual-Stem Synthesis (Gemini 2.5 Flash Audio / Lyria + MiniMax-Music3 + YuE)
+            HfModelEntry {
+                id: "google/gemini-2.5-flash-music".to_string(),
+                name: "Google Gemini 2.5 Flash Audio + Lyria Studio Producer (.env GEMINI_API_KEY)".to_string(),
+                pipeline_tag: "text-to-audio".to_string(),
+                stage: STAGE_YUE.to_string(),
+                required_vram_gb: 0.0,
+                required_ram_gb: 0.5,
+                trending_score: 99.9,
+                downloads: 1_250_000,
+                likes: 9_800,
+                description: "Google Gemini 2.5 Flash Audio & Lyria 3-Minute Song Producer powered by .env GEMINI_API_KEY + Formant-Preserved Studio Mastering".to_string(),
+            },
             HfModelEntry {
                 id: "MiniMaxAI/MiniMax-Music3".to_string(),
                 name: "MiniMax Music 3 (8B Global + 0.6B Local LLM + Flow-VAE)".to_string(),

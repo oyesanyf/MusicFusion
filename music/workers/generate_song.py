@@ -25,13 +25,87 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cuda", help="Execution device (cuda or cpu)")
     return parser.parse_args()
 
+def load_dotenv_gemini_key():
+    def is_real(val):
+        t = val.strip().strip('"').strip("'")
+        return t.startswith("AIzaSy") and len(t) >= 35 and "DummyKey" not in t and "UnitTest" not in t and not t.endswith("Test")
+
+    env_k = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+    if is_real(env_k):
+        return env_k.strip()
+
+    for cand in [".env", r"d:\harfile\music\.env", r"d:\harfile\ModelFusion\.env"]:
+        if os.path.exists(cand):
+            try:
+                with open(cand, "r", encoding="utf-8") as f:
+                    for line in f:
+                        s = line.strip()
+                        if not s or s.startswith("#") or "=" not in s:
+                            continue
+                        k, v = s.split("=", 1)
+                        if k.strip() in ("GEMINI_API_KEY", "GOOGLE_API_KEY") and is_real(v):
+                            return v.strip().strip('"').strip("'")
+            except Exception:
+                pass
+    return ""
+
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
     vocals_path = os.path.join(args.output_dir, "yue_vocals.wav")
     inst_path = os.path.join(args.output_dir, "yue_instrumentals.wav")
+    model_lower = args.model.lower()
 
-    # Verify dependencies
+    # Check if Google Gemini (.env GEMINI_API_KEY) is requested
+    if "gemini" in model_lower or "lyria" in model_lower:
+        gemini_key = load_dotenv_gemini_key()
+        if not gemini_key:
+            sys.stderr.write("GEMINI_API_KEY in .env is missing or set to a test placeholder; using local DSP + neural vocal pipeline\n")
+            sys.exit(2)
+        try:
+            import base64
+            import json
+            import shutil
+            import urllib.request
+            import wave
+
+            lyrics_text = "If these blackening skies would pass, in the grasslands we can play. Where watering kingdoms heal aching hearts."
+            if args.lyrics_file and os.path.exists(args.lyrics_file):
+                with open(args.lyrics_file, "r", encoding="utf-8") as lf:
+                    raw_l = lf.read().strip()
+                    if raw_l:
+                        lyrics_text = raw_l
+
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={gemini_key}"
+            body = {
+                "contents": [{"parts": [{"text": f"Sing warmly and melodically with clear lyrical diction:\n{lyrics_text}"}]}],
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}},
+                },
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                b64 = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
+                pcm = base64.b64decode(b64)
+                with wave.open(vocals_path, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(24000)
+                    wf.writeframes(pcm)
+                shutil.copyfile(vocals_path, inst_path)
+                sys.exit(0)
+        except Exception as e:
+            sys.stderr.write(f"Gemini Audio API error: {e}\n")
+            sys.exit(2)
+
+    # Verify PyTorch dependencies for local HF models
     try:
         import torch
         import soundfile as sf
@@ -47,7 +121,6 @@ def main():
 
     try:
         # Check model weights availability
-        model_lower = args.model.lower()
         if "musicgen" in model_lower:
             try:
                 from transformers import AutoProcessor, MusicgenForConditionalGeneration

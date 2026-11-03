@@ -1271,14 +1271,15 @@ One love... One heart... Forever.</pre>
               </select>
             </div>
 
-            <!-- Selector 9: Hugging Face Model -->
+            <!-- Selector 9: Hugging Face / Gemini Model -->
             <div class="slider-item">
               <div class="slider-label-row">
-                <span class="slider-name">Hugging Face Open Model</span>
-                <span class="slider-value" id="val-hf-model">MiniMax-Music3 (Full-Song)</span>
+                <span class="slider-name">Active Song &amp; Vocal Model</span>
+                <span class="slider-value" id="val-hf-model">Gemini 2.5 Flash Music (.env)</span>
               </div>
               <select id="select-hf-model" class="param-select">
-                <option value="MiniMaxAI/MiniMax-Music3" selected>MiniMaxAI/MiniMax-Music3 (8B+0.6B Hybrid-LM + Flow-VAE Full-Song, 8GB VRAM Offload)</option>
+                <option value="google/gemini-2.5-flash-music" selected>google/gemini-2.5-flash-music (Gemini 2.5 Flash Audio + Lyria Producer via .env GEMINI_API_KEY)</option>
+                <option value="MiniMaxAI/MiniMax-Music3">MiniMaxAI/MiniMax-Music3 (8B+0.6B Hybrid-LM + Flow-VAE Full-Song, 8GB VRAM Offload)</option>
                 <option value="ASLP-lab/DiffRhythm">ASLP-lab/DiffRhythm (Apache 2.0, 44.1kHz Full-Song)</option>
                 <option value="ACE-Step/ACE-Step-v1-3.5B">ACE-Step/ACE-Step-v1-3.5B (Apache 2.0 Rhythm &amp; Groove)</option>
                 <option value="m-a-p/YuE-s1-7B-anneal-en-cot">m-a-p/YuE-s1-7B-anneal-en-cot (Apache 2.0 Vocal Transformer)</option>
@@ -1468,7 +1469,8 @@ One love... One heart... Forever.</pre>
               </div>
               <div style="margin-top: 10px;">
                 <select id="select-hf-model-settings" class="param-select" style="width: 100%;">
-                  <option value="MiniMaxAI/MiniMax-Music3" selected>MiniMaxAI/MiniMax-Music3 (8B+0.6B Hybrid-LM + Flow-VAE Full-Song, 8GB VRAM Offload)</option>
+                  <option value="google/gemini-2.5-flash-music" selected>google/gemini-2.5-flash-music (Gemini 2.5 Flash Audio + Lyria Producer via .env GEMINI_API_KEY)</option>
+                  <option value="MiniMaxAI/MiniMax-Music3">MiniMaxAI/MiniMax-Music3 (8B+0.6B Hybrid-LM + Flow-VAE Full-Song, 8GB VRAM Offload)</option>
                   <option value="ASLP-lab/DiffRhythm">ASLP-lab/DiffRhythm (Apache 2.0, 44.1kHz Full-Song Diffusion)</option>
                   <option value="ACE-Step/ACE-Step-v1-3.5B">ACE-Step/ACE-Step-v1-3.5B (Apache 2.0 Rhythm &amp; Groove)</option>
                   <option value="m-a-p/YuE-s1-7B-anneal-en-cot">m-a-p/YuE-s1-7B-anneal-en-cot (Apache 2.0 Full-Song Transformer)</option>
