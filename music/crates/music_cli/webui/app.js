@@ -213,6 +213,9 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     activeAudioOutputId: 'default',
     audioDevices: [],
     isIterating: true, // Iterate mode vs New Song mode
+    attachedPhotoBase64: null,
+    attachedPhotoMime: null,
+    attachedPhotoName: null,
     isPlayingMaster: false,
     isPlayingStems: false,
     stemsMuted: {},
@@ -335,6 +338,8 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.modePillText = document.getElementById('mode-pill-text');
     DOM.capsuleGenreSelect = document.getElementById('capsule-genre-select');
     DOM.chatInputTextarea = document.getElementById('chat-input-textarea');
+    DOM.lyriaPhotoInput = document.getElementById('lyria-photo-input');
+    DOM.lyriaPhotoStatus = document.getElementById('lyria-photo-status');
     DOM.btnToggleSliders = document.getElementById('btn-toggle-sliders');
     DOM.btnSendPrompt = document.getElementById('btn-send-prompt');
     DOM.parameterSlidersDrawer = document.getElementById('parameter-sliders-drawer');
@@ -1840,13 +1845,47 @@ Grace and love shining forevermore!`
       this.style.height = Math.min(160, this.scrollHeight) + 'px';
     });
 
-    // Enter key sends
+    // Enter key sends (IME-safe via !e.isComposing)
     DOM.chatInputTextarea.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         submitPrompt();
       }
     });
+
+    if (DOM.lyriaPhotoInput) {
+      DOM.lyriaPhotoInput.addEventListener('change', function () {
+        const file = this.files && this.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function (ev) {
+          const dataUrl = String(ev.target && ev.target.result ? ev.target.result : '');
+          const parts = dataUrl.split(';base64,');
+          State.attachedPhotoBase64 = parts.length > 1 ? parts[1] : dataUrl;
+          State.attachedPhotoMime = file.type || 'image/png';
+          State.attachedPhotoName = file.name || 'photo';
+          setCapsuleMode(false);
+          if (DOM.lyriaPhotoStatus) {
+            DOM.lyriaPhotoStatus.textContent = '📷 ' + State.attachedPhotoName + ' (click to clear)';
+            DOM.lyriaPhotoStatus.classList.remove('hidden');
+          }
+          if (DOM.deckStatusMsg) {
+            DOM.deckStatusMsg.textContent = 'Photo "' + State.attachedPhotoName + '" attached for Gemini Lyria 3.5 Photo-to-Music!';
+          }
+        };
+        reader.readAsDataURL(file);
+        this.value = '';
+      });
+    }
+    if (DOM.lyriaPhotoStatus) {
+      DOM.lyriaPhotoStatus.addEventListener('click', function () {
+        State.attachedPhotoBase64 = null;
+        State.attachedPhotoMime = null;
+        State.attachedPhotoName = null;
+        this.textContent = '';
+        this.classList.add('hidden');
+      });
+    }
 
     DOM.btnSendPrompt.addEventListener('click', submitPrompt);
 
@@ -1899,18 +1938,26 @@ Grace and love shining forevermore!`
   // Song Submission: Create Hit or Iterate Song
   // ==========================================================================
   function submitPrompt() {
-    const text = DOM.chatInputTextarea.value.trim();
+    let text = DOM.chatInputTextarea.value.trim();
+    if (!text && State.attachedPhotoBase64) {
+      text = 'Transform this photo into a complete studio song with rich expressive vocals and instrumentals.';
+    }
     if (!text) return;
 
+    const nonEmptyLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const isPoemOrPhoto = Boolean(State.attachedPhotoBase64) || nonEmptyLines.length >= 4;
+
     DOM.btnSendPrompt.disabled = true;
-    DOM.deckStatusMsg.textContent = State.isIterating ? 'Iterating track via Multi-LLM Panel...' : 'Creating new song via 6-Node Pipeline...';
+    DOM.deckStatusMsg.textContent = (!State.isIterating || isPoemOrPhoto)
+      ? 'Synthesizing full-length studio song via Google Gemini Lyria 3.5...'
+      : 'Iterating track via Multi-LLM Panel...';
 
     // Append User Bubble to conversation
-    appendUserMessage(text);
+    appendUserMessage(State.attachedPhotoName ? ('[Photo: ' + State.attachedPhotoName + ']\n' + text) : text);
     DOM.chatInputTextarea.value = '';
     DOM.chatInputTextarea.style.height = 'auto';
 
-    if (State.isIterating) {
+    if (State.isIterating && !isPoemOrPhoto) {
       executeIteration(text);
     } else {
       executeCreation(text);
@@ -2179,25 +2226,38 @@ Grace and love shining forevermore!`
       : DOM.capsuleGenreSelect.value;
     const bpm = parseInt(DOM.sliderBpm.value, 10);
     const key = DOM.selectKey.value;
-    const lyrics = DOM.newSongLyricsInput ? DOM.newSongLyricsInput.value.trim() : '';
+    const isHeroOpen = DOM.newSongChatHero && !DOM.newSongChatHero.classList.contains('hidden');
+    const lyrics = (isHeroOpen && DOM.newSongLyricsInput) ? DOM.newSongLyricsInput.value.trim() : '';
 
     if (DOM.btnGenerateNewSongMain) {
       DOM.btnGenerateNewSongMain.disabled = true;
-      DOM.btnGenerateNewSongMain.innerHTML = '<span>⏳ Synthesizing Vocals &amp; All Instruments...</span>';
+      DOM.btnGenerateNewSongMain.innerHTML = '<span>⏳ Synthesizing Full Song via Gemini Lyria 3.5...</span>';
+    }
+
+    const payload = {
+      genre: genre,
+      style_prompt: promptText,
+      lyrics: lyrics || undefined,
+      bpm: bpm,
+      key_signature: key,
+      engine_mode: DOM.selectEngineMode ? DOM.selectEngineMode.value : 'auto',
+      hf_model: DOM.selectHfModel ? DOM.selectHfModel.value : 'models/lyria-3.5',
+      image_base64: State.attachedPhotoBase64 || undefined,
+      image_mime_type: State.attachedPhotoMime || undefined
+    };
+
+    State.attachedPhotoBase64 = null;
+    State.attachedPhotoMime = null;
+    State.attachedPhotoName = null;
+    if (DOM.lyriaPhotoStatus) {
+      DOM.lyriaPhotoStatus.textContent = '';
+      DOM.lyriaPhotoStatus.classList.add('hidden');
     }
 
     fetch('/api/songs/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        genre: genre,
-        style_prompt: promptText,
-        lyrics: lyrics,
-        bpm: bpm,
-        key_signature: key,
-        engine_mode: DOM.selectEngineMode ? DOM.selectEngineMode.value : 'auto',
-        hf_model: DOM.selectHfModel ? DOM.selectHfModel.value : 'ACE-Step/ACE-Step-v1-3.5B'
-      })
+      body: JSON.stringify(payload)
     })
     .then(r => r.json())
     .then(data => {
@@ -2208,21 +2268,31 @@ Grace and love shining forevermore!`
       }
       if (data && data.song_id) {
         const newId = data.song_id;
-        const newTitle = data.title || `${genre} Hit (${bpm} BPM)`;
+        const resolvedBpm = data.bpm || bpm;
+        const resolvedKey = data.key_signature || key;
+        const resolvedGenre = data.genre || genre;
+        const newTitle = data.title || `${resolvedGenre} (${resolvedBpm} BPM)`;
+        const resolvedLyrics = data.lyrics || lyrics || undefined;
         State.songs[newId] = {
           id: newId,
           title: newTitle,
-          genre: genre,
+          genre: resolvedGenre,
           versions: {
-            1: buildSongVersionRecord(newId, 1, newTitle, bpm, key, promptText, 9.5)
+            1: buildSongVersionRecord(newId, 1, newTitle, resolvedBpm, resolvedKey, promptText, 9.9, resolvedLyrics)
           }
         };
-        addSongCardToSidebar(newId, newTitle, genre, bpm, key, 1);
+        addSongCardToSidebar(newId, newTitle, resolvedGenre, resolvedBpm, resolvedKey, 1);
         closeNewSongChatInterface();
         State.activeSongId = newId;
         switchVersion(1, true);
+        if (DOM.masterAudio) {
+          const bust = Date.now();
+          DOM.masterAudio.src = `/api/songs/${newId}/versions/1/audio/final_master?t=${bust}`;
+          DOM.masterAudio.load();
+          DOM.masterAudio.play().catch(() => {});
+        }
       }
-      DOM.deckStatusMsg.textContent = `New ${genre} song with vocals & all instruments created and playing!`;
+      DOM.deckStatusMsg.textContent = `Complete Lyria 3.5 song created and playing!`;
     })
     .catch((err) => {
       DOM.btnSendPrompt.disabled = false;

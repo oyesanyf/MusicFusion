@@ -1147,7 +1147,14 @@ One love... One heart... Forever.</pre>
           </select>
 
           <!-- Multi-Line Expandable Textarea -->
-          <textarea id="chat-input-textarea" rows="1" placeholder="Describe a new song, or tell me how to iterate/adjust the current song (e.g. 'boost guitar wah, add nyabinghi rolls, change chorus')..." spellcheck="false"></textarea>
+          <textarea id="chat-input-textarea" name="song_prompt" rows="1" placeholder="Paste any poem, feeling, or style prompt (or attach a photo) to create a complete song with Gemini Lyria 3.5..." spellcheck="false"></textarea>
+
+          <!-- Accessible Native Photo Upload for Gemini Lyria 3.5 Photo-to-Music -->
+          <input type="file" id="lyria-photo-input" name="lyria_photo" accept="image/*" class="visually-hidden" aria-describedby="lyria-photo-status">
+          <label for="lyria-photo-input" class="capsule-btn params-btn lyria-photo-pill" title="Attach Photo / Mood Image for Gemini Lyria 3.5 Photo-to-Music">
+            📷
+          </label>
+          <span id="lyria-photo-status" class="lyria-photo-badge hidden" aria-live="polite"></span>
 
           <!-- Live Microphone Voice Input Button -->
           <button type="button" class="capsule-btn params-btn" id="btn-capsule-mic" title="Speak into Microphone (Voice Input / Test Mic)">
@@ -1275,10 +1282,12 @@ One love... One heart... Forever.</pre>
             <div class="slider-item">
               <div class="slider-label-row">
                 <span class="slider-name">Active Song &amp; Vocal Model</span>
-                <span class="slider-value" id="val-hf-model">Gemini 2.5 Flash Music (.env)</span>
+                <span class="slider-value" id="val-hf-model">Lyria 3.5 (.env)</span>
               </div>
-              <select id="select-hf-model" class="param-select">
-                <option value="google/gemini-2.5-flash-music" selected>google/gemini-2.5-flash-music (Gemini 2.5 Flash Audio + Lyria Producer via .env GEMINI_API_KEY)</option>
+              <select id="select-hf-model" name="hf_model" class="param-select">
+                <option value="models/lyria-3.5" selected>models/lyria-3.5 (Gemini Lyria 3.5 - Text, Poem &amp; Photo-to-Music via .env GEMINI_API_KEY)</option>
+                <option value="models/lyria-3-pro-preview">models/lyria-3-pro-preview (Gemini Lyria 3 Pro Preview via .env GEMINI_API_KEY)</option>
+                <option value="models/lyria-3-clip-preview">models/lyria-3-clip-preview (Gemini Lyria 3 Clip Preview via .env GEMINI_API_KEY)</option>
                 <option value="MiniMaxAI/MiniMax-Music3">MiniMaxAI/MiniMax-Music3 (8B+0.6B Hybrid-LM + Flow-VAE Full-Song, 8GB VRAM Offload)</option>
                 <option value="ASLP-lab/DiffRhythm">ASLP-lab/DiffRhythm (Apache 2.0, 44.1kHz Full-Song)</option>
                 <option value="ACE-Step/ACE-Step-v1-3.5B">ACE-Step/ACE-Step-v1-3.5B (Apache 2.0 Rhythm &amp; Groove)</option>
@@ -1468,8 +1477,10 @@ One love... One heart... Forever.</pre>
                 </div>
               </div>
               <div style="margin-top: 10px;">
-                <select id="select-hf-model-settings" class="param-select" style="width: 100%;">
-                  <option value="google/gemini-2.5-flash-music" selected>google/gemini-2.5-flash-music (Gemini 2.5 Flash Audio + Lyria Producer via .env GEMINI_API_KEY)</option>
+                <select id="select-hf-model-settings" name="hf_model_settings" class="param-select" style="width: 100%;">
+                  <option value="models/lyria-3.5" selected>models/lyria-3.5 (Gemini Lyria 3.5 - Text, Poem &amp; Photo-to-Music via .env GEMINI_API_KEY)</option>
+                  <option value="models/lyria-3-pro-preview">models/lyria-3-pro-preview (Gemini Lyria 3 Pro Preview via .env GEMINI_API_KEY)</option>
+                  <option value="models/lyria-3-clip-preview">models/lyria-3-clip-preview (Gemini Lyria 3 Clip Preview via .env GEMINI_API_KEY)</option>
                   <option value="MiniMaxAI/MiniMax-Music3">MiniMaxAI/MiniMax-Music3 (8B+0.6B Hybrid-LM + Flow-VAE Full-Song, 8GB VRAM Offload)</option>
                   <option value="ASLP-lab/DiffRhythm">ASLP-lab/DiffRhythm (Apache 2.0, 44.1kHz Full-Song Diffusion)</option>
                   <option value="ACE-Step/ACE-Step-v1-3.5B">ACE-Step/ACE-Step-v1-3.5B (Apache 2.0 Rhythm &amp; Groove)</option>

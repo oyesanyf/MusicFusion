@@ -3310,3 +3310,40 @@ body.theme-chatgpt-light .settings-nav-btn.active {
   color: #10a37f;
   font-weight: 600;
 }
+
+/* Accessible visually-hidden file input & Lyria 3.5 Photo-to-Music pill */
+.visually-hidden {
+  position: absolute;
+  clip-path: inset(50%);
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}
+
+.lyria-photo-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+input.visually-hidden:focus-visible + .lyria-photo-pill {
+  outline: 3px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.lyria-photo-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #10a37f;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(16, 163, 127, 0.12);
+  white-space: nowrap;
+}
+

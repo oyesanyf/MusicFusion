@@ -984,19 +984,23 @@ impl MelodicSingingSynthesizer {
     }
 
     /// Reads `GEMINI_API_KEY` from process environment or `.env` files (`d:\harfile\music\.env`, `d:\harfile\ModelFusion\.env`).
+    /// Supports both standard `AIzaSy...` keys and newer `AQ....` Google AI Studio / Gemini API keys.
     pub fn resolve_dotenv_gemini_api_key() -> Option<String> {
         let is_real_key = |k: &str| -> bool {
             let t = k.trim().trim_matches('"').trim_matches('\'');
-            t.starts_with("AIzaSy")
-                && t.len() >= 35
+            (t.starts_with("AIzaSy") || t.starts_with("AQ."))
+                && t.len() >= 25
                 && !t.contains("DummyKey")
                 && !t.contains("UnitTest")
                 && !t.ends_with("Test")
         };
 
-        if let Ok(k) = std::env::var("GEMINI_API_KEY") {
-            if is_real_key(&k) {
-                return Some(k.trim().to_string());
+        for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY"] {
+            if let Ok(k) = std::env::var(env_name) {
+                let clean = k.trim().trim_matches('"').trim_matches('\'');
+                if is_real_key(clean) {
+                    return Some(clean.to_string());
+                }
             }
         }
         let candidates = [
