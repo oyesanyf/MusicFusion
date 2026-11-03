@@ -56,38 +56,64 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
         ) -> u32;
     }
 
-    let peer_port = peer_addr.port();
+    let normalized_peer_addr = match peer_addr {
+        SocketAddr::V6(ref v6) => {
+            if let Some(v4) = v6.ip().to_ipv4_mapped() {
+                SocketAddr::new(std::net::IpAddr::V4(v4), v6.port())
+            } else {
+                match v6.ip().to_canonical() {
+                    std::net::IpAddr::V4(v4) => SocketAddr::new(std::net::IpAddr::V4(v4), v6.port()),
+                    std::net::IpAddr::V6(_) => peer_addr,
+                }
+            }
+        }
+        SocketAddr::V4(_) => peer_addr,
+    };
 
-    match peer_addr {
+    let peer_port = normalized_peer_addr.port();
+
+    match normalized_peer_addr {
         SocketAddr::V4(_) => {
             unsafe {
-                let mut size: u32 = 0;
-                let res = GetExtendedTcpTable(
-                    std::ptr::null_mut(),
-                    &mut size,
-                    0,
-                    AF_INET,
-                    TCP_TABLE_OWNER_PID_ALL,
-                    0,
-                );
-                if res != ERROR_INSUFFICIENT_BUFFER || size == 0 {
-                    return Err(KillSwitchError::NativeOsError(
-                        "Failed to query GetExtendedTcpTable size for IPv4".to_string(),
-                    ));
-                }
-                let mut buf = vec![0u8; size as usize];
-                if GetExtendedTcpTable(
-                    buf.as_mut_ptr(),
-                    &mut size,
-                    0,
-                    AF_INET,
-                    TCP_TABLE_OWNER_PID_ALL,
-                    0,
-                ) != 0
-                {
-                    return Err(KillSwitchError::NativeOsError(
-                        "Failed to read GetExtendedTcpTable for IPv4".to_string(),
-                    ));
+                let mut retries = 0;
+                let mut buf;
+                loop {
+                    let mut size: u32 = 0;
+                    let res = GetExtendedTcpTable(
+                        std::ptr::null_mut(),
+                        &mut size,
+                        0,
+                        AF_INET,
+                        TCP_TABLE_OWNER_PID_ALL,
+                        0,
+                    );
+                    if (res != 0 && res != ERROR_INSUFFICIENT_BUFFER) || size == 0 {
+                        return Err(KillSwitchError::NativeOsError(
+                            "Failed to query GetExtendedTcpTable size for IPv4".to_string(),
+                        ));
+                    }
+                    let alloc_size = (size as usize).saturating_add(4096);
+                    let mut curr_size: u32 = alloc_size as u32;
+                    buf = vec![0u8; alloc_size];
+                    let ret = GetExtendedTcpTable(
+                        buf.as_mut_ptr(),
+                        &mut curr_size,
+                        0,
+                        AF_INET,
+                        TCP_TABLE_OWNER_PID_ALL,
+                        0,
+                    );
+                    if ret == 0 {
+                        break;
+                    } else if ret == ERROR_INSUFFICIENT_BUFFER && retries < 3 {
+                        retries += 1;
+                        continue;
+                    } else {
+                        return Err(KillSwitchError::NativeOsError(format!(
+                            "Failed to read GetExtendedTcpTable for IPv4 (code {})",
+                            ret
+                        )));
+                    }
                 }
                 let num_entries = std::ptr::read_unaligned(buf.as_ptr() as *const u32) as usize;
                 let rows_ptr = buf.as_ptr().add(4) as *const MibTcpRowOwnerPid;
@@ -100,6 +126,12 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
                     let rport = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
                     // Match peer port to the client's local port and bound port to remote port
                     if lport == peer_port && (rport == bound_port || bound_port == 0) {
+                        if row.dw_owning_pid == 0 {
+                            return Err(KillSwitchError::NativeOsError(format!(
+                                "Socket matching peer port {} -> server port {} is closed/unowned (PID 0)",
+                                peer_port, bound_port
+                            )));
+                        }
                         return Ok(row.dw_owning_pid);
                     }
                 }
@@ -107,33 +139,45 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
         }
         SocketAddr::V6(_) => {
             unsafe {
-                let mut size: u32 = 0;
-                let res = GetExtendedTcpTable(
-                    std::ptr::null_mut(),
-                    &mut size,
-                    0,
-                    AF_INET6,
-                    TCP_TABLE_OWNER_PID_ALL,
-                    0,
-                );
-                if res != ERROR_INSUFFICIENT_BUFFER || size == 0 {
-                    return Err(KillSwitchError::NativeOsError(
-                        "Failed to query GetExtendedTcpTable size for IPv6".to_string(),
-                    ));
-                }
-                let mut buf = vec![0u8; size as usize];
-                if GetExtendedTcpTable(
-                    buf.as_mut_ptr(),
-                    &mut size,
-                    0,
-                    AF_INET6,
-                    TCP_TABLE_OWNER_PID_ALL,
-                    0,
-                ) != 0
-                {
-                    return Err(KillSwitchError::NativeOsError(
-                        "Failed to read GetExtendedTcpTable for IPv6".to_string(),
-                    ));
+                let mut retries = 0;
+                let mut buf;
+                loop {
+                    let mut size: u32 = 0;
+                    let res = GetExtendedTcpTable(
+                        std::ptr::null_mut(),
+                        &mut size,
+                        0,
+                        AF_INET6,
+                        TCP_TABLE_OWNER_PID_ALL,
+                        0,
+                    );
+                    if (res != 0 && res != ERROR_INSUFFICIENT_BUFFER) || size == 0 {
+                        return Err(KillSwitchError::NativeOsError(
+                            "Failed to query GetExtendedTcpTable size for IPv6".to_string(),
+                        ));
+                    }
+                    let alloc_size = (size as usize).saturating_add(4096);
+                    let mut curr_size: u32 = alloc_size as u32;
+                    buf = vec![0u8; alloc_size];
+                    let ret = GetExtendedTcpTable(
+                        buf.as_mut_ptr(),
+                        &mut curr_size,
+                        0,
+                        AF_INET6,
+                        TCP_TABLE_OWNER_PID_ALL,
+                        0,
+                    );
+                    if ret == 0 {
+                        break;
+                    } else if ret == ERROR_INSUFFICIENT_BUFFER && retries < 3 {
+                        retries += 1;
+                        continue;
+                    } else {
+                        return Err(KillSwitchError::NativeOsError(format!(
+                            "Failed to read GetExtendedTcpTable for IPv6 (code {})",
+                            ret
+                        )));
+                    }
                 }
                 let num_entries = std::ptr::read_unaligned(buf.as_ptr() as *const u32) as usize;
                 let rows_ptr = buf.as_ptr().add(4) as *const MibTcp6RowOwnerPid;
@@ -145,6 +189,12 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
                     let lport = u16::from_be((row.dw_local_port & 0xFFFF) as u16);
                     let rport = u16::from_be((row.dw_remote_port & 0xFFFF) as u16);
                     if lport == peer_port && (rport == bound_port || bound_port == 0) {
+                        if row.dw_owning_pid == 0 {
+                            return Err(KillSwitchError::NativeOsError(format!(
+                                "Socket matching peer port {} -> server port {} is closed/unowned (PID 0)",
+                                peer_port, bound_port
+                            )));
+                        }
                         return Ok(row.dw_owning_pid);
                     }
                 }
@@ -160,9 +210,22 @@ pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Resu
 
 #[cfg(target_os = "linux")]
 pub fn resolve_loopback_peer_pid(peer_addr: SocketAddr, bound_port: u16) -> Result<u32, KillSwitchError> {
-    let peer_port = peer_addr.port();
+    let normalized_peer_addr = match peer_addr {
+        SocketAddr::V6(ref v6) => {
+            if let Some(v4) = v6.ip().to_ipv4_mapped() {
+                SocketAddr::new(std::net::IpAddr::V4(v4), v6.port())
+            } else {
+                match v6.ip().to_canonical() {
+                    std::net::IpAddr::V4(v4) => SocketAddr::new(std::net::IpAddr::V4(v4), v6.port()),
+                    std::net::IpAddr::V6(_) => peer_addr,
+                }
+            }
+        }
+        SocketAddr::V4(_) => peer_addr,
+    };
+    let peer_port = normalized_peer_addr.port();
 
-    let entries = match peer_addr {
+    let entries = match normalized_peer_addr {
         SocketAddr::V4(_) => crate::landlock::read_and_parse_proc_net_tcp()?,
         SocketAddr::V6(_) => crate::landlock::read_and_parse_proc_net_tcp6()?,
     };

@@ -646,6 +646,7 @@ impl KillSwitchClient {
         let req = HealthProbeRequest {
             operator: Some("operator".to_string()),
             force_rollback: Some(force_rollback),
+            token: None,
         };
 
         if let Ok(resp) = self.client.post(&url).json(&req).send().await {

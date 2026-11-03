@@ -435,6 +435,7 @@ impl OperatorAuthenticator for OperatorAuthManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use killswitch_types::status::KILLCHAIN_RESTORE_CONFIRMATION_PHRASE;
 
     #[test]
     fn test_tier1_master_token_bypass_and_lockout_reset() {

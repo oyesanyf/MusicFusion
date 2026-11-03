@@ -43,13 +43,8 @@ fn serialize_val(val: &Value, buf: &mut Vec<u8>) -> Result<(), JcsError> {
                 if !f.is_finite() {
                     return Err(JcsError::NonFiniteNumber);
                 }
-                if f == 0.0 {
-                    buf.extend_from_slice(b"0");
-                } else if f.fract() == 0.0 && f.abs() < 1e21 {
-                    buf.extend_from_slice((f as i64).to_string().as_bytes());
-                } else {
-                    buf.extend_from_slice(f.to_string().as_bytes());
-                }
+                let formatted = format_ecma_float(f);
+                buf.extend_from_slice(formatted.as_bytes());
             }
         }
         Value::String(s) => {
@@ -104,6 +99,40 @@ fn serialize_val(val: &Value, buf: &mut Vec<u8>) -> Result<(), JcsError> {
     Ok(())
 }
 
+fn format_ecma_float(f: f64) -> String {
+    if f == 0.0 {
+        return "0".to_string();
+    }
+    let abs_f = f.abs();
+
+    if abs_f >= 1e21 {
+        // Scientific notation with 'e+' per ECMAScript / RFC 8785
+        let s = format!("{:e}", f);
+        if let Some(pos) = s.find('e') {
+            let (mantissa, exp) = s.split_at(pos);
+            let exp_val: i32 = exp[1..].parse().unwrap_or(0);
+            if exp_val >= 0 {
+                format!("{}e+{}", mantissa, exp_val)
+            } else {
+                format!("{}e{}", mantissa, exp_val)
+            }
+        } else {
+            s
+        }
+    } else if abs_f < 1e-6 {
+        // Scientific notation with 'e-' per ECMAScript / RFC 8785
+        format!("{:e}", f)
+    } else if f.fract() == 0.0 {
+        if abs_f <= i64::MAX as f64 {
+            (f as i64).to_string()
+        } else {
+            (f as i128).to_string()
+        }
+    } else {
+        f.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +183,17 @@ mod tests {
             canonical,
             r#"{"msg":"hello\nworld\t\"quoted\"\\backslash\bbackspace\fformfeed\rreturn"}"#
         );
+    }
+
+    #[test]
+    fn test_rfc8785_float_ecmascript_formatting() {
+        assert_eq!(canonicalize_jcs_string(&json!(0.0)).unwrap(), "0");
+        assert_eq!(canonicalize_jcs_string(&json!(-0.0)).unwrap(), "0");
+        assert_eq!(canonicalize_jcs_string(&json!(100.0)).unwrap(), "100");
+        assert_eq!(canonicalize_jcs_string(&json!(1e19)).unwrap(), "10000000000000000000");
+        assert_eq!(canonicalize_jcs_string(&json!(-1e19)).unwrap(), "-10000000000000000000");
+        assert_eq!(canonicalize_jcs_string(&json!(1e20)).unwrap(), "100000000000000000000");
+        assert_eq!(canonicalize_jcs_string(&json!(1e21)).unwrap(), "1e+21");
+        assert_eq!(canonicalize_jcs_string(&json!(1e-7)).unwrap(), "1e-7");
     }
 }

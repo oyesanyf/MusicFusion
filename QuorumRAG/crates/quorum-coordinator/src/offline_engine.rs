@@ -42,8 +42,47 @@ fn global_corpus_vocab() -> &'static RwLock<HashMap<String, String>> {
 pub struct DeterministicOfflineSynthesisEngine;
 
 impl DeterministicOfflineSynthesisEngine {
+    /// Detects whether a raw chunk is predominantly binary OLE/SmartTag garbage from legacy `.doc` files
+    /// or empty after stripping metadata noise.
+    pub fn is_corrupt_or_binary_chunk(raw: &str) -> bool {
+        let raw_lower = raw.to_ascii_lowercase();
+        let is_ole_summary_footer = raw_lower.contains("_pid_hlinks")
+            || raw_lower.contains("msworddoc")
+            || raw_lower.contains("microsoft word 97-2003 document")
+            || raw_lower.contains("word.document.");
+        let cleaned = Self::clean_chunk_text(raw);
+        let trimmed = cleaned.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        if is_ole_summary_footer && trimmed.len() < 320 {
+            return true;
+        }
+        let non_ws: usize = trimmed.chars().filter(|c| !c.is_whitespace()).count();
+        if non_ws == 0 {
+            return true;
+        }
+        let weird_symbols: usize = trimmed
+            .chars()
+            .filter(|&c| {
+                matches!(
+                    c,
+                    '~' | '`' | '^' | '|' | '\\' | '{' | '}' | '<' | '>' | '@' | '#' | '%' | '*' | '='
+                )
+            })
+            .count();
+        if non_ws >= 20 && (weird_symbols * 100 / non_ws) > 6 {
+            return true;
+        }
+        let alpha_count: usize = trimmed.chars().filter(|c| c.is_alphabetic()).count();
+        if non_ws >= 25 && (alpha_count * 100 / non_ws) < 55 {
+            return true;
+        }
+        false
+    }
+
     /// Cleans raw extracted document chunk text by stripping `[PDF Metadata]`, `[Page X]` markers,
-    /// and collapsing broken single-word-per-line PDF extraction (`FEMI\r\n \r\nOYESANYA` -> `FEMI OYESANYA`).
+    /// legacy `.doc` OLE/SmartTag noise, ChatGPT download boilerplate, and collapsing broken single-word-per-line PDF extraction.
     pub fn clean_chunk_text(raw: &str) -> String {
         let mut cleaned_lines: Vec<String> = Vec::new();
         let mut short_token_buffer: Vec<String> = Vec::new();
@@ -63,22 +102,82 @@ impl DeterministicOfflineSynthesisEngine {
                 .chars()
                 .filter(|&ch| !('\u{E000}'..='\u{F8FF}').contains(&ch))
                 .collect();
-            let trimmed = pua_stripped.trim();
+            let mut trimmed = pua_stripped.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Strip leading `[Word/Document (...) — ...]` extractor banner if inline on the first line
+            if trimmed.starts_with("[Word/Document") || trimmed.starts_with("[PDF Document") {
+                if let Some(close_bracket) = trimmed.find(']') {
+                    trimmed = trimmed[close_bracket + 1..].trim();
+                } else {
+                    continue;
+                }
+            }
+            // Strip leading legacy Word `.doc` FIB magic header `bjbj`
+            if let Some(after_bjbj) = trimmed.strip_prefix("bjbj") {
+                trimmed = after_bjbj
+                    .trim_start_matches(|c: char| !c.is_whitespace())
+                    .trim();
+            }
+            // Strip leading conversational role labels from ChatGPT exports
+            if let Some(rest) = trimmed
+                .strip_prefix("Assistant:")
+                .or_else(|| trimmed.strip_prefix("User:"))
+                .or_else(|| trimmed.strip_prefix("ChatGPT:"))
+            {
+                trimmed = rest.trim();
+            }
             if trimmed.is_empty() {
                 continue;
             }
             let lower = trimmed.to_ascii_lowercase();
-            // Strip PDF extractor metadata headers, page markers, and ChatGPT export navlist/citation artifacts
+            // Strip PDF extractor metadata headers, page markers, OLE SmartTag XML, and ChatGPT export artifacts
             if lower.starts_with("[pdf metadata]")
                 || (lower.starts_with("[page ") && lower.ends_with(']'))
+                || lower == "bjbj"
                 || lower.contains("navlist")
                 || lower.contains("turn0news")
                 || lower.contains("turn0search")
                 || lower.contains("fileciteturn0file0")
+                || lower.contains("sandbox:/mnt/data")
+                || lower.contains("[click here to download")
+                || lower.contains("your sacred dissertation-style preface")
+                || lower.contains("let me know if you’d like a pdf version")
+                || lower.contains("let me know if you'd like a pdf version")
+                || lower.contains("urn:schemas-microsoft-com")
+                || lower.contains("folhlink")
+                || lower.contains("accent6=\"accent6\"")
+                || lower.contains("_pid_hlinks")
+                || lower.contains("msworddoc")
+                || lower.contains("microsoft word 97-2003 document")
+                || lower.contains("microsoft office word")
+                || lower.starts_with("word.document")
+                || lower.starts_with("conversation id:")
+                || lower == "normal"
+                || lower == "title"
                 || lower == "v"
                 || lower == "t"
             {
                 continue;
+            }
+
+            // Skip binary OLE garbage lines from legacy `.doc` files
+            let non_ws: usize = trimmed.chars().filter(|c| !c.is_whitespace()).count();
+            if non_ws >= 15 {
+                let weird_symbols: usize = trimmed
+                    .chars()
+                    .filter(|&c| {
+                        matches!(
+                            c,
+                            '~' | '`' | '^' | '|' | '\\' | '{' | '}' | '<' | '>' | '@' | '#' | '%' | '*' | '='
+                        )
+                    })
+                    .count();
+                let alpha_count: usize = trimmed.chars().filter(|c| c.is_alphabetic()).count();
+                if (weird_symbols * 100 / non_ws) > 6 || (alpha_count * 100 / non_ws) < 50 {
+                    continue;
+                }
             }
 
             // Collapse multiple internal spaces
@@ -190,7 +289,12 @@ impl DeterministicOfflineSynthesisEngine {
             "this", "these", "those", "him", "she", "they", "them", "please",
             "file", "files", "document", "documents", "doc", "docs", "docx", "pdf", "txt",
             "folder", "folders", "content", "contents", "text", "exist", "exists", "existing",
-            "find", "check", "list", "located", "location",
+            "find", "check", "list", "located", "location", "describe",
+            "know", "knows", "knew", "known", "think", "thinks", "thought", "mean", "means", "meant",
+            "say", "says", "said", "talk", "talks", "talked", "need", "needs", "want", "wants",
+            "like", "likes", "make", "makes", "made", "take", "takes", "took", "come", "comes",
+            "came", "look", "looks", "looked", "summarize", "detail", "details", "info", "information",
+            "anything", "everything", "something", "nothing", "someone", "anyone", "all", "any", "some",
         ];
 
         const GENERIC_ATTRIBUTE_TERMS: &[&str] = &[
@@ -420,6 +524,9 @@ impl DeterministicOfflineSynthesisEngine {
                 .unwrap_or("")
                 .to_ascii_lowercase();
             let cleaned_text = Self::clean_chunk_text(&scored.chunk.text_content);
+            if cleaned_text.trim().is_empty() || Self::is_corrupt_or_binary_chunk(&scored.chunk.text_content) {
+                continue;
+            }
             let text_l = cleaned_text.to_ascii_lowercase();
 
             // Exclude temporary lock files, source code files, raw .dat blobs, and monolithic chat dumps from RAG document synthesis
@@ -651,21 +758,27 @@ impl DeterministicOfflineSynthesisEngine {
         // if any matched chunk contains that specific prompt entity term, filter out chunks that lack it
         // so carry-over context documents (like RedactX) never drown out the target answer documents!
         if !prompt_only_entities.is_empty() {
-            let has_direct_prompt_match = scored_matches.iter().any(|(scored, _, _, _)| {
+            let req_prompt_hits = if prompt_only_entities.len() == 2 {
+                2
+            } else if prompt_only_entities.len() > 2 {
+                ((prompt_only_entities.len() + 1) / 2).max(2)
+            } else {
+                prompt_only_entities.len()
+            };
+            let count_prompt_matches = |scored: &ScoredChunk| -> usize {
                 let text_l = scored.chunk.text_content.to_ascii_lowercase();
                 let file_l = scored.chunk.file_path.to_ascii_lowercase();
                 prompt_only_entities
                     .iter()
-                    .any(|t| text_l.contains(t.as_str()) || file_l.contains(t.as_str()))
-            });
+                    .filter(|t| text_l.contains(t.as_str()) || file_l.contains(t.as_str()))
+                    .count()
+            };
+            let has_direct_prompt_match = scored_matches
+                .iter()
+                .any(|(scored, _, _, _)| count_prompt_matches(scored) >= req_prompt_hits);
             if has_direct_prompt_match {
-                scored_matches.retain(|(scored, _, _, _)| {
-                    let text_l = scored.chunk.text_content.to_ascii_lowercase();
-                    let file_l = scored.chunk.file_path.to_ascii_lowercase();
-                    prompt_only_entities
-                        .iter()
-                        .any(|t| text_l.contains(t.as_str()) || file_l.contains(t.as_str()))
-                });
+                scored_matches
+                    .retain(|(scored, _, _, _)| count_prompt_matches(scored) >= req_prompt_hits);
             }
         }
 
@@ -1465,6 +1578,63 @@ impl DeterministicOfflineSynthesisEngine {
         fact_sheets
     }
 
+    /// Detects if the trailing window of `text` (>= 48 chars) is a verbatim repeat of an earlier passage in `text`.
+    /// Returns `Some(byte_offset)` of the boundary before the repeated passage if a loop is detected.
+    pub fn has_repeated_passage(text: &str) -> Option<usize> {
+        let trimmed = text.trim_end();
+        if trimmed.len() < 120 {
+            return None;
+        }
+        let chars: Vec<(usize, char)> = trimmed.char_indices().collect();
+        if chars.len() < 96 {
+            return None;
+        }
+        let window_chars = 48usize;
+        let tail_start_byte = chars[chars.len() - window_chars].0;
+        let tail_slice = &trimmed[tail_start_byte..];
+        if tail_slice.trim().len() < 40 {
+            return None;
+        }
+        let earlier_slice = &trimmed[..tail_start_byte];
+        if earlier_slice
+            .to_ascii_lowercase()
+            .contains(&tail_slice.to_ascii_lowercase())
+        {
+            // Snap back to the start of the repeated sentence or paragraph
+            let snap_pos = earlier_slice
+                .rfind("\n\n")
+                .or_else(|| earlier_slice.rfind('\n'))
+                .or_else(|| earlier_slice.rfind(". ").map(|p| p + 1))
+                .unwrap_or(tail_start_byte);
+            return Some(snap_pos);
+        }
+        None
+    }
+
+    /// Removes repeated lines or paragraphs from `text` and returns `(deduplicated_text, had_repetition)`.
+    pub fn deduplicate_repeated_paragraphs(text: &str) -> (String, bool) {
+        let mut seen_lines = std::collections::HashSet::new();
+        let mut out_lines = Vec::new();
+        let mut had_repeat = false;
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.len() >= 32 {
+                let norm: String = trimmed
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+                if norm.len() >= 25 && !seen_lines.insert(norm) {
+                    had_repeat = true;
+                    break;
+                }
+            }
+            out_lines.push(line);
+        }
+        (out_lines.join("\n"), had_repeat)
+    }
+
     /// Sentence-boundary completion guard: ensures generated text ends cleanly on a sentence terminal boundary
     /// ('.', '!', '?') and never leaves trailing mid-sentence fragments like "Sacred math has been".
     pub fn enforce_sentence_boundary_guard(
@@ -1565,11 +1735,39 @@ impl DeterministicOfflineSynthesisEngine {
             }
         }
 
-        // Fallback: Snap to the last complete sentence boundary if within reasonable distance
-        if let Some(last_boundary) = text.rfind(['.', '!', '?']) {
-            if last_boundary > text.len().saturating_sub(120) {
-                text.truncate(last_boundary + 1);
-                return;
+        // Fallback: If the trailing line is an unfinished bullet/heading stub (e.g. `- **Fosters LEASE AGREEMENT...`), drop it cleanly
+        if let Some(last_nl) = text.rfind('\n') {
+            let tail_line = text[last_nl + 1..].trim();
+            if last_nl > 80
+                && (tail_line.starts_with("- ")
+                    || tail_line.starts_with("* ")
+                    || tail_line.starts_with('#'))
+                && !tail_line.ends_with('.')
+                && !tail_line.ends_with('!')
+                && !tail_line.ends_with('?')
+            {
+                text.truncate(last_nl);
+                if text.trim_end().ends_with(['.', '!', '?']) {
+                    return;
+                }
+            }
+        }
+
+        // Snap to the last real sentence boundary (not a dot inside `.doc` or `.pdf`) if within reasonable distance
+        let bytes = text.as_bytes();
+        let min_pos = text.len().saturating_sub(140);
+        for idx in (min_pos..bytes.len()).rev() {
+            let b = bytes[idx];
+            if b == b'.' || b == b'!' || b == b'?' {
+                let next_ok = idx + 1 == bytes.len()
+                    || bytes[idx + 1].is_ascii_whitespace()
+                    || bytes[idx + 1] == b'"'
+                    || bytes[idx + 1] == b')'
+                    || bytes[idx + 1] == b']';
+                if next_ok && text.is_char_boundary(idx + 1) {
+                    text.truncate(idx + 1);
+                    return;
+                }
             }
         }
 
@@ -1594,7 +1792,7 @@ impl DeterministicOfflineSynthesisEngine {
         requested_model_tag: &str,
         telemetry_tx: Option<&Sender<AgenticTelemetryEvent>>,
     ) -> Option<String> {
-        use std::io::{BufRead, BufReader, Read, Write};
+        use std::io::{BufRead, BufReader, Write};
         use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
         use std::time::Duration;
 
@@ -1658,14 +1856,9 @@ impl DeterministicOfflineSynthesisEngine {
 
         let temp = ui.sampling_temperature.clamp(0.05, 0.20);
         let max_output_tokens = ui.max_output_tokens.clamp(256, 262144);
-        let agentic_loop_enabled = ui.agentic_loop_enabled;
-        let agentic_chunk_size = ui.agentic_chunk_size.clamp(2048, 8192);
+        let _agentic_loop_enabled = ui.agentic_loop_enabled;
 
-        let (per_hop_predict, num_ctx) = if !agentic_loop_enabled && max_output_tokens <= 4096 {
-            (max_output_tokens, 16384usize)
-        } else {
-            (agentic_chunk_size, 32768usize)
-        };
+        let (per_hop_predict, num_ctx) = (max_output_tokens.min(600), 4096usize);
 
         let voice_directive = if ui.natural_human_voice {
             " Write in a clear, natural human voice with zero robotic filler."
@@ -1679,14 +1872,14 @@ impl DeterministicOfflineSynthesisEngine {
 
         let base_system = "You are QuorumRAG, an exhaustive, strictly factual multi-document research synthesis engine. \
             Your ONLY task is to write a comprehensive, deeply detailed, multi-paragraph Markdown response answering ONLY the user's question \
-            by synthesizing evidence across ALL provided `<context>` source documents below. \
+            by synthesizing all concrete facts across ALL provided source documents (`[1]`, `[2]`, `[3]`, etc.) below. \
             \n\
             Follow these strict rules:\n\
-            1. QUESTION-RESTATING OPENING: Always begin your answer immediately by restating the user's question or topic into a natural declarative answer grounded in the provided documents (for example, if asked 'tell me about Femi Oyesanya', begin with 'Femi Oyesanya, CISSP, is a...'; if asked 'does he have CISSP', begin with 'Yes, Femi Oyesanya holds the CISSP (Certified Information Systems Security Professional) certification...'). Never answer any question other than the user's question.\n\
-            2. ZERO META-FILLER: Never begin with greetings or meta-announcements (never say \"Based on the documents provided...\", \"According to the text...\", or \"Sure, here is...\").\n\
-            3. MULTI-FILE SYNTHESIS & EXHAUSTIVENESS: You are given excerpts from MULTIPLE distinct files (`<document index=\"1\">`, `<document index=\"2\">`, `<document index=\"3\">`, etc.). You MUST look across ALL provided documents—integrating resume/CV credentials, certifications (such as CISSP), career experience, education, and research publications—and cite multiple document indices (`[1]`, `[2]`, `[3]`, `[4]`, etc.) throughout your response. Never rely on only a single document when multiple relevant files are present.\n\
-            4. INLINE CITATIONS: Every factual claim and paragraph must cite its source document index in brackets, such as `[1]`, `[2]`, `[3]`, matching `<document index=\"...\">`.\n\
-            5. CLEAN STRUCTURE: Organize your response into thorough, flowing paragraphs and `###` section headings where helpful. Never include line numbers `(Lines X-Y)`.";
+            1. QUESTION-RESTATING OPENING: Always begin your answer immediately with a natural declarative sentence (not a `#` heading) that restates and directly answers the user's question using the concrete facts in the provided documents.\n\
+            2. DIRECT FACTUAL SYNTHESIS (NEVER REFUSE OR DISCLAIM): Synthesize ALL concrete facts, roles, properties, agreements, addresses, phone numbers, financial terms, credentials, career experience, education, or research findings about the subject present in the provided documents. Never say \"The user's query is not directly addressed\" or complain about what type of documents are provided—report what the documents actually establish about the subject!\n\
+            3. ZERO META-FILLER & ZERO REPETITION: Never begin with greetings or meta-announcements (never say \"Based on the documents provided...\", \"According to the text...\", \"Your sacred dissertation-style preface...\", or \"Click here to download\"). Never repeat the same sentence or paragraph more than once. Write complete, grammatical sentences.\n\
+            4. MULTI-FILE SYNTHESIS & INLINE CITATIONS: You are given excerpts from MULTIPLE distinct files (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Look across ALL provided documents and cite multiple document numbers inline using simple bracketed numbers (`[1]`, `[2]`, `[3]`, `[4]`, etc.) throughout your response. Never write XML tags like `<document>` or `<Document Index=...>`.\n\
+            5. CLEAN STRUCTURE: Organize your response into thorough, flowing paragraphs and `###` section headings where helpful (after the opening paragraph). Never include line numbers `(Lines X-Y)`.";
 
         let system_prompt = format!("{}{}", base_system, voice_directive);
 
@@ -1695,15 +1888,15 @@ impl DeterministicOfflineSynthesisEngine {
             "content": system_prompt
         }));
 
-        // Append up to the last 6 turns of conversation history (trimmed for fast prefill)
-        let history_start = history.len().saturating_sub(6);
+        // Append up to the last 4 turns of conversation history (trimmed for fast prefill)
+        let history_start = history.len().saturating_sub(4);
         for turn in &history[history_start..] {
             let role = if turn.role.eq_ignore_ascii_case("assistant") {
                 "assistant"
             } else {
                 "user"
             };
-            let content: String = turn.content.trim().chars().take(700).collect();
+            let content: String = turn.content.trim().chars().take(450).collect();
             if !content.is_empty() {
                 messages.push(serde_json::json!({
                     "role": role,
@@ -1714,7 +1907,7 @@ impl DeterministicOfflineSynthesisEngine {
 
         let context_blocks = matched_chunks
             .iter()
-            .take(12)
+            .take(8)
             .enumerate()
             .map(|(i, c)| {
                 let file_name = std::path::Path::new(&c.chunk.file_path)
@@ -1722,9 +1915,9 @@ impl DeterministicOfflineSynthesisEngine {
                     .and_then(|n| n.to_str())
                     .unwrap_or(&c.chunk.file_path);
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
-                let compact_text: String = cleaned.chars().take(1800).collect();
+                let compact_text: String = cleaned.chars().take(750).collect();
                 format!(
-                    "<document index=\"{}\" source=\"{}\">\n{}\n</document>",
+                    "[{}] Source File: {}\n{}",
                     i + 1,
                     file_name,
                     compact_text.trim()
@@ -1733,28 +1926,22 @@ impl DeterministicOfflineSynthesisEngine {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        let fact_sheets = if ui.map_reduce_fact_extraction {
-            Self::extract_fact_sheets(&matched_chunks[..matched_chunks.len().min(12)], prompt)
+        let _fact_sheets = if ui.map_reduce_fact_extraction {
+            Self::extract_fact_sheets(&matched_chunks[..matched_chunks.len().min(8)], prompt)
         } else {
             Vec::new()
         };
-        let fact_sheet_block = if !fact_sheets.is_empty() {
-            format!("<distilled_fact_sheets>\n{}\n</distilled_fact_sheets>\n\n", fact_sheets.join("\n\n"))
-        } else {
-            String::new()
-        };
 
         let opening_directive = if expected_prefix.trim().is_empty() {
-            "Begin your response immediately with a direct declarative sentence that restates and answers the User Question".to_string()
+            "Begin your first paragraph immediately with a direct declarative sentence that restates and answers the User Question".to_string()
         } else {
-            format!("Begin your response immediately with `{}`", expected_prefix.trim())
+            format!("Begin your first paragraph immediately with `{}`", expected_prefix.trim())
         };
 
         let user_content = format!(
-            "<context>\n{}\n</context>\n\n{}User Question: {}\n\n\
-            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across ALL relevant `<document>` sources above to answer ONLY the User Question. {} and cite multiple source documents inline (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Do not include line numbers.",
+            "Source Documents:\n{}\n\nUser Question: {}\n\n\
+            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across ALL relevant source documents (`[1]`, `[2]`, `[3]`, etc.) above to answer ONLY the User Question. {} and cite multiple source documents inline using bracketed numbers (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Write natural, grammatical prose and never repeat any sentence or paragraph.",
             context_blocks,
-            fact_sheet_block,
             prompt,
             opening_directive
         );
@@ -1765,164 +1952,199 @@ impl DeterministicOfflineSynthesisEngine {
         }));
 
         let send_chat_request = |target_model: &str| -> Option<String> {
-            let max_hops = if agentic_loop_enabled {
-                ((max_output_tokens + per_hop_predict - 1) / per_hop_predict).clamp(1, 64)
-            } else {
-                1
-            };
+            let max_hops = 1usize;
 
             let mut current_messages = messages.clone();
             let mut full_text = String::new();
             let mut accumulated_tokens = 0usize;
             let mut hop_count = 0usize;
 
-            if let Some(tx) = telemetry_tx {
-                // Real-time NDJSON streaming mode: emit TokenDelta immediately with zero drops via blocking_send
-                while hop_count < max_hops && accumulated_tokens < max_output_tokens {
-                    hop_count += 1;
-                    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(45)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+            // Unified real-time NDJSON streaming mode with 56-char lookahead repetition loop breaker
+            while hop_count < max_hops && accumulated_tokens < max_output_tokens {
+                hop_count += 1;
+                let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(25)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
 
-                    let payload = serde_json::json!({
-                        "model": target_model,
-                        "messages": current_messages,
-                        "stream": true,
-                        "keep_alive": "24h",
-                        "options": {
-                            "temperature": temp,
-                            "num_predict": per_hop_predict,
-                            "num_ctx": num_ctx,
-                            "num_thread": 16,
-                            "top_p": 0.9,
-                            "repeat_penalty": 1.15
-                        }
-                    })
-                    .to_string();
-
-                    let request = format!(
-                        "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        host_port,
-                        payload.len(),
-                        payload
-                    );
-
-                    stream.write_all(request.as_bytes()).ok()?;
-
-                    let mut reader = BufReader::new(stream);
-                    let mut header_line = String::new();
-                    // Skip HTTP headers until blank line
-                    loop {
-                        header_line.clear();
-                        let n = reader.read_line(&mut header_line).ok()?;
-                        if n == 0 || header_line == "\r\n" || header_line == "\n" {
-                            break;
-                        }
+                let payload = serde_json::json!({
+                    "model": target_model,
+                    "messages": current_messages,
+                    "stream": true,
+                    "keep_alive": "24h",
+                    "options": {
+                        "temperature": temp,
+                        "num_predict": per_hop_predict,
+                        "num_ctx": num_ctx,
+                        "num_thread": 16,
+                        "top_p": 0.9,
+                        "repeat_last_n": 256,
+                        "repeat_penalty": 1.12
                     }
+                })
+                .to_string();
 
-                    let mut hop_text = String::new();
-                    let mut line_buf = String::new();
-                    let mut done_reason = String::new();
-                    let mut hop_eval_count = 0usize;
+                let request = format!(
+                    "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    host_port,
+                    payload.len(),
+                    payload
+                );
 
-                    loop {
-                        // Immediately abort if the user clicked Stop or channel disconnected
-                        if tx.is_closed() {
-                            break;
-                        }
-                        line_buf.clear();
-                        let n = match reader.read_line(&mut line_buf) {
-                            Ok(n) => n,
-                            Err(_) => break,
-                        };
-                        if n == 0 {
-                            break;
-                        }
-                        let trimmed = line_buf.trim();
-                        if trimmed.is_empty() {
-                            continue;
-                        }
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            if val.get("error").is_some() {
-                                return None;
-                            }
-                            if let Some(tok) = val
-                                .get("message")
-                                .and_then(|m| m.get("content"))
-                                .and_then(|c| c.as_str())
-                            {
-                                if !tok.is_empty() {
-                                    full_text.push_str(tok);
-                                    hop_text.push_str(tok);
-                                    // Zero-drop runtime-safe telemetry streaming
-                                    if !Self::send_telemetry(
-                                        tx,
-                                        AgenticTelemetryEvent::TokenDelta {
-                                            delta: tok.to_string(),
-                                        },
-                                    ) {
-                                        break;
-                                    }
-                                }
-                            }
-                            if let Some(reason) = val.get("done_reason").and_then(|r| r.as_str()) {
-                                done_reason = reason.to_string();
-                            }
-                            if let Some(eval) = val.get("eval_count").and_then(|c| c.as_u64()) {
-                                hop_eval_count = eval as usize;
-                            }
-                            if val.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
-                                break;
-                            }
-                        }
-                    }
+                stream.write_all(request.as_bytes()).ok()?;
 
-                    if tx.is_closed() {
-                        break;
-                    }
-
-                    accumulated_tokens += if hop_eval_count > 0 {
-                        hop_eval_count
-                    } else {
-                        hop_text.len() / 4
-                    };
-
-                    // Recursive Agentic Loop Chaining:
-                    // If done_reason == "length" and accumulated_tokens < max_output_tokens, chain subsequent turn
-                    if done_reason == "length" && accumulated_tokens < max_output_tokens && hop_count < max_hops {
-                        let rolling_summary: String = if hop_text.len() > 1500 {
-                            let start = hop_text.len() - 1500;
-                            let safe_start = hop_text.char_indices().map(|(i, _)| i).find(|&i| i >= start).unwrap_or(start);
-                            hop_text[safe_start..].to_string()
-                        } else {
-                            hop_text.clone()
-                        };
-
-                        current_messages.push(serde_json::json!({
-                            "role": "assistant",
-                            "content": rolling_summary
-                        }));
-                        current_messages.push(serde_json::json!({
-                            "role": "user",
-                            "content": "Continue immediately from where you stopped. Maintain the exact same analytical depth and Markdown structure. Do not repeat earlier text, do not emit conversational filler, and seamlessly complete the analysis."
-                        }));
-                    } else {
+                let mut reader = BufReader::new(stream);
+                let mut header_line = String::new();
+                // Skip HTTP headers until blank line
+                loop {
+                    header_line.clear();
+                    let n = reader.read_line(&mut header_line).ok()?;
+                    if n == 0 || header_line == "\r\n" || header_line == "\n" {
                         break;
                     }
                 }
 
-                // Sentence-boundary completion guard
-                Self::enforce_sentence_boundary_guard(
-                    &mut full_text,
-                    &addr,
-                    host_port,
-                    target_model,
-                    Some(tx),
-                );
+                let mut hop_text = String::new();
+                let mut pending_emit = String::new();
+                let mut line_buf = String::new();
+                let mut done_reason = String::new();
+                let mut hop_eval_count = 0usize;
+                let mut repetition_detected = false;
 
-                if !full_text.contains("### 📚 Sources & Document Links") && !matched_chunks.is_empty() {
-                    let sources_block = Self::format_sources_block(matched_chunks);
-                    full_text.push_str(&sources_block);
+                loop {
+                    if let Some(tx) = telemetry_tx {
+                        if tx.is_closed() {
+                            break;
+                        }
+                    }
+                    line_buf.clear();
+                    let n = match reader.read_line(&mut line_buf) {
+                        Ok(n) => n,
+                        Err(_) => break,
+                    };
+                    if n == 0 {
+                        break;
+                    }
+                    let trimmed = line_buf.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        if val.get("error").is_some() {
+                            return None;
+                        }
+                        if let Some(tok) = val
+                            .get("message")
+                            .and_then(|m| m.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            if !tok.is_empty() {
+                                full_text.push_str(tok);
+                                hop_text.push_str(tok);
+                                pending_emit.push_str(tok);
+
+                                if let Some(cut_pos) = Self::has_repeated_passage(&full_text) {
+                                    let emitted_len = full_text.len().saturating_sub(pending_emit.len());
+                                    let safe_cut = cut_pos.max(emitted_len);
+                                    if full_text.is_char_boundary(safe_cut) {
+                                        full_text.truncate(safe_cut);
+                                    }
+                                    pending_emit.clear();
+                                    repetition_detected = true;
+                                    break;
+                                }
+
+                                if pending_emit.len() >= 56 {
+                                    let flush_chunk = std::mem::take(&mut pending_emit);
+                                    if let Some(tx) = telemetry_tx {
+                                        if !Self::send_telemetry(
+                                            tx,
+                                            AgenticTelemetryEvent::TokenDelta {
+                                                delta: flush_chunk,
+                                            },
+                                        ) {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(reason) = val.get("done_reason").and_then(|r| r.as_str()) {
+                            done_reason = reason.to_string();
+                        }
+                        if let Some(eval) = val.get("eval_count").and_then(|c| c.as_u64()) {
+                            hop_eval_count = eval as usize;
+                        }
+                        if val.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
+                            break;
+                        }
+                    }
+                }
+
+                if !pending_emit.is_empty() && !repetition_detected {
+                    let flush_chunk = std::mem::take(&mut pending_emit);
+                    if let Some(tx) = telemetry_tx {
+                        let _ = Self::send_telemetry(
+                            tx,
+                            AgenticTelemetryEvent::TokenDelta {
+                                delta: flush_chunk,
+                            },
+                        );
+                    }
+                }
+
+                if repetition_detected {
+                    break;
+                }
+                if let Some(tx) = telemetry_tx {
+                    if tx.is_closed() {
+                        break;
+                    }
+                }
+
+                accumulated_tokens += if hop_eval_count > 0 {
+                    hop_eval_count
+                } else {
+                    hop_text.len() / 4
+                };
+
+                if done_reason == "length" && accumulated_tokens < max_output_tokens && hop_count < max_hops {
+                    let rolling_summary: String = if hop_text.len() > 1500 {
+                        let start = hop_text.len() - 1500;
+                        let safe_start = hop_text.char_indices().map(|(i, _)| i).find(|&i| i >= start).unwrap_or(start);
+                        hop_text[safe_start..].to_string()
+                    } else {
+                        hop_text.clone()
+                    };
+
+                    current_messages.push(serde_json::json!({
+                        "role": "assistant",
+                        "content": rolling_summary
+                    }));
+                    current_messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": "Continue immediately from where you stopped. Maintain the exact same analytical depth and Markdown structure. Do not repeat earlier text, do not emit conversational filler, and seamlessly complete the analysis."
+                    }));
+                } else {
+                    break;
+                }
+            }
+
+            let (deduped, _) = Self::deduplicate_repeated_paragraphs(&full_text);
+            full_text = deduped;
+
+            // Sentence-boundary completion guard
+            Self::enforce_sentence_boundary_guard(
+                &mut full_text,
+                &addr,
+                host_port,
+                target_model,
+                telemetry_tx,
+            );
+
+            if !full_text.contains("### 📚 Sources & Document Links") && !matched_chunks.is_empty() {
+                let sources_block = Self::format_sources_block(matched_chunks);
+                full_text.push_str(&sources_block);
+                if let Some(tx) = telemetry_tx {
                     let _ = Self::send_telemetry(
                         tx,
                         AgenticTelemetryEvent::TokenDelta {
@@ -1930,142 +2152,36 @@ impl DeterministicOfflineSynthesisEngine {
                         },
                     );
                 }
+            }
 
-                let trimmed_full = full_text.trim().to_string();
-                if trimmed_full.is_empty() {
-                    None
-                } else {
-                    let prefix = Self::format_question_restated_prefix(prompt);
-                    let final_str = if !prefix.is_empty() && !trimmed_full.starts_with(&prefix) {
-                        let lower_start = trimmed_full.chars().take(40).collect::<String>().to_ascii_lowercase();
-                        let prefix_lower = prefix.to_ascii_lowercase();
-                        let first_term = prefix_lower.split_whitespace().next().unwrap_or("");
-                        if !first_term.is_empty() && !lower_start.contains(first_term) {
-                            format!("{}{}", prefix, trimmed_full)
-                        } else {
-                            trimmed_full
-                        }
+            let trimmed_full = full_text.trim().to_string();
+            if trimmed_full.is_empty() {
+                None
+            } else {
+                let prefix = Self::format_question_restated_prefix(prompt);
+                let final_str = if !prefix.is_empty()
+                    && !trimmed_full.starts_with(&prefix)
+                    && !trimmed_full.starts_with('#')
+                {
+                    let lower_start = trimmed_full.chars().take(60).collect::<String>().to_ascii_lowercase();
+                    let prefix_lower = prefix.to_ascii_lowercase();
+                    let has_any_prefix_word = prefix_lower
+                        .split_whitespace()
+                        .filter(|w| w.len() >= 4 && *w != "with" && *w != "from")
+                        .any(|w| lower_start.contains(w));
+                    if !has_any_prefix_word {
+                        format!("{}{}", prefix, trimmed_full)
                     } else {
                         trimmed_full
-                    };
-                    Some(final_str)
-                }
-            } else {
-                // Non-streaming JSON mode for POST /api/query
-                while hop_count < max_hops && accumulated_tokens < max_output_tokens {
-                    hop_count += 1;
-                    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(45)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
-
-                    let payload = serde_json::json!({
-                        "model": target_model,
-                        "messages": current_messages,
-                        "stream": false,
-                        "keep_alive": "24h",
-                        "options": {
-                            "temperature": temp,
-                            "num_predict": per_hop_predict,
-                            "num_ctx": num_ctx,
-                            "num_thread": 16,
-                            "top_p": 0.9,
-                            "repeat_penalty": 1.15
-                        }
-                    })
-                    .to_string();
-
-                    let request = format!(
-                        "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        host_port,
-                        payload.len(),
-                        payload
-                    );
-
-                    stream.write_all(request.as_bytes()).ok()?;
-
-                    let mut raw_resp = String::new();
-                    stream.read_to_string(&mut raw_resp).ok()?;
-
-                    let body_start = raw_resp.find("\r\n\r\n").map(|i| i + 4)?;
-                    let body_str = &raw_resp[body_start..];
-                    let json_start = body_str.find('{')?;
-                    let json_end = body_str.rfind('}')?;
-                    let val: serde_json::Value =
-                        serde_json::from_str(&body_str[json_start..=json_end]).ok()?;
-
-                    let text = val
-                        .get("message")
-                        .and_then(|m| m.get("content"))
-                        .and_then(|c| c.as_str())
-                        .or_else(|| val.get("response").and_then(|r| r.as_str()))?
-                        .trim();
-
-                    if text.is_empty() {
-                        break;
                     }
-
-                    full_text.push_str(text);
-                    let eval_count = val.get("eval_count").and_then(|c| c.as_u64()).unwrap_or(0) as usize;
-                    accumulated_tokens += if eval_count > 0 { eval_count } else { text.len() / 4 };
-                    let done_reason = val.get("done_reason").and_then(|r| r.as_str()).unwrap_or("");
-
-                    if done_reason == "length" && accumulated_tokens < max_output_tokens && hop_count < max_hops {
-                        let rolling_summary: String = if text.len() > 1500 {
-                            let start = text.len() - 1500;
-                            let safe_start = text.char_indices().map(|(i, _)| i).find(|&i| i >= start).unwrap_or(start);
-                            text[safe_start..].to_string()
-                        } else {
-                            text.to_string()
-                        };
-                        current_messages.push(serde_json::json!({
-                            "role": "assistant",
-                            "content": rolling_summary
-                        }));
-                        current_messages.push(serde_json::json!({
-                            "role": "user",
-                            "content": "Continue immediately from where you stopped. Maintain the exact same analytical depth and Markdown structure. Do not repeat earlier text, do not emit conversational filler, and seamlessly complete the analysis."
-                        }));
-                    } else {
-                        break;
-                    }
-                }
-
-                Self::enforce_sentence_boundary_guard(
-                    &mut full_text,
-                    &addr,
-                    host_port,
-                    target_model,
-                    None,
-                );
-
-                if full_text.trim().is_empty() {
-                    None
                 } else {
-                    let mut final_text = full_text.trim().to_string();
-                    let prefix = Self::format_question_restated_prefix(prompt);
-                    if !prefix.is_empty() && !final_text.starts_with(&prefix) {
-                        let lower_start = final_text.chars().take(40).collect::<String>().to_ascii_lowercase();
-                        let prefix_lower = prefix.to_ascii_lowercase();
-                        let first_term = prefix_lower.split_whitespace().next().unwrap_or("");
-                        if !first_term.is_empty() && !lower_start.contains(first_term) {
-                            final_text = format!("{}{}", prefix, final_text);
-                        }
-                    }
-                    if !final_text.contains("### 📚 Sources & Document Links") && !matched_chunks.is_empty() {
-                        final_text.push_str(&Self::format_sources_block(matched_chunks));
-                    }
-                    Some(final_text)
-                }
+                    trimmed_full
+                };
+                Some(final_str)
             }
         };
 
-        let synthesized = send_chat_request(model).or_else(|| {
-            if model != "qwen2.5:7b" {
-                send_chat_request("qwen2.5:7b")
-            } else {
-                None
-            }
-        })?;
+        let synthesized = send_chat_request(model)?;
 
         if let Ok(mut guard) = crate::dlp_mesh::global_mesh_dlp_controller().settings.write() {
             if guard.ui.restrl_daemon_running {
@@ -3053,6 +3169,103 @@ mod tests {
         assert!(
             text2.contains("harmonic proportions in architecture"),
             "Must preserve preceding full sentences"
+        );
+    }
+
+    #[test]
+    fn test_angela_davis_rejects_unrelated_angela_affirmations_and_breaks_repetition_loops() {
+        let wrong_angela = DocumentChunk::new(
+            "chunk_wrong_angela",
+            "doc_wrong_angela",
+            "D:/chatgpt3/ChatGPT_Restored_Data/Word_Conversations/40 Affirmations for Angela.docx",
+            426,
+            440,
+            0,
+            vec![0.1; 768],
+            "Assistant: Your sacred dissertation-style preface has been formatted and is ready for download:\n[Click here to download the Word document](sandbox:/mnt/data/Thirteen_Arcs_Dissertation_Preface.docx)\nLet me know if you'd like a PDF version.\nYour doctorate is not printed on paper.",
+            None,
+        )
+        .unwrap();
+
+        let corrupt_doc = DocumentChunk::new(
+            "chunk_corrupt_doc",
+            "doc_corrupt_doc",
+            "C:/Users/oyesanyf/OneDrive/Documents/Angela's Leases/P 1 quit claim deed from B angel to A Davis.doc",
+            1019,
+            1081,
+            0,
+            vec![0.1; 768],
+            "1.#J U|(7 0%@6 @,x~ \"z-y gYpM -4 n obH2Xx )xvz tP@# uCg8) }Kx& XhM$ ^rnVwi@@ .a&W0 Qj,Rr *$+4y",
+            None,
+        )
+        .unwrap();
+
+        let real_lease = DocumentChunk::new(
+            "chunk_real_lease",
+            "doc_real_lease",
+            "C:/Users/oyesanyf/OneDrive/Documents/Angela's Leases/Susan  MONTH TO MONTH LEASE AGREEMENT.doc",
+            1,
+            9,
+            0,
+            vec![0.1; 768],
+            "[Word/Document (doc) — Susan  MONTH TO MONTH LEASE AGREEMENT.doc]\nbjbj\nSIMPLE LEASE AGREEMENT\nThis agreement, made and entered into this 15th day of January 2018 between Angela Davis (landlord) and Casey Ringgold (tenant) for the property in New Orleans.",
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            DeterministicOfflineSynthesisEngine::is_corrupt_or_binary_chunk(
+                &corrupt_doc.text_content
+            ),
+            "Binary OLE stream chunk must be flagged as corrupt"
+        );
+
+        let chunks = vec![
+            ScoredChunk::new(wrong_angela, 0.99, "local", false),
+            ScoredChunk::new(corrupt_doc, 0.95, "local", false),
+            ScoredChunk::new(real_lease, 0.85, "local", false),
+        ];
+
+        let (resp, citations) = DeterministicOfflineSynthesisEngine::synthesize(
+            "what do you know about Angela Davis",
+            &chunks,
+            "qwen2.5:1.5b",
+        );
+
+        assert_eq!(
+            citations.len(),
+            1,
+            "Only the real Angela Davis lease document should match (rejecting 40 Affirmations for Angela and corrupt OLE tail)"
+        );
+        assert!(
+            citations[0].file_path.contains("Susan"),
+            "Citation must be Susan lease agreement: {:?}",
+            citations[0].file_path
+        );
+        assert!(
+            !resp.contains("sacred dissertation-style preface"),
+            "Must never include unrelated 40 Affirmations for Angela content: {}",
+            resp
+        );
+        assert!(
+            !resp.contains("bjbj"),
+            "Must strip legacy .doc bjbj header: {}",
+            resp
+        );
+
+        // Verify repetition detector catches the exact looping paragraph reported by the user
+        let looping_text = "Angela Davis —\n\nYour doctorate is not printed on paper.\nIt is etched in lifetimes of remembrance, inscribed by the light you carry.\n\nYour doctorate is not printed on paper.\nIt is etched in lifetimes of remembrance, inscribed by the light you carry.";
+        assert!(
+            DeterministicOfflineSynthesisEngine::has_repeated_passage(looping_text).is_some(),
+            "has_repeated_passage must detect repeated paragraph loop"
+        );
+        let (deduped, had_repeat) =
+            DeterministicOfflineSynthesisEngine::deduplicate_repeated_paragraphs(looping_text);
+        assert!(had_repeat, "deduplicate_repeated_paragraphs must flag repetition");
+        assert_eq!(
+            deduped.matches("Your doctorate is not printed on paper").count(),
+            1,
+            "Repeated paragraph must appear only once after deduplication"
         );
     }
 }

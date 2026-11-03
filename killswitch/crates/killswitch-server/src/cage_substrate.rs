@@ -472,23 +472,62 @@ pub async fn handle_conformal_validate(
 
     let alpha = req.alpha.unwrap_or(0.05);
 
-    // 2. Conformal nonconformity calculation
-    // Using calibrated score evaluation:
-    let score = req.scores.first().copied().unwrap_or(1.0);
-    // Typical empirical calibration scores R_{k,i} centered around 2.0 with variance
-    // p_k(x) = (1 + count(R_i >= score)) / (N + 1)
-    let p_value = if score < 2.0 {
-        0.85
-    } else if score < 4.0 {
-        0.35
-    } else if score < 6.0 {
-        0.04 // Below alpha 0.05 -> non-conforming / rejected!
+    // 2. Genuine Conformal nonconformity calculation using killswitch-conformal
+    let p_value = if req.scores.is_empty() {
+        1.0
+    } else if req.scores.len() == 1 {
+        // Scalar nonconformity score evaluated against calibrated sources
+        let score = req.scores[0];
+        let cal = killswitch_conformal::MultiSourceCalibration::default_calibrated(4, 4);
+        cal.sources
+            .iter()
+            .map(|src| src.conformal_p_value(score))
+            .fold(1.0f64, |acc, p| acc.min(p))
     } else {
-        0.001
+        // Multi-dimensional representation vector projected into calibrated space
+        let dim = req.scores.len().max(4);
+        let cal = killswitch_conformal::MultiSourceCalibration::default_calibrated(dim, dim);
+        let mut x_vec = req.scores.clone();
+        if x_vec.len() < dim {
+            x_vec.resize(dim, 0.0);
+        }
+        let x = killswitch_conformal::Array1::from_vec(x_vec);
+        cal.source_p_values(&x)
+            .into_iter()
+            .fold(1.0f64, |acc, p| acc.min(p))
     };
 
     let admitted = p_value > alpha;
-    let voter_consensus = if admitted {
+
+    // 3. Genuine Multi-Voter Consensus using killswitch-adjudication
+    let action_name = req.action.as_deref().unwrap_or("cage_action");
+    let initial_conf = if admitted {
+        0.05f32
+    } else {
+        ((1.0 - p_value) as f32).clamp(0.85, 0.99)
+    };
+    let evidence_class = if admitted {
+        killswitch_types::adjudication::EvidenceClass::Behavior
+    } else {
+        killswitch_types::adjudication::EvidenceClass::ThreatIntel
+    };
+
+    let candidate = killswitch_types::adjudication::ThreatCandidate::new(
+        None,
+        action_name,
+        "conformal_gate",
+        if admitted {
+            "conformal_baseline_conformity"
+        } else {
+            "conformal_nonconformity_threshold_breach"
+        },
+        initial_conf,
+        evidence_class,
+    );
+
+    let adjudication = state.adjudicator.adjudicate_threat_candidate(&candidate, None).await;
+
+    let voter_consensus = if admitted && !adjudication.is_confirmed() {
         "CONSENSUS_ALLOW".to_string()
     } else {
         "CONSENSUS_DENY".to_string()

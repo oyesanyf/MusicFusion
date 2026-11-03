@@ -7,7 +7,7 @@ use axum::Json;
 use chrono::Utc;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 use killswitch_adjudication::{load_all_bench_tasks, EdrBenchHarness};
 use killswitch_core::killchain::execute_host_disarm_unauthenticated;
@@ -360,15 +360,44 @@ pub async fn post_disarm(
     );
 
     // Resolve peer PID from OS kernel TCP socket table if available
-    let resolved_pid = if let Some(ConnectInfo(addr)) = connect_info {
+    let effective_pid = if let Some(ConnectInfo(addr)) = connect_info {
         let bound_port = state
             .active_bound_port
             .load(std::sync::atomic::Ordering::SeqCst);
-        killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port).ok()
+        match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
+            Ok(pid) => {
+                if let Some(claimed) = req.caller_pid {
+                    if claimed != pid {
+                        warn!(
+                            "🚨 [SERVER] Caller PID mismatch: claimed={}, actual_peer_pid={}",
+                            claimed, pid
+                        );
+                        return Err(ServerError::Core(
+                            killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
+                                "Caller PID spoofing detected: claimed PID {} does not match authenticated peer PID {}",
+                                claimed, pid
+                            )),
+                        ));
+                    }
+                }
+                Some(pid)
+            }
+            Err(e) => {
+                warn!(
+                    "🚨 [SERVER] Loopback peer PID resolution failed for {}: {}",
+                    addr, e
+                );
+                return Err(ServerError::Core(
+                    killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
+                        "Loopback peer PID verification failed on connected socket: {}",
+                        e
+                    )),
+                ));
+            }
+        }
     } else {
-        None
+        req.caller_pid
     };
-    let effective_pid = resolved_pid.or(req.caller_pid);
 
     let token = match req.token.as_deref() {
         Some(t) if !t.trim().is_empty() => t.trim(),
@@ -467,7 +496,17 @@ pub async fn post_health_probe(
             let bound_port = state
                 .active_bound_port
                 .load(std::sync::atomic::Ordering::SeqCst);
-            killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port).ok()
+            match killswitch_core::peer_pid::resolve_loopback_peer_pid(addr, bound_port) {
+                Ok(pid) => Some(pid),
+                Err(e) => {
+                    return Err(ServerError::Core(
+                        killswitch_types::errors::KillSwitchError::AuthenticationFailed(format!(
+                            "Loopback peer PID verification failed on connected socket: {}",
+                            e
+                        )),
+                    ));
+                }
+            }
         } else {
             None
         };
