@@ -83,6 +83,106 @@ def main():
             sf.write(vocals_path, audio_data * 0.5, sr)
             sys.exit(0)
 
+        elif "minimax" in model_lower or "music3" in model_lower:
+            # Read lyrics from file if provided, otherwise use structured default
+            lyrics_text = "[Verse]\nMorning light filtering through the grasslands\n[Chorus]\nWhere watering kingdoms heal aching hearts"
+            if args.lyrics_file and os.path.exists(args.lyrics_file):
+                try:
+                    with open(args.lyrics_file, "r", encoding="utf-8") as lf:
+                        raw_l = lf.read().strip()
+                        if raw_l:
+                            lyrics_text = raw_l
+                except Exception:
+                    pass
+
+            structured_instructions = args.prompt or (
+                f"Global Metadata: Genre: modern indie folk and chamber pop. BPM: {args.bpm}. Key: {args.key}. "
+                "Warm, pastoral, and emotionally uplifting.\n"
+                "Vocal Details: Warm, breathy female alto lead vocal with close microphone presence and stacked chorus harmonies.\n"
+                "Arrangement: Intricate fingerpicked steel-string acoustic guitar, swirling chamber violins and mournful solo cello, "
+                "soft upright bass, and organic shaker building into floor tom swells and shimmering tambourine in the chorus."
+            )
+
+            # 1. Try active SGLang-Omni server (http://127.0.0.1:8000/v1/audio/speech) first if running
+            sglang_url = os.environ.get("MINIMAX_SGLANG_URL", "http://127.0.0.1:8000/v1/audio/speech")
+            try:
+                import json
+                import urllib.request
+                payload = json.dumps({
+                    "model": "MiniMaxAI/MiniMax-Music3",
+                    "input": lyrics_text,
+                    "instructions": structured_instructions,
+                    "response_format": "wav",
+                    "seed": 7,
+                    "max_new_tokens": max(250, min(4500, int(args.duration * 25))),
+                    "stream": False,
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    sglang_url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=180) as resp:
+                    if resp.status == 200:
+                        wav_bytes = resp.read()
+                        raw_path = os.path.join(args.output_dir, "minimax_raw.wav")
+                        with open(raw_path, "wb") as wf:
+                            wf.write(wav_bytes)
+                        audio_data, sr = sf.read(raw_path, always_2d=True)
+                        sf.write(inst_path, audio_data, sr)
+                        sf.write(vocals_path, audio_data, sr)
+                        sys.exit(0)
+            except Exception:
+                pass
+
+            # 2. Diffusers ModularPipeline with 8GB Low-VRAM ComponentsManager & Leaf-Level Streaming Offload
+            try:
+                from diffusers import ComponentsManager, ModularPipeline
+                manager = ComponentsManager()
+                if device == "cuda":
+                    manager.enable_auto_cpu_offload(device="cuda")
+                pipe = ModularPipeline.from_pretrained(args.model, components_manager=manager)
+                pipe.load_components(dtype=torch.bfloat16 if device == "cuda" else torch.float32)
+
+                if device == "cuda":
+                    vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                    if vram_gb < 22.0:
+                        try:
+                            from diffusers.hooks import apply_group_offloading
+                            apply_group_offloading(
+                                pipe.language_model,
+                                onload_device=torch.device("cuda"),
+                                offload_type="leaf_level",
+                                use_stream=True,
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        pipe.to("cuda")
+
+                gen = torch.Generator(device if device == "cuda" else "cpu").manual_seed(7)
+                audio = pipe(
+                    prompt=structured_instructions,
+                    lyrics=lyrics_text,
+                    audio_duration=float(min(300.0, max(15.0, args.duration))),
+                    generator=gen,
+                    output="audios",
+                )[0]
+                audio_np = audio.T.float().cpu().numpy()
+                sr = getattr(pipe, "sampling_rate", 32000)
+                sf.write(inst_path, audio_np, sr)
+                sf.write(vocals_path, audio_np, sr)
+                sys.exit(0)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "out of memory" in err_str:
+                    sys.stderr.write(f"CUDA OOM loading MiniMax-Music3 ({args.model}): {e}\n")
+                    sys.exit(3)
+                else:
+                    sys.stderr.write(f"MiniMax-Music3 weights or diffusers PR pipeline unavailable: {e}\n")
+                    sys.exit(2)
+
         elif "diffrhythm" in model_lower:
             try:
                 from transformers import AutoModel

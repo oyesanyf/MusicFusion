@@ -500,6 +500,9 @@ pub async fn handle_create_song(
             let _ = synth_out
                 .final_master
                 .to_wav_file_with_format(&d_music_dir.join("GENERATED_RL_SAMPLE_SONG.wav"), pcm16);
+            let _ = synth_out
+                .final_master
+                .to_wav_file_with_format(&d_music_dir.join("Watering_Kingdoms_of_the_Grasslands_Poem.wav"), pcm16);
         }
 
         let mut final_state = MusicProductionState::new(&song_id, &synth_out.genre_label, synth_out.bpm, &synth_out.key_signature);
@@ -2531,12 +2534,15 @@ pub async fn handle_generate_rl(
     let _ = std::fs::write(v_dir.join("lyrics.txt"), &synth_out.lyrics);
     let _ = std::fs::write(v_dir.join("genre.txt"), &synth_out.genre_label);
 
-    // Also export directly to D:\music\GENERATED_RL_SAMPLE_SONG.wav if D:\music exists
+    // Also export directly to D:\music\GENERATED_RL_SAMPLE_SONG.wav and Watering_Kingdoms_of_the_Grasslands_Poem.wav if D:\music exists
     let d_music_dir = Path::new(r"D:\music");
     if d_music_dir.exists() && d_music_dir.is_dir() {
         let _ = synth_out
             .final_master
             .to_wav_file_with_format(&d_music_dir.join("GENERATED_RL_SAMPLE_SONG.wav"), pcm16);
+        let _ = synth_out
+            .final_master
+            .to_wav_file_with_format(&d_music_dir.join("Watering_Kingdoms_of_the_Grasslands_Poem.wav"), pcm16);
     }
 
     // Save checkpoint state so /api/songs and stem streaming serve the new song metadata & lyrics

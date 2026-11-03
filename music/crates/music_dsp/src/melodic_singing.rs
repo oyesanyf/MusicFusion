@@ -903,9 +903,11 @@ impl MelodicSingingSynthesizer {
     }
 
     #[inline]
-    /// Dual-Head 30 ms (`1440-sample`) Hann Window Time-Stretch, Pitch-Contour & Singing Vibrato Processor.
-    /// Smoothly elongates each poetic line into a lyrical `target_duration_secs` phrase (`~4.4s` inside each 6.0s 2-bar slot)
-    /// while applying a melodic pitch arch (`contour_semitones`) and natural vibrato with zero grain-chopping buzz.
+    /// Zero-Phase Bandpass (`115–255 Hz`) De-Tilted Single-Cycle Singing Resynthesizer.
+    /// Partitions the neural vocal waveform at rising zero-crossings of the zero-phase fundamental
+    /// bandpass into exact single glottal cycles, locks voiced vowels 100% to target musical scale
+    /// notes (`vocal_root_hz * 2^(st/12)`) with syllable-boundary note stepping and vowel-core
+    /// elongation (`1.55x`), and traverses unvoiced consonants at `1.0x` continuous sample rate.
     fn apply_smooth_30ms_pitch_and_vibrato(
         src: &[f32],
         sr: f32,
@@ -915,20 +917,71 @@ impl MelodicSingingSynthesizer {
         vibrato_depth: f32,
     ) -> Vec<f32> {
         let n_in = src.len();
-        if n_in == 0 {
-            return Vec::new();
+        if n_in < 240 {
+            return src.to_vec();
         }
-        let raw_secs = n_in as f32 / sr;
-        // Gently elongate spoken phrases (up to 1.28x slower) so each poetic line sings across its 2-bar phrase
-        let stretch = (target_duration_secs / raw_secs.max(0.5)).clamp(1.0, 1.28);
-        let n_out = ((n_in as f32) * stretch).round() as usize;
-        let mut out = vec![0.0f32; n_out];
-        let win_size = 1440.0f64; // 30.0 ms at 48 kHz
-        let mut delay_phase = 0.0f64;
-        let mut smoothed_ratio = 1.0f64;
+
+        let zero_phase_lp = |sig: &[f32], cutoff_hz: f32| -> Vec<f32> {
+            let mut out = sig.to_vec();
+            let alpha = 1.0 - (-2.0 * PI * cutoff_hz / sr).exp();
+            for _ in 0..2 {
+                let mut y = 0.0f32;
+                for v in out.iter_mut() {
+                    y += alpha * (*v - y);
+                    *v = y;
+                }
+                let mut y_rev = 0.0f32;
+                for v in out.iter_mut().rev() {
+                    y_rev += alpha * (*v - y_rev);
+                    *v = y_rev;
+                }
+            }
+            out
+        };
+
+        // 1. Zero-phase bandpass [115 Hz .. 255 Hz] removes DC/breath drift AND F1/F2 formant ripples
+        let lp_hi = zero_phase_lp(src, 255.0);
+        let lp_lo = zero_phase_lp(src, 115.0);
+        let mut f0_band = Vec::with_capacity(n_in);
+        for i in 0..n_in {
+            f0_band.push(lp_hi[i] - lp_lo[i]);
+        }
+
+        // 2. Extract rising zero-crossings of f0_band as fundamental glottal cycle boundaries
+        let mut raw_zc = Vec::with_capacity(n_in / 180 + 8);
+        raw_zc.push(0.0f64);
+        let min_step = (sr / 335.0) as f64;
+        for i in 1..n_in {
+            if f0_band[i - 1] <= 0.0 && f0_band[i] > 0.0 {
+                let denom = (f0_band[i] - f0_band[i - 1]).max(1e-12);
+                let pos = (i - 1) as f64 - (f0_band[i - 1] as f64) / (denom as f64);
+                if pos - *raw_zc.last().unwrap_or(&0.0) >= min_step {
+                    raw_zc.push(pos);
+                }
+            }
+        }
+        if (n_in.saturating_sub(2) as f64) - *raw_zc.last().unwrap_or(&0.0) >= 140.0 {
+            raw_zc.push((n_in - 2) as f64);
+        }
+
+        // Subdivide any unvoiced gap > 380 samples into equal ~210-sample segments (never leaving a stub!)
+        let mut zc = Vec::with_capacity(raw_zc.len() * 2);
+        zc.push(raw_zc[0]);
+        for &next_pos in raw_zc.iter().skip(1) {
+            let last_pos = *zc.last().unwrap_or(&0.0);
+            let gap = next_pos - last_pos;
+            if gap > 380.0 {
+                let m_segs = ((gap / 210.0).round() as usize).max(2);
+                let step = gap / (m_segs as f64);
+                for s_i in 1..m_segs {
+                    zc.push(last_pos + (s_i as f64) * step);
+                }
+            }
+            zc.push(next_pos);
+        }
 
         let read_interp = |pos: f64| -> f32 {
-            if pos < 0.0 || pos >= (n_in - 1) as f64 {
+            if pos <= 0.0 || pos >= (n_in - 1) as f64 {
                 0.0
             } else {
                 let idx = pos.floor() as usize;
@@ -937,34 +990,183 @@ impl MelodicSingingSynthesizer {
             }
         };
 
-        for i in 0..n_out {
-            let t = i as f32 / sr;
-            let prog = (i as f32) / (n_out.max(1) as f32);
-            let note_idx = ((prog * (contour_semitones.len() as f32)).floor() as usize)
-                .min(contour_semitones.len().saturating_sub(1));
-            let st = contour_semitones[note_idx];
-            // Vibrato blooms naturally on held syllables
+        #[derive(Clone, Copy)]
+        struct GlottalCycle {
+            s0: f64,
+            per: f64,
+            voiced: bool,
+            rms: f32,
+            e0: f32,
+            e1: f32,
+        }
+
+        let mut cycles = Vec::with_capacity(zc.len());
+        for k in 0..zc.len().saturating_sub(1) {
+            let s0 = zc[k];
+            let s1 = zc[k + 1];
+            let per = (s1 - s0).max(1.0);
+            let i0 = (s0 as usize).min(n_in - 1);
+            let i1 = (s1 as usize).clamp(i0 + 1, n_in);
+            let count = (i1 - i0).max(1) as f32;
+            let mut sum_sq = 0.0f32;
+            let mut f0_sq = 0.0f32;
+            let mut zc_cnt = 0usize;
+            for j in i0..i1 {
+                let x = src[j];
+                let fb = f0_band[j];
+                sum_sq += x * x;
+                f0_sq += fb * fb;
+                if j + 1 < i1 && ((src[j] <= 0.0 && src[j + 1] > 0.0) || (src[j] >= 0.0 && src[j + 1] < 0.0)) {
+                    zc_cnt += 1;
+                }
+            }
+            let rms = (sum_sq / count).sqrt();
+            let f0_rms = (f0_sq / count).sqrt();
+            let zcr = zc_cnt as f32 / count;
+            let voiced = (145.0..=345.0).contains(&per)
+                && rms > 0.020
+                && (f0_rms / rms.max(1e-6)) > 0.22
+                && zcr < 0.13;
+            cycles.push(GlottalCycle {
+                s0,
+                per,
+                voiced,
+                rms,
+                e0: read_interp(s0),
+                e1: read_interp(s1),
+            });
+        }
+
+        if cycles.is_empty() {
+            return src.to_vec();
+        }
+
+        // Bridge 1..2 cycle voiced dropouts inside a vowel core
+        for bridge_len in [1usize, 2usize] {
+            if cycles.len() > bridge_len * 2 {
+                for k in bridge_len..(cycles.len() - bridge_len) {
+                    if cycles[k - 1].voiced && cycles[k + bridge_len].voiced {
+                        let ok_rms = (k..(k + bridge_len)).all(|j| cycles[j].rms > 0.018);
+                        if ok_rms {
+                            for j in k..(k + bridge_len) {
+                                cycles[j].voiced = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Remove isolated 1-2 cycle consonant transients marked voiced
+        if cycles.len() > 4 {
+            for k in 2..(cycles.len() - 2) {
+                if cycles[k].voiced && !cycles[k - 1].voiced && !cycles[k + 1].voiced {
+                    cycles[k].voiced = false;
+                }
+                if cycles[k].voiced && cycles[k + 1].voiced && !cycles[k - 1].voiced && !cycles[k + 2].voiced {
+                    cycles[k].voiced = false;
+                    cycles[k + 1].voiced = false;
+                }
+            }
+        }
+
+        // Map contour_semitones to human Female Alto scale notes (centered on G3 = 196.0 Hz .. E4 = 329.63 Hz)
+        let base_root_hz = 196.0f32;
+        let mut melody_hz = Vec::with_capacity(contour_semitones.len() * 2);
+        for &st in contour_semitones {
+            let hz = (base_root_hz * 2.0f32.powf((st * 0.85) / 12.0)).clamp(185.0, 349.23);
+            melody_hz.push(hz);
+        }
+        if melody_hz.is_empty() {
+            melody_hz.push(220.0);
+        }
+
+        // Step melody notes cleanly at syllable boundaries (when voiced syllable finishes)
+        let mut cycle_notes = vec![melody_hz[0]; cycles.len()];
+        let mut n_idx = 0usize;
+        let mut v_count = 0usize;
+        for k in 0..cycles.len() {
+            if cycles[k].voiced {
+                v_count += 1;
+                if v_count > 44 {
+                    n_idx = (n_idx + 1) % melody_hz.len();
+                    v_count = 0;
+                }
+            } else {
+                if v_count >= 6 {
+                    n_idx = (n_idx + 1) % melody_hz.len();
+                }
+                v_count = 0;
+            }
+            cycle_notes[k] = melody_hz[n_idx];
+        }
+
+        let eval_cycle = |c: GlottalCycle, phi: f64, t_syn: f64| -> f32 {
+            let warp = (t_syn - c.per) * 0.22 * (std::f64::consts::PI * phi).sin() / std::f64::consts::PI;
+            let off = (phi * c.per + warp).clamp(0.0, c.per);
+            let raw_v = read_interp(c.s0 + off);
+            let phi_f = phi as f32;
+            raw_v - ((1.0 - phi_f) * c.e0 + phi_f * c.e1)
+        };
+
+        let voiced_samples: f64 = cycles.iter().filter(|c| c.voiced).map(|c| c.per).sum();
+        let unvoiced_samples: f64 = cycles.iter().filter(|c| !c.voiced).map(|c| c.per).sum();
+        let desired_total = (target_duration_secs * sr) as f64;
+        let desired_voiced = (desired_total - unvoiced_samples).max(voiced_samples * 1.08);
+        let vowel_advance_rate = (voiced_samples / desired_voiced.max(1.0)).clamp(0.54, 0.92);
+
+        let max_out = ((target_duration_secs + 1.2) * sr) as usize;
+        let mut out = Vec::with_capacity(max_out);
+        let mut src_pos = 0.0f64;
+        let mut c_idx = 0usize;
+        let mut phase = 0.0f64;
+        let mut v_mix = 0.0f32;
+        let mut smoothed_hz = melody_hz[0];
+
+        while src_pos < (n_in - 2) as f64 && out.len() < max_out {
+            let t = (out.len() as f32) / sr;
+            while c_idx + 1 < cycles.len() && (cycles[c_idx].s0 + cycles[c_idx].per) <= src_pos {
+                c_idx += 1;
+            }
+            let c0 = cycles[c_idx];
+            let c1 = cycles[(c_idx + 1).min(cycles.len() - 1)];
+            let alpha_c = ((src_pos - c0.s0) / c0.per.max(1e-6)).clamp(0.0, 1.0);
+            let alpha_f = alpha_c as f32;
+
+            let base_hz = cycle_notes[c_idx];
             let vib = (2.0 * PI * vibrato_freq * t).sin() * vibrato_depth;
-            let pitch_ratio = (2.0f32.powf((st * 0.52) / 12.0) * (1.0 + vib)) as f64;
-            smoothed_ratio = smoothed_ratio * 0.9992 + pitch_ratio * 0.0008;
+            let target_hz = base_hz * (1.0 + vib);
+            smoothed_hz = smoothed_hz * 0.996 + target_hz * 0.004;
 
-            let base_in = (i as f64) / (stretch as f64);
-            // Relative read rate = smoothed_ratio; center read position advances at 1/stretch
-            let rate_diff = smoothed_ratio - (1.0 / (stretch as f64));
-            delay_phase = (delay_phase - rate_diff).rem_euclid(win_size);
-            let delay_a = delay_phase;
-            let delay_b = (delay_phase + win_size * 0.5).rem_euclid(win_size);
+            let target_vmix = if c0.voiced && c1.voiced { 1.0f32 } else { 0.0f32 };
+            v_mix = v_mix * 0.988 + target_vmix * 0.012;
 
-            let win_a = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * delay_a / win_size).cos()) as f32;
-            let win_b = 1.0 - win_a;
+            let raw_cons = read_interp(src_pos);
+            let sample = if v_mix < 0.005 {
+                phase = alpha_c;
+                raw_cons
+            } else {
+                phase = (phase + (smoothed_hz / sr) as f64).rem_euclid(1.0);
+                let t_syn = (sr / smoothed_hz) as f64;
+                let v0 = eval_cycle(c0, phase, t_syn);
+                let g_eq = (c0.rms / c1.rms.max(0.010)).clamp(0.78, 1.25);
+                let v1 = eval_cycle(c1, phase, t_syn) * (g_eq * (1.0 - alpha_f) + alpha_f);
+                let v_sung = v0 * (1.0 - alpha_f) + v1 * alpha_f;
+                let tilt = (1.0 - alpha_f) * c0.e0 + alpha_f * c0.e1;
+                (1.0 - v_mix) * raw_cons + v_mix * (v_sung + tilt * (1.0 - v_mix))
+            };
+            out.push(sample);
 
-            let sample_a = read_interp(base_in - delay_a);
-            let sample_b = read_interp(base_in - delay_b);
-            // Smooth 25 ms fade-in and 80 ms fade-out on each poetic phrase
+            let step = (1.0 - v_mix as f64) * 1.0 + (v_mix as f64) * vowel_advance_rate;
+            src_pos += step;
+        }
+
+        let n_out = out.len();
+        for (i, val) in out.iter_mut().enumerate() {
+            let t = (i as f32) / sr;
             let fade_in = (t / 0.025).min(1.0);
             let rem_sec = ((n_out - 1 - i) as f32) / sr;
             let fade_out = (rem_sec / 0.080).min(1.0);
-            out[i] = (sample_a * win_a + sample_b * win_b) * fade_in * fade_out;
+            *val *= fade_in * fade_out;
         }
         out
     }

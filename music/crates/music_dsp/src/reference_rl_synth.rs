@@ -143,6 +143,63 @@ impl ReferenceRlSynthesizer {
             || (lower.contains("one love! one heart! let us get together") && lower.len() < 420)
     }
 
+    /// Builds a 3-section MiniMax Music 3 Structured Caption (`Global Metadata`, `Vocal Details`, `Arrangement`)
+    /// following the official `MiniMax-AI/MiniMax-Music3` `music-caption-rewriter` specification.
+    pub fn build_minimax_music3_structured_caption(prompt: &str, bpm: u32, key: &str) -> String {
+        let lower = prompt.to_ascii_lowercase();
+        let is_minor = lower.contains("minor") || lower.contains("dorian") || key.to_ascii_lowercase().contains("minor");
+        let scale = if is_minor { "natural minor" } else { "major" };
+        format!(
+            "Global Metadata: Genre: modern indie folk, chamber pop. BPM: {bpm}. Key: {key} ({scale}). \
+             Emotional progression: intimate and pastoral opening, building through hopeful anticipation into a soaring, \
+             wide-screen orchestral chorus, resolving into a tender stripped-back acoustic outro. Production profile: warm studio analog.\n\
+             Vocal Details: Female alto lead vocal, warm and breathy with close-microphone intimacy in the verses, \
+             expanding into stereo-doubled soaring lead vocals with stacked third and fifth backing harmonies in the choruses.\n\
+             Arrangement: Intricate fingerpicked steel-string and 12-string acoustic guitars, grand piano, swirling stereo chamber violins, \
+             and mournful solo cello; upright acoustic bass and organic seed shaker in the intro and verses, building with rising \
+             floor tom swells, studio kick, crisp snare/rimshot, and shimmering bronze tambourine in the choruses; \
+             wordless orchestral violin, grand piano, and cello climax before a solo cello and fingerpicked guitar outro.",
+            bpm = bpm,
+            key = key,
+            scale = scale
+        )
+    }
+
+    /// Extracts raw poetic lines directly from `prompt` when a user pastes a multi-line poem or lyric stanza
+    /// as their prompt (like the 13-line Grasslands/Flamingos poem or any custom poem).
+    pub fn extract_raw_poem_lines_from_prompt(prompt: &str) -> Option<Vec<String>> {
+        let mut lines = Vec::new();
+        for raw_line in prompt.lines() {
+            let trimmed = raw_line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('[') || trimmed.starts_with('(') {
+                continue;
+            }
+            let lower = trimmed.to_ascii_lowercase();
+            // Skip pure technical instruction lines if mixed with a poem
+            if lower.starts_with("genre:")
+                || lower.starts_with("global metadata:")
+                || lower.starts_with("vocal details:")
+                || lower.starts_with("arrangement:")
+            {
+                continue;
+            }
+            let cleaned = trimmed
+                .strip_prefix("create the song")
+                .or_else(|| trimmed.strip_prefix("create the sonng"))
+                .or_else(|| trimmed.strip_prefix("create a song"))
+                .unwrap_or(trimmed)
+                .trim();
+            if cleaned.split_whitespace().count() >= 3 {
+                lines.push(cleaned.to_string());
+            }
+        }
+        if lines.len() >= 4 {
+            Some(lines)
+        } else {
+            None
+        }
+    }
+
     /// Generates a brand-new song title, genre label, and 7-movement section-by-section structured lyrics
     /// directly tailored to the user's poem or production prompt and the resolved key/BPM.
     pub fn compose_prompt_conditioned_lyrics_and_title(
@@ -156,9 +213,28 @@ impl ReferenceRlSynthesizer {
             && !lower.contains("grasslands")
             && !lower.contains("blackening skies");
 
+        let custom_poem_lines = if !lower.contains("blackening skies")
+            && !lower.contains("traveling flamingos")
+            && !is_1988_folk_soul
+        {
+            Self::extract_raw_poem_lines_from_prompt(prompt)
+        } else {
+            None
+        };
+
         let explicit_title = Self::extract_prompt_title(prompt);
         let title = if let Some(t) = explicit_title {
             format!("{} ({} BPM • {})", t, bpm, key)
+        } else if let Some(ref p_lines) = custom_poem_lines {
+            let first_words: String = p_lines[0]
+                .split_whitespace()
+                .take(5)
+                .collect::<Vec<_>>()
+                .join(" ")
+                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ' ')
+                .to_string();
+            let base_t = if first_words.is_empty() { "Chamber Pop Poem" } else { &first_words };
+            format!("{} — Chamber Pop Poem ({} BPM • {})", base_t, bpm, key)
         } else if is_1988_folk_soul {
             format!("One Love Shining — 1988 Acoustic Folk & Soul ({} BPM • {})", bpm, key)
         } else {
@@ -171,7 +247,49 @@ impl ReferenceRlSynthesizer {
             "Modern Indie Folk & Chamber Pop Poem Arrangement".to_string()
         };
 
-        let lyrics = if is_1988_folk_soul {
+        let lyrics = if let Some(p_lines) = custom_poem_lines {
+            let get_ln = |idx: usize| -> &str { p_lines[idx % p_lines.len()].as_str() };
+            format!(
+                "[Intro]\n\
+                 (Lush modern indie folk and chamber pop arrangement at {bpm} BPM in {key} featuring fingerpicked acoustic guitar, grand piano, swirling violins and solo cello)\n\n\
+                 [Verse 1]\n\
+                 {l0}\n\
+                 {l1}\n\
+                 {l2}\n\n\
+                 [Pre-Chorus]\n\
+                 {l3}\n\
+                 {l4}\n\
+                 {l5}\n\n\
+                 [Chorus]\n\
+                 {l6}\n\
+                 {l7}\n\
+                 {l8}\n\
+                 {l9}\n\n\
+                 [Verse 2]\n\
+                 {l10}\n\
+                 {l11}\n\n\
+                 [Instrumental]\n\
+                 (Wordless orchestral climax with expressive violins, grand piano, solo cello, and fluid basslines)\n\n\
+                 [Outro]\n\
+                 {l11}\n\
+                 {l12}",
+                bpm = bpm,
+                key = key,
+                l0 = get_ln(0),
+                l1 = get_ln(1),
+                l2 = get_ln(2),
+                l3 = get_ln(3),
+                l4 = get_ln(4),
+                l5 = get_ln(5),
+                l6 = get_ln(6),
+                l7 = get_ln(7),
+                l8 = get_ln(8),
+                l9 = get_ln(9),
+                l10 = get_ln(10),
+                l11 = get_ln(11),
+                l12 = get_ln(12),
+            )
+        } else if is_1988_folk_soul {
             format!(
                 "[Opening Instrumental]\n\
                  (Intricate fingerpicked steel-string acoustic guitar riff with bright hammer-ons, swirling cello & Wurlitzer, soft fretless bass, and light organic shaker & distant frame drum at {bpm} BPM in {key})\n\n\
@@ -437,10 +555,10 @@ impl ReferenceRlSynthesizer {
                 let (voice_idx, vel, is_hammer_on) = pick_pattern[pat_pos];
 
                 let tones = [
-                    chord.root_hz * 2.0,
-                    chord.third_hz * 2.0,
-                    chord.fifth_hz * 2.0,
-                    chord.seventh_hz * 2.0,
+                    chord.root_hz,
+                    chord.third_hz,
+                    chord.fifth_hz,
+                    chord.seventh_hz,
                 ];
                 let base_freq = tones[voice_idx % 4];
                 let freq = if is_hammer_on { base_freq * 1.122_462 } else { base_freq };
@@ -610,14 +728,12 @@ impl ReferenceRlSynthesizer {
             let (mov, _) = Self::movement_at_time(t, movements);
             let total_beats = t / beat_sec;
             let in_climax = mov == SongMovementKind::OrchestralClimax;
-            let in_intro = mov == SongMovementKind::OpeningInstrumental && total_beats < 4.0;
-            let in_chorus_fill = mov == SongMovementKind::ChamberPopChorus && (total_beats % 16.0) >= 14.0;
 
             let cycle_num = (total_beats / 16.0).floor() as usize;
             let beat_in_16 = total_beats % 16.0;
 
             let mut active_lick: Option<(usize, (f32, f32, usize, f32, bool))> = None;
-            if in_climax || in_intro || in_chorus_fill {
+            if in_climax {
                 for (l_idx, &lick) in solo_licks.iter().enumerate() {
                     if beat_in_16 >= lick.0 && beat_in_16 < (lick.0 + lick.1) {
                         active_lick = Some((l_idx, lick));

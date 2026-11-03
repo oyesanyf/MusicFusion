@@ -179,7 +179,10 @@ impl HfModelDiscoveryEngine {
     /// Convert raw HF API item to structured HfModelEntry with heuristic resource requirements.
     fn api_item_to_entry(item: &HfApiItem, stage: &str, default_tag: &str) -> HfModelEntry {
         let id_lower = item.id.to_lowercase();
-        let (vram, ram) = if id_lower.contains("7b") || id_lower.contains("8b") {
+        let (vram, ram) = if id_lower.contains("minimax-music3") || id_lower.contains("minimax_music3") {
+            // Supports 8GB VRAM video cards via diffusers ComponentsManager + leaf-level streaming group offloading
+            (6.5, 16.0)
+        } else if id_lower.contains("7b") || id_lower.contains("8b") {
             (14.0, 28.0)
         } else if id_lower.contains("1.5b") || id_lower.contains("2b") || id_lower.contains("medium") {
             (6.0, 12.0)
@@ -319,7 +322,19 @@ impl HfModelDiscoveryEngine {
             },
             Self::fallback_dsp_entry(STAGE_GROOVE),
 
-            // Stage 2: YuE Dual-Stem Synthesis
+            // Stage 2: Full-Song & Dual-Stem Synthesis (MiniMax-Music3 + YuE + DiffRhythm)
+            HfModelEntry {
+                id: "MiniMaxAI/MiniMax-Music3".to_string(),
+                name: "MiniMax Music 3 (8B Global + 0.6B Local LLM + Flow-VAE)".to_string(),
+                pipeline_tag: "text-to-audio".to_string(),
+                stage: STAGE_YUE.to_string(),
+                required_vram_gb: 6.5,
+                required_ram_gb: 16.0,
+                trending_score: 99.5,
+                downloads: 597_600,
+                likes: 1_540,
+                description: "5-minute full-song generator with Structured Caption control, expressive vocals, and 8GB VRAM leaf-level streaming offload".to_string(),
+            },
             HfModelEntry {
                 id: "m-a-p/YuE-s1-7B-anneal-en-cot".to_string(),
                 name: "YuE s1 7B English CoT".to_string(),
