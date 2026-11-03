@@ -10,6 +10,17 @@
       .replace(/'/g, '&#39;');
   }
 
+  // Fast 400ms timeout probe helper (prevents UI freezes when local daemons restart)
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 400) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      return await fetch(url, Object.assign({}, options, { signal: ctrl.signal }));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   // State
   let currentModel = 'AutoFusion';
   let currentSearchMode = 'Hybrid';
@@ -79,12 +90,77 @@
     themeSelector.value = savedTheme;
   }
 
-  // 2. MODEL SELECTOR
+  // 2. MODEL SELECTOR & DYNAMIC MISSING-MODEL GUIDANCE
+  async function verifySelectedModelAvailability(modelFamily) {
+    const existingBanner = document.getElementById('missing-model-guidance-card');
+    if (existingBanner) existingBanner.remove();
+    try {
+      const res = await fetchWithTimeout('/api/models', {}, 400);
+      if (!res || !res.ok) return;
+      const info = await res.json();
+      const installed = Array.isArray(info.installed_models) ? info.installed_models : [];
+      if (!installed.length) return;
+      const expectedTagMap = {
+        Gemma4_26b: 'gemma4:26b',
+        Glm4Agentic: 'glm4:9b',
+        Qwen25Code: (info.hardware_recommendation && info.hardware_recommendation.recommended_qwen_tier) || 'qwen2.5:7b',
+        GemmaProse: (info.hardware_recommendation && info.hardware_recommendation.recommended_gemma_tier) || 'gemma2:9b'
+      };
+      const targetTag = expectedTagMap[modelFamily];
+      if (!targetTag) return;
+      const hasTag = installed.some(m => String(m).toLowerCase() === targetTag.toLowerCase() || String(m).toLowerCase() === (targetTag + ':latest').toLowerCase());
+      if (modelFamily === 'Gemma4_26b' && info.gemma4_26b_memory_eligible === false) {
+        const card = document.createElement('div');
+        card.id = 'missing-model-guidance-card';
+        card.style.cssText = 'margin:8px 16px;padding:10px 14px;border-radius:10px;border:1px solid rgba(245,158,11,0.45);background:rgba(245,158,11,0.1);font-size:12.5px;line-height:1.5;';
+        const freeRam = info.hardware_recommendation ? Number(info.hardware_recommendation.free_ram_gb || 0).toFixed(1) : '?';
+        card.innerHTML = `<strong>Memory Gate Active:</strong> <code>gemma4:26b</code> requires &ge;18 GB free RAM or &ge;16 GB free VRAM (currently ${escapeHtml(freeRam)} GB free RAM). Safely routing to a memory-fitted installed model to prevent OOM.`;
+        if (chatStream && chatStream.parentElement) chatStream.parentElement.insertBefore(card, chatStream);
+        return;
+      }
+      if (!hasTag) {
+        fetch('/api/models/pull', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: targetTag })
+        }).catch(() => {});
+        const card = document.createElement('div');
+        card.id = 'missing-model-guidance-card';
+        card.style.cssText = 'margin:8px 16px;padding:12px 14px;border-radius:10px;border:1px solid rgba(99,102,241,0.45);background:rgba(99,102,241,0.10);font-size:12.5px;line-height:1.55;';
+        const pillsHtml = installed
+          .filter(m => !/embed|moondream|llava/i.test(m))
+          .slice(0, 6)
+          .map(m => `<button type="button" class="missing-model-pill" data-tag="${escapeHtml(m)}" style="margin:3px 4px 0 0;padding:3px 9px;border-radius:999px;border:1px solid rgba(255,255,255,0.22);background:rgba(255,255,255,0.08);color:inherit;cursor:pointer;font-size:11.5px;">${escapeHtml(m)}</button>`)
+          .join('');
+        card.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span><strong>Installing <code>${escapeHtml(targetTag)}</code> in background...</strong> Terminal command: <code>ollama pull ${escapeHtml(targetTag)}</code></span>
+            <button type="button" id="btn-retry-model-check" style="padding:3px 10px;border-radius:6px;border:1px solid rgba(99,102,241,0.6);background:rgba(99,102,241,0.22);color:inherit;cursor:pointer;font-size:11.5px;">Retry Check</button>
+          </div>
+          <div style="margin-top:6px;opacity:0.9;">Already installed models (click to switch immediately): ${pillsHtml}</div>
+        `;
+        if (chatStream && chatStream.parentElement) chatStream.parentElement.insertBefore(card, chatStream);
+        card.querySelectorAll('.missing-model-pill').forEach(btn => {
+          btn.addEventListener('click', () => {
+            currentModel = btn.dataset.tag;
+            card.remove();
+          });
+        });
+        const retryBtn = card.querySelector('#btn-retry-model-check');
+        if (retryBtn) retryBtn.addEventListener('click', () => verifySelectedModelAvailability(modelFamily));
+      }
+    } catch (_) {}
+  }
+
   modelPills.forEach(pill => {
     pill.addEventListener('click', () => {
       modelPills.forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
       currentModel = pill.dataset.model;
+      if (typeof saveUiSettingsPatch === 'function') {
+        saveUiSettingsPatch({ default_model_family: currentModel }).catch(() => {});
+      }
+      verifySelectedModelAvailability(currentModel);
     });
   });
 
@@ -214,8 +290,8 @@
     submitPrompt();
   });
 
-  // PROBE HARDWARE ON LOAD
-  fetch('/api/health')
+  // PROBE HARDWARE ON LOAD (400ms fast-timeout law)
+  fetchWithTimeout('/api/health', {}, 400)
     .then(r => r.json())
     .then(data => {
       if (data.hardware && hwStatus) {
@@ -276,14 +352,14 @@
     startThinkingIndicator(bodyEl);
 
     try {
-      let resp = null;
       let lastErr = null;
-      for (let attempt = 0; attempt < 6; attempt++) {
+      let streamCompleted = false;
+      for (let attempt = 0; attempt < 10 && !streamCompleted; attempt++) {
         if (activeAbortController && activeAbortController.signal.aborted) {
           throw new DOMException('Generation stopped by user', 'AbortError');
         }
         try {
-          resp = await fetch('/api/chat', {
+          const resp = await fetch('/api/chat', {
             method: 'POST',
             signal: activeAbortController ? activeAbortController.signal : undefined,
             headers: {
@@ -301,47 +377,55 @@
               history: turnHistorySnapshot
             })
           });
-          if (resp.ok) break;
-          lastErr = new Error(`Server returned status ${resp.status}`);
+          if (!resp.ok) {
+            lastErr = new Error(`Server returned status ${resp.status}`);
+            await new Promise(r => setTimeout(r, 1200));
+            continue;
+          }
+
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder('utf-8');
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep partial trailing line
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('data:')) {
+                const jsonStr = trimmed.substring(5).trim();
+                if (jsonStr) {
+                  try {
+                    const event = JSON.parse(jsonStr);
+                    handleTelemetryEvent(event, bodyEl, citationsEl, headerEl);
+                  } catch (err) {
+                    console.error('Failed to parse SSE event:', jsonStr, err);
+                  }
+                }
+              }
+            }
+          }
+          streamCompleted = true;
         } catch (fetchErr) {
           if (fetchErr && (fetchErr.name === 'AbortError' || (activeAbortController && activeAbortController.signal.aborted))) {
             throw fetchErr;
           }
           lastErr = fetchErr;
-        }
-        await new Promise(r => setTimeout(r, 1500));
-      }
-
-      if (!resp || !resp.ok) {
-        throw lastErr || new Error('Unable to reach local QuorumRAG daemon');
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep partial trailing line
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('data:')) {
-            const jsonStr = trimmed.substring(5).trim();
-            if (jsonStr) {
-              try {
-                const event = JSON.parse(jsonStr);
-                handleTelemetryEvent(event, bodyEl, citationsEl, headerEl);
-              } catch (err) {
-                console.error('Failed to parse SSE event:', jsonStr, err);
-              }
-            }
+          // If tokens have already streamed, keep partial output; if stream dropped before first token, auto-retry seamlessly
+          if (bodyEl._rawMarkdown && bodyEl._rawMarkdown.trim().length > 0) {
+            break;
           }
+          await new Promise(r => setTimeout(r, attempt < 3 ? 800 : 1500));
         }
+      }
+
+      if (!streamCompleted && (!bodyEl._rawMarkdown || !bodyEl._rawMarkdown.trim())) {
+        throw lastErr || new Error('Local QuorumRAG daemon is reconnecting');
       }
 
     } catch (err) {
@@ -353,7 +437,16 @@
           bodyEl.innerHTML = `<div style="color:var(--text-muted); font-style:italic;">⏹ Generation stopped by user.</div>`;
         }
       } else {
-        bodyEl.innerHTML += `<div style="color:var(--danger);">Error: ${escapeHtml(err.message)}</div>`;
+        bodyEl.innerHTML = `<div style="padding:10px 12px;border-radius:8px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <span>Connection to local QuorumRAG daemon was interrupted (${escapeHtml(err.message || 'network retry exhausted')}).</span>
+          <button type="button" class="btn-inline-retry" style="padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,255,255,0.1);color:inherit;cursor:pointer;">🔄 Retry Now</button>
+        </div>`;
+        const retryBtn = bodyEl.querySelector('.btn-inline-retry');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => {
+            streamAssistantTurn(text, turnHistorySnapshot, bodyEl, citationsEl, headerEl, actionsEl, true);
+          });
+        }
       }
     } finally {
       stopThinkingIndicator(bodyEl);
@@ -366,11 +459,19 @@
             { role: 'user', content: text },
             { role: 'assistant', content: bodyEl._rawMarkdown }
           );
-        } else if (conversationHistoryTurns.length >= 2) {
-          conversationHistoryTurns[conversationHistoryTurns.length - 1] = {
-            role: 'assistant',
-            content: bodyEl._rawMarkdown
-          };
+        } else {
+          // Regenerate: replace this turn's answer if it is already recorded, otherwise record it now
+          // (e.g. the first attempt failed with "Failed to fetch"), so "continue" always has context.
+          const n = conversationHistoryTurns.length;
+          const prevUser = n >= 2 ? conversationHistoryTurns[n - 2] : null;
+          if (prevUser && prevUser.role === 'user' && prevUser.content === text) {
+            conversationHistoryTurns[n - 1] = { role: 'assistant', content: bodyEl._rawMarkdown };
+          } else {
+            conversationHistoryTurns.push(
+              { role: 'user', content: text },
+              { role: 'assistant', content: bodyEl._rawMarkdown }
+            );
+          }
         }
       } else {
         const cursor = bodyEl.querySelector('.typing-cursor');
@@ -632,6 +733,16 @@
     } else if (type === 'TokenDelta' || type === 'token_delta' || type === 'token') {
       const delta = data.delta || data.content || '';
       appendToken(bodyEl, delta);
+    } else if (type === 'FinalAnswer' || type === 'final_answer') {
+      // Server-side guards (repeat removal, meta stripping, grounding) run after streaming: show the final text
+      const finalText = data.content || '';
+      if (finalText.trim()) {
+        bodyEl._rawMarkdown = finalText;
+        stopThinkingIndicator(bodyEl);
+        bodyEl.style.whiteSpace = 'normal';
+        bodyEl.innerHTML = renderMarkdownHtml(bodyEl._rawMarkdown);
+        scrollToBottom();
+      }
     } else if (type === 'CitationEmitted' || type === 'citation') {
       const cit = data.citation || event.citation;
       if (cit) {
@@ -1997,9 +2108,10 @@
             </div>
             <select class="pill-select" onchange="window._setModelFromSettings(this.value)">
               <option value="AutoFusion" ${ui.default_model_family === 'AutoFusion' ? 'selected' : ''}>✨ Auto-Fusion</option>
+              <option value="Gemma4_26b" ${ui.default_model_family === 'Gemma4_26b' ? 'selected' : ''}>💎 Gemma 4 26B</option>
               <option value="Glm4Agentic" ${ui.default_model_family === 'Glm4Agentic' ? 'selected' : ''}>🧠 GLM-4-9B</option>
               <option value="Qwen25Code" ${ui.default_model_family === 'Qwen25Code' ? 'selected' : ''}>💻 Qwen 2.5</option>
-              <option value="GemmaProse" ${ui.default_model_family === 'GemmaProse' ? 'selected' : ''}>📜 Gemma 3</option>
+              <option value="GemmaProse" ${ui.default_model_family === 'GemmaProse' ? 'selected' : ''}>📜 Gemma</option>
             </select>
           </div>
           <div class="settings-row">
@@ -3823,16 +3935,17 @@
   };
 
   window._setModelFromSettings = async function(model) {
-    selectedModel = model;
+    currentModel = model;
     document.querySelectorAll('.model-pill').forEach(b => {
       b.classList.toggle('active', b.dataset.model === model);
     });
     await saveUiSettingsPatch({ default_model_family: model });
+    verifySelectedModelAvailability(model);
     showSettingsToast('Default model set to ' + model);
   };
 
   window._setSearchModeFromSettings = async function(mode) {
-    selectedSearchMode = mode;
+    currentSearchMode = mode;
     document.querySelectorAll('.search-pill').forEach(b => {
       b.classList.toggle('active', b.dataset.mode === mode);
     });

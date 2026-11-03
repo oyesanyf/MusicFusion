@@ -93,6 +93,32 @@ impl AgenticStateGraphRunner {
             || prompt_lower.contains("tell me more")
             || prompt_lower.contains("go on")
             || prompt_lower.contains("what else");
+        // Server-side last-topic memory: if a continuation ("continue", "tell me more") arrives without any client
+        // history (e.g. the previous turn was a regenerate after a network error), continue the last real topic
+        // instead of searching the index for the literal word "continue".
+        let mut history = history;
+        if is_continuation {
+            let has_user_turn = history.iter().any(|t| t.role.eq_ignore_ascii_case("user"));
+            if !has_user_turn {
+                if let Ok(guard) = last_turn_memory().lock() {
+                    if !guard.0.trim().is_empty() {
+                        history.push(ChatTurnMessage {
+                            role: "user".to_string(),
+                            content: guard.0.clone(),
+                        });
+                        if !guard.1.trim().is_empty() {
+                            history.push(ChatTurnMessage {
+                                role: "assistant".to_string(),
+                                content: guard.1.clone(),
+                            });
+                        }
+                        tracing::info!(topic = %guard.0, "Continuation without client history: restored last topic from server memory");
+                    }
+                }
+            }
+        } else if let Ok(mut guard) = last_turn_memory().lock() {
+            *guard = (corrected_prompt.clone(), String::new());
+        }
         let mut state_name = AgenticStateName::ClassifyIntent;
         let mut graph_state =
             AgenticGraphState::new(&corrected_prompt, requested_family, self.max_hops)
@@ -409,6 +435,24 @@ impl AgenticStateGraphRunner {
                         );
                     }
 
+                    if let Ok(mut guard) = last_turn_memory().lock() {
+                        let answer: String = graph_state
+                            .synthesized_response
+                            .as_deref()
+                            .unwrap_or("")
+                            .chars()
+                            .take(4000)
+                            .collect();
+                        if is_continuation {
+                            if !guard.1.is_empty() {
+                                guard.1.push_str("\n\n");
+                            }
+                            guard.1.push_str(&answer);
+                        } else {
+                            guard.1 = answer;
+                        }
+                    }
+
                     // Insert into QueryCache (skip caching continuation turns so "tell me more" always generates fresh follow-ups)
                     if !is_continuation {
                         let epoch = engine.local_storage.index_epoch();
@@ -464,4 +508,11 @@ impl AgenticStateGraphRunner {
             }
         }
     }
+}
+
+/// Process-wide memory of the last non-continuation user prompt and its synthesized answer, used only as a fallback
+/// when a continuation request arrives without client-side conversation history.
+fn last_turn_memory() -> &'static std::sync::Mutex<(String, String)> {
+    static MEM: std::sync::OnceLock<std::sync::Mutex<(String, String)>> = std::sync::OnceLock::new();
+    MEM.get_or_init(|| std::sync::Mutex::new((String::new(), String::new())))
 }

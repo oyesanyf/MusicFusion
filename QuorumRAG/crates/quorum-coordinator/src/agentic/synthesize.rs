@@ -18,6 +18,14 @@ impl SynthesizeWithCitationsNode {
             &state.selected_model_tag,
             telemetry_tx,
         );
+        if let Some(tx) = telemetry_tx {
+            // Guards (repeat removal, meta stripping, grounding) run after token streaming; push the final text so
+            // the UI shows exactly what the server returns.
+            let _ = DeterministicOfflineSynthesisEngine::send_telemetry(
+                tx,
+                AgenticTelemetryEvent::FinalAnswer { content: resp.clone() },
+            );
+        }
         state.synthesized_response = Some(resp);
         state.citations = citations;
     }

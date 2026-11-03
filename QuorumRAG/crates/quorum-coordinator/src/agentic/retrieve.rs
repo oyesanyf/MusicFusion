@@ -14,6 +14,8 @@ pub struct ChunkScoreCriteria {
     pub intent_bonus: i32,
     pub total_score: i32,
     pub is_relevant: bool,
+    /// True when every user-capitalised proper-noun anchor (or all but one when 3+) appears in the chunk.
+    pub proper_ok: bool,
 }
 
 pub const GENERIC_ATTRIBUTE_TERMS: &[&str] = &[
@@ -31,6 +33,9 @@ pub const GENERIC_ATTRIBUTE_TERMS: &[&str] = &[
     "sections", "page", "pages", "total", "day", "days", "heart", "soul",
     "life", "time", "world", "reading", "book", "books", "universal", "system", "systems",
     "model", "models", "data", "report", "reports", "policy", "policies",
+    "pay", "pays", "paid", "paying", "cost", "costs", "price", "prices", "fee", "fees",
+    "start", "started", "starts", "begin", "began", "end", "ended", "ends", "date", "dates",
+    "important", "importance", "result", "results", "respond", "responds", "response",
 ];
 
 const STOPWORDS: &[&str] = &[
@@ -48,6 +53,11 @@ const STOPWORDS: &[&str] = &[
     "like", "likes", "make", "makes", "made", "take", "takes", "took", "come", "comes",
     "came", "look", "looks", "looked", "summarize", "detail", "details", "info", "information",
     "anything", "everything", "something", "nothing", "someone", "anyone", "all", "any", "some",
+    "much", "many", "often", "long", "kind", "type", "sort", "way", "get", "gets", "got", "use",
+    "uses", "used", "which", "whose", "whom", "its", "our", "your", "my", "me", "one", "ones",
+    "not", "than", "then", "very", "just", "only", "each", "every", "both", "either", "other",
+    "others", "own", "same", "such", "been", "being", "off", "out", "over", "under", "again",
+    "here", "now", "still", "yet", "ever", "even",
 ];
 
 pub struct RetrieveMeshNode;
@@ -184,6 +194,40 @@ impl RetrieveMeshNode {
                 acc
             });
 
+        // Proper-noun anchors: words the user capitalised mid-sentence ("how much rent does Casey Ringgold pay").
+        // When present, a chunk must contain them, so generic words ("rent", "pay") can never outvote the named subject.
+        let proper_terms: Vec<String> = state
+            .original_prompt
+            .split_whitespace()
+            .enumerate()
+            .filter_map(|(i, raw)| {
+                if i == 0 {
+                    return None;
+                }
+                let w = raw
+                    .trim_matches(|c: char| !c.is_alphanumeric() && c != '\'')
+                    .trim_end_matches("'s")
+                    .trim_end_matches("\u{2019}s")
+                    .trim_matches(|c: char| !c.is_alphanumeric());
+                let first_upper = w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                let lw = w.to_ascii_lowercase();
+                if first_upper
+                    && lw.len() >= 3
+                    && !STOPWORDS.contains(&lw.as_str())
+                    && !GENERIC_ATTRIBUTE_TERMS.contains(&lw.as_str())
+                {
+                    Some(lw)
+                } else {
+                    None
+                }
+            })
+            .fold(Vec::new(), |mut acc, w| {
+                if !acc.contains(&w) {
+                    acc.push(w);
+                }
+                acc
+            });
+
         if (daemon_active || !state.extracted_entities.is_empty()) && !prelim_entities.is_empty() {
             let mut seen_ids: std::collections::HashSet<String> =
                 chunks.iter().map(|c| c.chunk.chunk_id.clone()).collect();
@@ -208,6 +252,19 @@ impl RetrieveMeshNode {
                     .search_text(&prompt_kw_query, access_tier, 64)
                     .await;
                 for hit in prompt_hits {
+                    if seen_ids.insert(hit.chunk.chunk_id.clone()) {
+                        chunks.push(hit);
+                    }
+                }
+            }
+
+            // Answer-type targeted search: "where does X live" -> X + address/street/phone, "how much ... X" -> X + rent/amount,
+            // so the excerpt holding the requested kind of fact is in the candidate pool, not just excerpts naming X.
+            let cue_terms = crate::offline_engine::DeterministicOfflineSynthesisEngine::answer_type_cue_terms(&state.original_prompt);
+            if !cue_terms.is_empty() && !prompt_only_entities.is_empty() {
+                let cue_query = format!("{} {}", prompt_only_entities.join(" "), cue_terms.join(" "));
+                let cue_hits = engine.local_storage.search_text(&cue_query, access_tier, 48).await;
+                for hit in cue_hits {
                     if seen_ids.insert(hit.chunk.chunk_id.clone()) {
                         chunks.push(hit);
                     }
@@ -430,6 +487,11 @@ impl RetrieveMeshNode {
                     weighted_hits += content_matched_terms * 8;
                 }
 
+                let proper_hits = proper_terms
+                    .iter()
+                    .filter(|t| matches_whole_word(t.as_str()))
+                    .count();
+
                 let mut intent_bonus = (prompt_entity_hits as i32) * 320;
 
                 // Boost chunks whose filename directly matches query terms (e.g. "African Churches and Gang Violence.docx")
@@ -572,10 +634,21 @@ impl RetrieveMeshNode {
                     1
                 };
 
-                let is_relevant = (content_matched_terms >= required_query_hits
+                let required_proper_hits = if proper_terms.len() > 2 {
+                    proper_terms.len() - 1
+                } else {
+                    proper_terms.len()
+                };
+                let proper_ok = proper_hits >= required_proper_hits;
+                let is_relevant = ((content_matched_terms >= required_query_hits
                     && entity_hits >= required_entity_hits)
+                    || (proper_ok && !proper_terms.is_empty() && content_matched_terms >= proper_terms.len()))
                     || matches_target_doc;
 
+                intent_bonus += crate::offline_engine::DeterministicOfflineSynthesisEngine::answer_type_cue_score(
+                    &state.original_prompt,
+                    &text_l,
+                );
                 let total_score = (weighted_hits as i32) * 5 + intent_bonus;
 
                 ChunkScoreCriteria {
@@ -586,6 +659,7 @@ impl RetrieveMeshNode {
                     intent_bonus,
                     total_score,
                     is_relevant,
+                    proper_ok,
                 }
             };
 
@@ -599,6 +673,8 @@ impl RetrieveMeshNode {
                 .collect();
 
             let any_lexical_match = paired.iter().any(|(_, crit)| crit.weighted_hits > 0);
+            let any_proper_match = !proper_terms.is_empty()
+                && paired.iter().any(|(_, crit)| crit.is_relevant && crit.proper_ok);
             let required_prompt_hits = if prompt_only_entities.len() == 2 {
                 2
             } else if prompt_only_entities.len() > 2 {
@@ -616,6 +692,7 @@ impl RetrieveMeshNode {
                         && crit.weighted_hits > 0
                         && crit.intent_bonus > -100
                         && (!any_prompt_entity_match || crit.prompt_entity_hits >= required_prompt_hits)
+                        && (!any_proper_match || crit.proper_ok)
                 });
 
                 // Zero string allocation comparator: sorts using precomputed total_score

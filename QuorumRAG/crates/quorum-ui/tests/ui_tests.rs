@@ -32,7 +32,13 @@ fn test_index_html_contains_chatgpt_aesthetics() {
     );
 
     // 5. Model selector pill bar
-    assert!(html.contains("Auto-Fusion") && html.contains("GLM-4-9B") && html.contains("Qwen 2.5") && html.contains("Gemma 3"));
+    assert!(
+        html.contains("Auto-Fusion")
+            && html.contains("Gemma 4 26B")
+            && html.contains("GLM-4-9B")
+            && html.contains("Qwen 2.5")
+            && html.contains("Gemma 3")
+    );
 
     // 6. 3-way search mode toggle
     assert!(html.contains("BM25 Keyword") && html.contains("Semantic Vector") && html.contains("Hybrid RRF"));

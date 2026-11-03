@@ -47,6 +47,7 @@ pub fn derive_query_cache_key(
         SynthesisModelFamily::Qwen25Code => 1u8,
         SynthesisModelFamily::GemmaProse => 2u8,
         SynthesisModelFamily::AutoFusion => 3u8,
+        SynthesisModelFamily::Gemma4_26b => 4u8,
     };
     hasher.update(&[family_byte]);
     hasher.update(&[access_tier]);

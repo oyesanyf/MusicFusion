@@ -78,6 +78,7 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
         // Health & Models Telemetry
         .route("/api/health", get(health::health_handler))
         .route("/api/models", get(health::models_handler))
+        .route("/api/models/pull", post(health::pull_model_handler))
 
         // Graceful Shutdown Endpoint
         .route("/api/shutdown", post(shutdown_handler))
