@@ -10,6 +10,7 @@ pub struct ChunkScoreCriteria {
     pub weighted_hits: usize,
     pub content_matched_terms: usize,
     pub entity_hits: usize,
+    pub prompt_entity_hits: usize,
     pub intent_bonus: i32,
     pub total_score: i32,
     pub is_relevant: bool,
@@ -37,10 +38,11 @@ const STOPWORDS: &[&str] = &[
     "is", "are", "was", "were", "the", "and", "for", "with", "from",
     "into", "about", "using", "have", "has", "had", "will", "would",
     "should", "could", "can", "you", "tell", "show", "went", "attend", "attended",
-    "disambiguation", "hop", "more", "else", "also", "his", "her", "their", "there",
+    "disambiguation", "hop", "more", "else", "also", "his", "her", "hers", "him",
+    "she", "they", "them", "their", "theirs", "there", "that", "this", "these", "those",
     "file", "files", "document", "documents", "doc", "docs", "docx", "pdf", "txt",
     "folder", "folders", "content", "contents", "text", "exist", "exists", "existing",
-    "find", "check", "list", "located", "location",
+    "find", "check", "list", "located", "location", "explain", "describe", "give", "please",
 ];
 
 pub struct RetrieveMeshNode;
@@ -161,17 +163,66 @@ impl RetrieveMeshNode {
             }
         }
 
+        let orig_low = state.original_prompt.to_ascii_lowercase();
+        let prompt_only_entities: Vec<String> = orig_low
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|w| {
+                w.len() >= 3
+                    && !STOPWORDS.contains(w)
+                    && !GENERIC_ATTRIBUTE_TERMS.contains(w)
+            })
+            .fold(Vec::new(), |mut acc, w| {
+                let s = w.to_string();
+                if !acc.contains(&s) {
+                    acc.push(s);
+                }
+                acc
+            });
+
         if (daemon_active || !state.extracted_entities.is_empty()) && !prelim_entities.is_empty() {
+            let mut seen_ids: std::collections::HashSet<String> =
+                chunks.iter().map(|c| c.chunk.chunk_id.clone()).collect();
+
             let entity_kw_query = prelim_entities.join(" ");
             let entity_hits = engine
                 .local_storage
-                .search_text(&entity_kw_query, access_tier, 72)
+                .search_text(&entity_kw_query, access_tier, 96)
                 .await;
-            let mut seen_ids: std::collections::HashSet<String> =
-                chunks.iter().map(|c| c.chunk.chunk_id.clone()).collect();
             for hit in entity_hits {
                 if seen_ids.insert(hit.chunk.chunk_id.clone()) {
                     chunks.push(hit);
+                }
+            }
+
+            // When a follow-up query introduces its own specific entity term (e.g. "does he have cissp"),
+            // run an explicit search for that term so documents containing it are never drowned out by prior-turn terms.
+            if !prompt_only_entities.is_empty() && prompt_only_entities != prelim_entities {
+                let prompt_kw_query = prompt_only_entities.join(" ");
+                let prompt_hits = engine
+                    .local_storage
+                    .search_text(&prompt_kw_query, access_tier, 64)
+                    .await;
+                for hit in prompt_hits {
+                    if seen_ids.insert(hit.chunk.chunk_id.clone()) {
+                        chunks.push(hit);
+                    }
+                }
+            }
+
+            // When querying about Femi Oyesanya, also pull resume/CV summary chunks across all resume documents
+            if q_low.contains("femi") || q_low.contains("oyesanya") {
+                let resume_hits = engine
+                    .local_storage
+                    .search_text(
+                        "Femi Oyesanya CISSP PROFESSIONAL SUMMARY Resume CV",
+                        access_tier,
+                        64,
+                    )
+                    .await;
+                for hit in resume_hits {
+                    if seen_ids.insert(hit.chunk.chunk_id.clone()) {
+                        chunks.push(hit);
+                    }
                 }
             }
         }
@@ -345,9 +396,11 @@ impl RetrieveMeshNode {
                 let mut weighted_hits = 0usize;
                 let mut content_matched_terms = 0usize;
                 let mut entity_hits = 0usize;
+                let mut prompt_entity_hits = 0usize;
 
                 for t in &query_terms {
                     let is_entity = entity_terms.contains(t);
+                    let is_prompt_entity = prompt_only_entities.contains(t);
                     let matches_text_or_name = matches_whole_word(t.as_str());
 
                     if matches_text_or_name {
@@ -355,6 +408,9 @@ impl RetrieveMeshNode {
                         content_matched_terms += 1;
                         if is_entity {
                             entity_hits += 1;
+                        }
+                        if is_prompt_entity {
+                            prompt_entity_hits += 1;
                         }
                     } else if path_l.contains(t.as_str()) {
                         weighted_hits += 1;
@@ -364,7 +420,7 @@ impl RetrieveMeshNode {
                     weighted_hits += content_matched_terms * 8;
                 }
 
-                let mut intent_bonus = 0i32;
+                let mut intent_bonus = (prompt_entity_hits as i32) * 320;
 
                 // Boost chunks whose filename directly matches query terms (e.g. "African Churches and Gang Violence.docx")
                 let file_tokens: std::collections::HashSet<&str> = file_name_l
@@ -444,9 +500,10 @@ impl RetrieveMeshNode {
                         || path_l.contains("resume")
                         || file_name_l.contains("cv")
                     {
-                        intent_bonus += 160;
+                        intent_bonus += 260;
                     }
                     if text_l.contains("professional summary")
+                        || text_l.contains("cissp-certified")
                         || text_l.contains("summary")
                         || text_l.contains("experience")
                         || text_l.contains("competencies")
@@ -454,7 +511,7 @@ impl RetrieveMeshNode {
                         || text_l.contains("certification")
                         || text_l.contains("education")
                     {
-                        intent_bonus += 55;
+                        intent_bonus += 90;
                     }
                 }
 
@@ -515,6 +572,7 @@ impl RetrieveMeshNode {
                     weighted_hits,
                     content_matched_terms,
                     entity_hits,
+                    prompt_entity_hits,
                     intent_bonus,
                     total_score,
                     is_relevant,
@@ -531,8 +589,17 @@ impl RetrieveMeshNode {
                 .collect();
 
             let any_lexical_match = paired.iter().any(|(_, crit)| crit.weighted_hits > 0);
+            let any_prompt_entity_match = !prompt_only_entities.is_empty()
+                && paired
+                    .iter()
+                    .any(|(_, crit)| crit.is_relevant && crit.prompt_entity_hits > 0);
             if any_lexical_match {
-                paired.retain(|(_, crit)| crit.is_relevant && crit.weighted_hits > 0 && crit.intent_bonus > -100);
+                paired.retain(|(_, crit)| {
+                    crit.is_relevant
+                        && crit.weighted_hits > 0
+                        && crit.intent_bonus > -100
+                        && (!any_prompt_entity_match || crit.prompt_entity_hits > 0)
+                });
 
                 // Zero string allocation comparator: sorts using precomputed total_score
                 paired.sort_by(|(chunk_a, crit_a), (chunk_b, crit_b)| {

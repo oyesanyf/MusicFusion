@@ -97,7 +97,7 @@ pub async fn chat_sse_handler(
 
     let prompt = payload.prompt.trim().to_string();
     let history = payload.history;
-    let top_k = payload.top_k.unwrap_or(24).clamp(10, 50);
+    let top_k = payload.top_k.unwrap_or(32).clamp(24, 50);
     let _access_tier = payload.access_tier.unwrap_or(0);
 
     let family = match payload.model_family.as_deref() {
@@ -181,7 +181,7 @@ pub async fn query_handler(
             .into_response();
     }
 
-    let top_k = payload.top_k.unwrap_or(24).clamp(10, 50);
+    let top_k = payload.top_k.unwrap_or(32).clamp(24, 50);
     let family = match payload.model_family.as_deref() {
         Some("Glm4Agentic") => SynthesisModelFamily::Glm4Agentic,
         Some("Qwen25Code") => SynthesisModelFamily::Qwen25Code,
