@@ -164,13 +164,24 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
             .write()
             .unwrap_or_else(|e| e.into_inner());
         guard.mesh.mesh_port = chosen_p2p_port;
+        if cli.max_peer_responses > 0 {
+            guard.mesh.max_peer_responses = cli.max_peer_responses;
+        }
     }
 
-    // 4. Network Swarm & Query Coordinator (with OshoosiMeshInboundHandler enforcing Shared Folders & PHI DLP)
+    // Load or generate persistent 32-byte Ed25519 node seed
+    let node_seed = quorum_network::load_or_generate_node_seed(&cli.data_dir)?;
+    let secret = quorum_network::libp2p::identity::ed25519::SecretKey::try_from_bytes(node_seed)
+        .map_err(|e| anyhow::anyhow!("Invalid node seed: {e}"))?;
+    let ed_kp = quorum_network::libp2p::identity::ed25519::Keypair::from(secret);
+    let persistent_peer_id = quorum_network::libp2p::identity::Keypair::from(ed_kp).public().to_peer_id();
+    let persistent_peer_id_str = persistent_peer_id.to_string();
+
+    // 4. Network Swarm & Query Coordinator (with OsoosiMeshInboundHandler enforcing Shared Folders & PHI DLP)
     let inbound_handler: Arc<dyn quorum_network::InboundQueryHandler> = Arc::new(
         quorum_coordinator::OsoosiMeshInboundHandler::new(
             Arc::clone(&storage) as Arc<dyn quorum_coordinator::StorageSearcher>,
-            "local_quorum_node",
+            persistent_peer_id_str.clone(),
         ),
     );
     let (mesh_dispatcher, swarm_handle): (Arc<dyn quorum_coordinator::MeshQueryDispatcher>, Option<quorum_network::NetworkSwarmHandle>) = if cli.local_only {
@@ -178,8 +189,10 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         (Arc::new(quorum_coordinator::LocalOnlyDispatcher), None)
     } else {
         let net_config = quorum_network::NetworkConfig {
+            ed25519_seed: Some(node_seed),
             tcp_listen_addrs: vec![format!("/ip4/{}/tcp/{}", cli.host, chosen_p2p_port).parse()?],
             quic_listen_addrs: vec![format!("/ip4/{}/udp/{}/quic-v1", cli.host, chosen_p2p_port).parse()?],
+            contract_hash_hex: embedder.contract_hash().iter().map(|b| format!("{:02x}", b)).collect(),
             ..Default::default()
         };
         match quorum_network::start_network_node(net_config, Some(inbound_handler)).await {
@@ -196,18 +209,21 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         }
     };
 
+    let mut coord_cfg = quorum_coordinator::CoordinatorConfig::default();
+    coord_cfg.max_peer_responses = cli.max_peer_responses;
+
     let coordinator_engine = Arc::new(quorum_coordinator::ScatterGatherEngine::new(
         Arc::clone(&storage) as Arc<dyn quorum_coordinator::StorageSearcher>,
         mesh_dispatcher,
         Arc::new(tokio::sync::RwLock::new(quorum_coordinator::PeerAclManager::default())),
-        quorum_coordinator::CoordinatorConfig::default(),
-        [0u8; 32],
-        "local_daemon".to_string(),
+        coord_cfg.clone(),
+        node_seed,
+        persistent_peer_id_str,
     ));
 
     let coordinator = Arc::new(quorum_coordinator::QueryCoordinator::new(
         coordinator_engine,
-        quorum_coordinator::CoordinatorConfig::default(),
+        coord_cfg,
     ));
 
     let default_model_family = match cli.model_family.as_str() {

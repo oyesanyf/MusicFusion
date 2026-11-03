@@ -1410,14 +1410,15 @@ impl DeterministicOfflineSynthesisEngine {
     ) -> Vec<(&'a ScoredChunk, u32)> {
         let all_explicit_unit = !matched_chunks.is_empty()
             && matched_chunks.iter().all(|c| (0.85..=1.0).contains(&c.score));
-        let mut seen_filenames = std::collections::HashSet::new();
+        let mut seen_keys = std::collections::HashSet::new();
         let mut out: Vec<(&'a ScoredChunk, u32)> = Vec::new();
         for &c in matched_chunks {
             let file_name = std::path::Path::new(&c.chunk.file_path)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(&c.chunk.file_path);
-            if !seen_filenames.insert(file_name.to_ascii_lowercase()) {
+            let dedup_key = (c.source_peer.to_ascii_lowercase(), file_name.to_ascii_lowercase());
+            if !seen_keys.insert(dedup_key) {
                 continue;
             }
             let unique_idx = out.len();
@@ -1458,10 +1459,22 @@ impl DeterministicOfflineSynthesisEngine {
         let mut block = String::from("\n\n---\n### 📚 Sources & Document Links\n");
 
         for (c, score_pct) in deduped {
-            let file_name = std::path::Path::new(&c.chunk.file_path)
+            let file_name_base = std::path::Path::new(&c.chunk.file_path)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(&c.chunk.file_path);
+
+            let peer_suffix = if !c.source_peer.is_empty() && c.source_peer != "local" {
+                let short_peer = if c.source_peer.len() > 8 {
+                    &c.source_peer[..8]
+                } else {
+                    &c.source_peer
+                };
+                format!(" (Peer: {})", short_peer)
+            } else {
+                String::new()
+            };
+            let file_name = format!("{}{}", file_name_base, peer_suffix);
 
             let raw_target = if c.chunk.file_path.starts_with("http://")
                 || c.chunk.file_path.starts_with("https://")

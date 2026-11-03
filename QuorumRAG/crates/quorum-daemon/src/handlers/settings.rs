@@ -34,6 +34,7 @@ pub struct UpdateMeshConfigPayload {
     pub quarantine_peer: Option<String>,
     pub unquarantine_peer: Option<String>,
     pub trust_peer: Option<String>,
+    pub max_peer_responses: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -318,6 +319,9 @@ pub async fn update_mesh_config_handler(
             if !tp.is_empty() && !guard.mesh.trusted_peers.contains(&tp) {
                 guard.mesh.trusted_peers.push(tp);
             }
+        }
+        if let Some(max_peers) = payload.max_peer_responses {
+            guard.mesh.max_peer_responses = max_peers.max(1);
         }
     }
 

@@ -17,6 +17,22 @@ impl RrfCombiner {
         k: f32,
         top_k: usize,
     ) -> Vec<ScoredChunk> {
+        let paired = remote_peer_lists
+            .into_iter()
+            .enumerate()
+            .map(|(i, list)| (format!("remote_peer_{}", i + 1), list))
+            .collect();
+        Self::fuse_rankings_with_peers(local_results, paired, k, top_k)
+    }
+
+    /// Combines local rankings and remote peer candidate lists paired with real `responder_peer_id`,
+    /// preserving the actual peer identity in `ScoredChunk.source_peer`.
+    pub fn fuse_rankings_with_peers(
+        local_results: Vec<ScoredChunk>,
+        remote_peer_lists: Vec<(String, Vec<CandidateChunkDto>)>,
+        k: f32,
+        top_k: usize,
+    ) -> Vec<ScoredChunk> {
         // Map from cryptographic blake3_hash to (base_rrf_score, ScoredChunk, HashSet of distinct peer IDs)
         // Local is peer 0; remote peers are indexed 1..=N
         let mut rrf_map: HashMap<String, (f32, ScoredChunk, HashSet<usize>)> = HashMap::new();
@@ -45,8 +61,8 @@ impl RrfCombiner {
         }
 
         // 2. Remote peer chunk rankings with intra-peer anti-stuffing protection
-        for (remote_idx, list) in remote_peer_lists.into_iter().enumerate() {
-            let remote_peer_id = remote_idx + 1;
+        for (remote_idx, (peer_id, list)) in remote_peer_lists.into_iter().enumerate() {
+            let remote_peer_numeric_id = remote_idx + 1;
             let mut seen_peer_hashes: HashSet<String> = HashSet::new();
 
             for (rank_0, candidate) in list.into_iter().enumerate() {
@@ -71,11 +87,11 @@ impl RrfCombiner {
                         text_content: candidate.content,
                         metadata_json: "{}".to_string(),
                     };
-                    let scored = ScoredChunk::new(doc_chunk, candidate.score, "remote_peer", true);
+                    let scored = ScoredChunk::new(doc_chunk, candidate.score, peer_id.clone(), true);
                     (0.0, scored, HashSet::new())
                 });
                 entry.0 += score;
-                entry.2.insert(remote_peer_id);
+                entry.2.insert(remote_peer_numeric_id);
             }
         }
 

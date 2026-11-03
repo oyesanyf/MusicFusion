@@ -234,8 +234,7 @@ impl RetrieveMeshNode {
 
             let entity_kw_query = prelim_entities.join(" ");
             let entity_hits = engine
-                .local_storage
-                .search_text(&entity_kw_query, access_tier, 96)
+                .search_federated_text(&entity_kw_query, access_tier, 96)
                 .await;
             for hit in entity_hits {
                 if seen_ids.insert(hit.chunk.chunk_id.clone()) {
@@ -248,8 +247,7 @@ impl RetrieveMeshNode {
             if !prompt_only_entities.is_empty() && prompt_only_entities != prelim_entities {
                 let prompt_kw_query = prompt_only_entities.join(" ");
                 let prompt_hits = engine
-                    .local_storage
-                    .search_text(&prompt_kw_query, access_tier, 64)
+                    .search_federated_text(&prompt_kw_query, access_tier, 64)
                     .await;
                 for hit in prompt_hits {
                     if seen_ids.insert(hit.chunk.chunk_id.clone()) {
@@ -263,7 +261,7 @@ impl RetrieveMeshNode {
             let cue_terms = crate::offline_engine::DeterministicOfflineSynthesisEngine::answer_type_cue_terms(&state.original_prompt);
             if !cue_terms.is_empty() && !prompt_only_entities.is_empty() {
                 let cue_query = format!("{} {}", prompt_only_entities.join(" "), cue_terms.join(" "));
-                let cue_hits = engine.local_storage.search_text(&cue_query, access_tier, 48).await;
+                let cue_hits = engine.search_federated_text(&cue_query, access_tier, 48).await;
                 for hit in cue_hits {
                     if seen_ids.insert(hit.chunk.chunk_id.clone()) {
                         chunks.push(hit);
@@ -274,8 +272,7 @@ impl RetrieveMeshNode {
             // When querying about Femi Oyesanya, also pull resume/CV summary chunks across all resume documents
             if q_low.contains("femi") || q_low.contains("oyesanya") {
                 let resume_hits = engine
-                    .local_storage
-                    .search_text(
+                    .search_federated_text(
                         "Femi Oyesanya CISSP PROFESSIONAL SUMMARY Resume CV",
                         access_tier,
                         64,

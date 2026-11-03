@@ -82,11 +82,24 @@ impl MeshQueryDispatcher for MockMeshDispatcher {
             }));
         }
 
+        let max_peer_responses = {
+            let controller = crate::dlp_mesh::global_mesh_dlp_controller();
+            let s = controller.settings.read().unwrap_or_else(|e| e.into_inner());
+            if s.mesh.max_peer_responses > 0 {
+                s.mesh.max_peer_responses
+            } else {
+                8
+            }
+        };
+
         let mut responses = Vec::new();
         let _ = tokio::time::timeout(timeout, async {
             while let Some(res) = futures.next().await {
                 if let Ok(resp) = res {
                     responses.push(resp);
+                    if responses.len() >= max_peer_responses {
+                        break;
+                    }
                 }
             }
         })
@@ -141,11 +154,24 @@ impl MeshQueryDispatcher for SwarmMeshDispatcher {
             }));
         }
 
+        let max_peer_responses = {
+            let controller = crate::dlp_mesh::global_mesh_dlp_controller();
+            let s = controller.settings.read().unwrap_or_else(|e| e.into_inner());
+            if s.mesh.max_peer_responses > 0 {
+                s.mesh.max_peer_responses
+            } else {
+                8
+            }
+        };
+
         let mut responses = Vec::new();
         let _ = tokio::time::timeout(timeout, async {
             while let Some(res) = futures.next().await {
                 if let Ok(Ok(resp)) = res {
                     responses.push(resp);
+                    if responses.len() >= max_peer_responses {
+                        break;
+                    }
                 }
             }
         })

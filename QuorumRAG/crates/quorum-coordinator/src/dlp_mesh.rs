@@ -154,6 +154,12 @@ pub struct OsoosiMeshSettings {
     pub shared_folders: Vec<SharedFolderEntry>,
     pub quarantined_peers: Vec<String>,
     pub trusted_peers: Vec<String>,
+    #[serde(default = "default_8")]
+    pub max_peer_responses: usize,
+}
+
+fn default_8() -> usize {
+    8
 }
 
 impl Default for OsoosiMeshSettings {
@@ -179,6 +185,7 @@ impl Default for OsoosiMeshSettings {
             }],
             quarantined_peers: Vec::new(),
             trusted_peers: Vec::new(),
+            max_peer_responses: 8,
         }
     }
 }

@@ -258,9 +258,21 @@ impl ScatterGatherEngine {
         };
 
         // 3. Ingest candidate chunks into volatile memory containers after inbound PHI/PII DLP gate
+        let max_peer_responses = {
+            let s = controller.settings.read().unwrap_or_else(|e| e.into_inner());
+            if s.mesh.max_peer_responses > 0 {
+                s.mesh.max_peer_responses
+            } else {
+                self.config.max_peer_responses.max(1)
+            }
+        };
+
         let mut volatile_chunks = Vec::new();
         let mut remote_lists = Vec::new();
         for resp in remote_responses {
+            if remote_lists.len() >= max_peer_responses {
+                break;
+            }
             let mut clean_peer_chunks = Vec::new();
             for mut chunk in resp.chunks {
                 // Byzantine consensus hardening: validate line numbers and clamp remote access tier
@@ -290,12 +302,12 @@ impl ScatterGatherEngine {
                 }
             }
             if !clean_peer_chunks.is_empty() {
-                remote_lists.push(clean_peer_chunks);
+                remote_lists.push((resp.responder_peer_id.clone(), clean_peer_chunks));
             }
         }
 
-        // 4. Reciprocal Rank Fusion
-        let fused = RrfCombiner::fuse_rankings(
+        // 4. Reciprocal Rank Fusion preserving responder_peer_id
+        let fused = RrfCombiner::fuse_rankings_with_peers(
             local_results,
             remote_lists,
             self.config.rrf_k,
@@ -318,6 +330,95 @@ impl ScatterGatherEngine {
             .execute_query_with_cached_vector(query_text, query_vec, None, access_tier, top_k)
             .await;
         (fused, volatile, duration_ms)
+    }
+
+    /// Dispatches federated text queries across local storage and remote mesh peers.
+    pub async fn search_federated_text(
+        &self,
+        query_text: &str,
+        access_tier: u8,
+        top_k: usize,
+    ) -> Vec<ScoredChunk> {
+        let mut results = self.local_storage.search_text(query_text, access_tier, top_k).await;
+
+        let controller = crate::dlp_mesh::global_mesh_dlp_controller();
+        let (p2p_enabled, max_peer_responses) = {
+            let s = controller.settings.read().unwrap_or_else(|e| e.into_inner());
+            let max_peers = if s.mesh.max_peer_responses > 0 {
+                s.mesh.max_peer_responses
+            } else {
+                self.config.max_peer_responses.max(1)
+            };
+            (s.mesh.p2p_enabled, max_peers)
+        };
+
+        if !p2p_enabled {
+            return results;
+        }
+
+        if let Some(sanitized_query) = controller.sanitize_outbound_query(query_text) {
+            use quorum_contract::EmbeddingGenerator;
+            let embedder = quorum_contract::DeterministicOfflineEngine::new();
+            let query_vec = embedder.embed_text(query_text).unwrap_or_else(|_| vec![0.0; 768]);
+
+            let mut req = FederatedQueryRequest {
+                query_id: Uuid::new_v4(),
+                sender_peer_id: self.sender_peer_id.clone(),
+                sender_pubkey: [0u8; 32],
+                query_text: sanitized_query,
+                embedding: query_vec,
+                top_k,
+                timestamp: Utc::now().timestamp(),
+                signature: [0u8; 64],
+            };
+            let tier = AccessTier::from_u8(access_tier).unwrap_or(AccessTier::Tier0Public);
+            sign_request(&self.secret_seed, &mut req, tier);
+
+            let timeout_dur = Duration::from_millis(self.config.timeout_ms.min(300));
+            if let Ok(responses) = self.mesh_dispatcher.query_peers(&req, timeout_dur).await {
+                let mut peer_count = 0;
+                for resp in responses {
+                    if peer_count >= max_peer_responses {
+                        break;
+                    }
+                    let mut peer_added = false;
+                    for mut chunk in resp.chunks {
+                        if chunk.line_start > chunk.line_end {
+                            continue;
+                        }
+                        chunk.access_tier = chunk.access_tier.min(access_tier);
+                        let dlp_res = controller.inspect_and_enforce_text(
+                            &chunk.content,
+                            &chunk.file_path,
+                            &resp.responder_peer_id,
+                            "InboundMesh",
+                            None,
+                            false,
+                        );
+                        if dlp_res.allowed_to_share {
+                            let doc_chunk = quorum_types::DocumentChunk {
+                                chunk_id: chunk.chunk_id,
+                                document_id: "remote_doc".to_string(),
+                                file_path: chunk.file_path,
+                                line_start: chunk.line_start,
+                                line_end: chunk.line_end,
+                                blake3_hash: quorum_types::DocumentChunk::compute_blake3_hash(&dlp_res.scrubbed_text),
+                                access_tier: chunk.access_tier,
+                                vector: vec![0.0; 768],
+                                text_content: dlp_res.scrubbed_text,
+                                metadata_json: "{}".to_string(),
+                            };
+                            results.push(ScoredChunk::new(doc_chunk, chunk.score, resp.responder_peer_id.clone(), true));
+                            peer_added = true;
+                        }
+                    }
+                    if peer_added {
+                        peer_count += 1;
+                    }
+                }
+            }
+        }
+        results
     }
 }
 

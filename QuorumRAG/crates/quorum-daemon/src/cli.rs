@@ -42,6 +42,10 @@ pub struct Cli {
     /// Default synthesis model family: AutoFusion, Glm4Agentic, Qwen25Code, GemmaProse
     #[arg(long, default_value = "AutoFusion")]
     pub model_family: String,
+
+    /// Maximum number of remote peer responses to collect/fuse per query (default: 8)
+    #[arg(long, default_value_t = 8)]
+    pub max_peer_responses: usize,
 }
 
 #[derive(Subcommand, Debug, Clone)]

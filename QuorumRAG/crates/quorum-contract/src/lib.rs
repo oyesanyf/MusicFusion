@@ -59,6 +59,9 @@ pub struct EmbeddingContract {
     /// Foundation embedding model identifier (canonical: "google/embeddinggemma-300m").
     pub model_name: String,
 
+    /// Engine execution mode (e.g. "DeterministicOffline", "GemmaCandle").
+    pub engine_mode: String,
+
     /// Output vector dimension (canonical: 768).
     pub dimension: usize,
 
@@ -76,11 +79,26 @@ pub struct EmbeddingContract {
 }
 
 impl EmbeddingContract {
-    /// The canonical QuorumRAG contract specification for Gemma 300M.
+    /// The canonical QuorumRAG contract specification for Gemma 300M neural models.
     pub fn canonical_gemma_300m() -> Self {
         Self {
             contract_version: 1,
             model_name: "google/embeddinggemma-300m".to_string(),
+            engine_mode: "GemmaCandle".to_string(),
+            dimension: 768,
+            normalization: "L2".to_string(),
+            distance_metric: "Cosine".to_string(),
+            pooling_strategy: "MeanPooling".to_string(),
+            max_sequence_length: 512,
+        }
+    }
+
+    /// The canonical QuorumRAG contract specification for Deterministic Offline BLAKE3 XOF vectors.
+    pub fn canonical_deterministic_offline() -> Self {
+        Self {
+            contract_version: 1,
+            model_name: "google/embeddinggemma-300m".to_string(),
+            engine_mode: "DeterministicOffline".to_string(),
             dimension: 768,
             normalization: "L2".to_string(),
             distance_metric: "Cosine".to_string(),
@@ -93,13 +111,15 @@ impl EmbeddingContract {
     ///
     /// Canonical layout:
     /// `"QUORUM_RAG_EMBEDDING_CONTRACT_V1\n"` || `contract_version` (4 bytes LE) ||
-    /// `model_name` || `\n` || `dimension` (8 bytes LE) || `normalization` || `\n` ||
+    /// `model_name` || `\n` || `engine_mode` || `\n` || `dimension` (8 bytes LE) || `normalization` || `\n` ||
     /// `distance_metric` || `\n` || `pooling_strategy` || `\n` || `max_sequence_length` (8 bytes LE)
     pub fn derive_contract_hash(&self) -> [u8; 32] {
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"QUORUM_RAG_EMBEDDING_CONTRACT_V1\n");
         hasher.update(&self.contract_version.to_le_bytes());
         hasher.update(self.model_name.as_bytes());
+        hasher.update(b"\n");
+        hasher.update(self.engine_mode.as_bytes());
         hasher.update(b"\n");
         hasher.update(&(self.dimension as u64).to_le_bytes());
         hasher.update(self.normalization.as_bytes());
@@ -192,10 +212,10 @@ pub struct DeterministicOfflineEngine {
 }
 
 impl DeterministicOfflineEngine {
-    /// Create a new `DeterministicOfflineEngine` with the canonical Gemma 300M contract.
+    /// Create a new `DeterministicOfflineEngine` with the canonical deterministic offline contract.
     pub fn new() -> Self {
         Self {
-            contract: EmbeddingContract::canonical_gemma_300m(),
+            contract: EmbeddingContract::canonical_deterministic_offline(),
         }
     }
 
@@ -479,11 +499,33 @@ mod tests {
         let contract = EmbeddingContract::canonical_gemma_300m();
         assert_eq!(contract.contract_version, 1);
         assert_eq!(contract.model_name, "google/embeddinggemma-300m");
+        assert_eq!(contract.engine_mode, "GemmaCandle");
         assert_eq!(contract.dimension, 768);
         assert_eq!(contract.normalization, "L2");
         assert_eq!(contract.distance_metric, "Cosine");
         assert_eq!(contract.pooling_strategy, "MeanPooling");
         assert_eq!(contract.max_sequence_length, 512);
+
+        let offline_contract = EmbeddingContract::canonical_deterministic_offline();
+        assert_eq!(offline_contract.engine_mode, "DeterministicOffline");
+        assert_eq!(offline_contract.dimension, 768);
+    }
+
+    #[test]
+    fn test_engine_mode_contract_hash_differentiation() {
+        let gemma = EmbeddingContract::canonical_gemma_300m();
+        let offline = EmbeddingContract::canonical_deterministic_offline();
+
+        let gemma_hash = gemma.derive_contract_hash();
+        let offline_hash = offline.derive_contract_hash();
+
+        // Hashes MUST be distinct
+        assert_ne!(gemma_hash, offline_hash);
+        assert_ne!(gemma.derive_contract_hash_hex(), offline.derive_contract_hash_hex());
+
+        // Handshake between incompatible engine modes MUST fail closed with ContractMismatch
+        let res = verify_contract_handshake(&gemma_hash, &offline_hash);
+        assert!(matches!(res, Err(ContractError::ContractMismatch { .. })));
     }
 
     #[test]
@@ -505,6 +547,10 @@ mod tests {
         let mut modified_metric = c1.clone();
         modified_metric.distance_metric = "DotProduct".to_string();
         assert_ne!(h1, modified_metric.derive_contract_hash());
+
+        let mut modified_mode = c1.clone();
+        modified_mode.engine_mode = "CustomEngine".to_string();
+        assert_ne!(h1, modified_mode.derive_contract_hash());
     }
 
     #[test]

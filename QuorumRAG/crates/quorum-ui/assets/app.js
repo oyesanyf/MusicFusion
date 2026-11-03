@@ -877,21 +877,27 @@
       .replace(/\(Lines?\s*\d+(\s*[–—\-]\s*\d+)?\)/gi, '')
       .replace(/:(\d+)\s*[–—\-]\s*(\d+)/g, '')
       .trim();
-    if (!cleanFileName || citationsEl._seenFiles.has(cleanFileName.toLowerCase())) {
+    const peerId = (cit.peer_id || cit.source_peer || 'local').trim();
+    const dedupKey = peerId.toLowerCase() + '::' + cleanFileName.toLowerCase();
+    if (!cleanFileName || citationsEl._seenFiles.has(dedupKey)) {
       return;
     }
-    citationsEl._seenFiles.add(cleanFileName.toLowerCase());
+    citationsEl._seenFiles.add(dedupKey);
     const citeNum = (citationsEl._nextIndex = (citationsEl._nextIndex || 0) + 1);
 
     const rawScore = Number(cit.score !== undefined ? cit.score : (cit.relevance_score || 0));
     let scorePct = rawScore > 1 ? Math.round(rawScore) : Math.round(rawScore * 100);
     scorePct = Math.max(0, Math.min(100, scorePct));
 
+    const peerLabel = peerId !== 'local' && peerId.length > 0
+      ? ` [Peer: ${peerId.length > 8 ? peerId.slice(0, 8) + '...' : peerId}]`
+      : '';
+
     const badge = document.createElement('button');
     badge.type = 'button';
     badge.className = 'citation-badge';
-    badge.title = `[${citeNum}] ${cit.file_path}\nRelevance: ${scorePct}%\n${cit.snippet || ''}`.trim();
-    badge.innerHTML = `<span class="cite-index" style="font-weight:700;opacity:0.9;">[${citeNum}]</span> <span>📄 ${escapeHtml(cleanFileName)}</span> <span class="score-pill" style="opacity:0.85; font-size:11px; margin-left:3px; padding:1px 6px; border-radius:4px; background:rgba(66,133,244,0.2); font-weight:600;">· ${scorePct}%</span>`;
+    badge.title = `[${citeNum}] ${cit.file_path}${peerLabel}\nRelevance: ${scorePct}%\n${cit.snippet || ''}`.trim();
+    badge.innerHTML = `<span class="cite-index" style="font-weight:700;opacity:0.9;">[${citeNum}]</span> <span>📄 ${escapeHtml(cleanFileName + peerLabel)}</span> <span class="score-pill" style="opacity:0.85; font-size:11px; margin-left:3px; padding:1px 6px; border-radius:4px; background:rgba(66,133,244,0.2); font-weight:600;">· ${scorePct}%</span>`;
     badge.addEventListener('click', () => {
       let inspector = citationsEl.querySelector('.source-inspector-card');
       if (inspector && inspector.dataset.citeNum === String(citeNum)) {
@@ -3108,6 +3114,16 @@
           </div>
           <div class="settings-row">
             <div class="settings-row-info">
+              <span class="settings-row-label">Max Peer Responses Per Query</span>
+              <div class="settings-row-desc">Deterministic cap on remote peer candidate sets collected and fused per federated search.</div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="number" id="mesh-max-peer-responses" class="settings-input" style="width:90px;" min="1" max="64" value="${escapeHtml(String(mesh.max_peer_responses || 8))}" onchange="window.quorumUpdateMeshConfig({max_peer_responses: parseInt(this.value, 10) || 8})">
+              <span style="font-size:12px; color:var(--text-muted);">peers</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
               <span class="settings-row-label">Monotonic HMAC Generation Epoch (#${mesh.hmac_epoch || 1})</span>
               <div class="settings-row-desc">Constant-time keyed BLAKE3/HMAC epoch verification across Mesh nodes. Rotating immediately invalidates stale peer handles.</div>
             </div>
@@ -4471,6 +4487,31 @@
       await saveUiSettingsPatch(cachedSettingsData.ui);
     }
     showSettingsToast('All preferences saved to disk');
+  };
+
+  window.quorumUpdateMeshConfig = async function(payload) {
+    try {
+      const res = await fetch('/api/mesh/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (cachedSettingsData && data.mesh) {
+          cachedSettingsData.mesh = data.mesh;
+        }
+        showSettingsToast('Mesh configuration updated');
+        if (activeSettingsTab === 'mesh') {
+          renderSettingsTabContent('mesh', '');
+        }
+      } else {
+        showSettingsToast('Failed to update mesh configuration');
+      }
+    } catch (e) {
+      console.error('Error updating mesh config:', e);
+      showSettingsToast('Error updating mesh config');
+    }
   };
 
   // Load initial settings on startup to sync theme & sidebar pills

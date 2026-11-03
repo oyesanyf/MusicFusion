@@ -106,6 +106,15 @@ fn test_mutated_parameters_handshake_rejection() {
         assert_ne!(canonical_hash, h);
         assert!(verify_contract_handshake(&canonical_hash, &h).is_err());
     }
+
+    // 7. Mutated engine mode (e.g. DeterministicOffline vs GemmaCandle)
+    for mode in ["DeterministicOffline", "MockEngine", "CandleCUDA", "", "gemma_candle"] {
+        let mut m = canonical.clone();
+        m.engine_mode = mode.to_string();
+        let h = m.derive_contract_hash();
+        assert_ne!(canonical_hash, h);
+        assert!(verify_contract_handshake(&canonical_hash, &h).is_err());
+    }
 }
 
 #[test]

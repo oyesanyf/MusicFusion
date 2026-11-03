@@ -24,6 +24,36 @@ pub fn derive_peer_id_from_pubkey(pubkey: &[u8; 32]) -> Result<libp2p::PeerId, S
     Ok(libp2p::PeerId::from_public_key(&pk))
 }
 
+/// Loads a persistent 32-byte Ed25519 seed from `<data_dir>/node_identity.seed`, or creates it if not present.
+pub fn load_or_generate_node_seed(data_dir: &std::path::Path) -> Result<[u8; 32], std::io::Error> {
+    let seed_path = data_dir.join("node_identity.seed");
+    if seed_path.is_file() {
+        let bytes = std::fs::read(&seed_path)?;
+        if bytes.len() == 32 {
+            let mut seed = [0u8; 32];
+            seed.copy_from_slice(&bytes);
+            return Ok(seed);
+        }
+    }
+    let ed_kp = libp2p::identity::ed25519::Keypair::generate();
+    let mut seed = [0u8; 32];
+    let secret = ed_kp.secret();
+    let secret_bytes = secret.as_ref();
+    if secret_bytes.len() >= 32 {
+        seed.copy_from_slice(&secret_bytes[..32]);
+    } else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Generated keypair secret bytes invalid length",
+        ));
+    }
+    if let Some(parent) = seed_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&seed_path, seed)?;
+    Ok(seed)
+}
+
 use quorum_types::{FederatedQueryRequest, FederatedQueryResponse};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -122,4 +152,37 @@ pub async fn start_network_node(
     }
 
     Ok((join_handle, handle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_persistent_node_seed_generation_and_reload() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let path = temp_dir.path();
+
+        let seed1 = load_or_generate_node_seed(path).expect("generate seed");
+        assert_ne!(seed1, [0u8; 32]);
+
+        let seed_file = path.join("node_identity.seed");
+        assert!(seed_file.is_file());
+        let on_disk = std::fs::read(&seed_file).expect("read file");
+        assert_eq!(on_disk.len(), 32);
+        assert_eq!(on_disk.as_slice(), &seed1);
+
+        // Reload existing seed
+        let seed2 = load_or_generate_node_seed(path).expect("reload seed");
+        assert_eq!(seed1, seed2);
+
+        // Verify keypair derivation and PeerId match derive_peer_id_from_pubkey
+        let secret = libp2p::identity::ed25519::SecretKey::try_from_bytes(seed1).expect("secret");
+        let ed_kp = libp2p::identity::ed25519::Keypair::from(secret);
+        let peer_id = libp2p::identity::Keypair::from(ed_kp.clone()).public().to_peer_id();
+
+        let pubkey_bytes: [u8; 32] = ed_kp.public().to_bytes();
+        let derived_peer_id = derive_peer_id_from_pubkey(&pubkey_bytes).expect("derive peer id");
+        assert_eq!(peer_id, derived_peer_id);
+    }
 }
