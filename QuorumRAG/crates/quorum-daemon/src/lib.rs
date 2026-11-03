@@ -7,4 +7,4 @@ pub mod state;
 
 pub use cli::{Cli, Commands};
 pub use server::build_router;
-pub use state::{DaemonState, InFlightCancelToken, InFlightQueryRegistry};
+pub use state::{ChatSessionData, ChatSessionRegistry, DaemonState, InFlightCancelToken, InFlightQueryRegistry};

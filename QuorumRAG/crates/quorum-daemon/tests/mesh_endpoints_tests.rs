@@ -77,6 +77,7 @@ async fn setup_test_app() -> axum::Router {
         data_dir,
         shutdown_notify,
         in_flight_queries: Arc::new(quorum_daemon::InFlightQueryRegistry::new()),
+        sessions: quorum_daemon::ChatSessionRegistry::new(),
     });
 
     build_router(state)

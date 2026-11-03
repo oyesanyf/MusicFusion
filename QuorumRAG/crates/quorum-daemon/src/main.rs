@@ -253,6 +253,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         data_dir: cli.data_dir.clone(),
         shutdown_notify: Arc::clone(&shutdown_notify),
         in_flight_queries: Arc::new(crate::state::InFlightQueryRegistry::new()),
+        sessions: crate::state::ChatSessionRegistry::new(),
     });
 
     let app = server::build_router(Arc::clone(&app_state));

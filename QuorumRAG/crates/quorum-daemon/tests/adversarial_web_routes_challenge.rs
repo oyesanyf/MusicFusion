@@ -85,6 +85,7 @@ async fn setup_test_app() -> (axum::Router, Arc<tokio::sync::Notify>) {
         data_dir,
         shutdown_notify: Arc::clone(&shutdown_notify),
         in_flight_queries: Arc::new(quorum_daemon::InFlightQueryRegistry::new()),
+        sessions: quorum_daemon::ChatSessionRegistry::new(),
     });
 
     (build_router(state), shutdown_notify)

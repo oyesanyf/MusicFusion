@@ -25,7 +25,9 @@ pub use tpm::{
     TpmHardwareInspection, TpmOemVendor, PCR_APPLICATION_AUDIT, PCR_PLATFORM_FIRMWARE,
     PCR_SECURE_BOOT,
 };
-pub use agentic::AgenticStateGraphRunner;
+pub use agentic::{
+    AgenticStateGraphRunner, ContinuationFacetExtractor, RewriteContinuationNode,
+};
 pub use cache::{
     derive_embedding_cache_key, derive_query_cache_key, normalize_text_for_caching,
     CachedQueryEntry, CacheManager, EmbeddingCache, QueryCache,

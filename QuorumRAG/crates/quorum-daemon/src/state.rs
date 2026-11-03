@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -113,6 +113,58 @@ impl InFlightQueryRegistry {
     }
 }
 
+/// Session data tracking seen chunk IDs and last active timestamp for multi-turn continuation deduplication.
+#[derive(Debug, Clone)]
+pub struct ChatSessionData {
+    pub session_id: String,
+    pub seen_chunk_ids: HashSet<String>,
+    pub last_active: Instant,
+}
+
+/// Thread-safe registry mapping session IDs to their active continuation state and seen chunk IDs.
+#[derive(Clone, Default)]
+pub struct ChatSessionRegistry {
+    sessions: Arc<RwLock<HashMap<String, ChatSessionData>>>,
+}
+
+impl ChatSessionRegistry {
+    pub fn new() -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub fn get_seen_chunks(&self, session_id: &str) -> HashSet<String> {
+        if let Ok(map) = self.sessions.read() {
+            map.get(session_id)
+                .map(|s| s.seen_chunk_ids.clone())
+                .unwrap_or_default()
+        } else {
+            HashSet::new()
+        }
+    }
+
+    pub fn record_seen_chunks(&self, session_id: &str, chunk_ids: &[String]) {
+        if let Ok(mut map) = self.sessions.write() {
+            let entry = map.entry(session_id.to_string()).or_insert_with(|| ChatSessionData {
+                session_id: session_id.to_string(),
+                seen_chunk_ids: HashSet::new(),
+                last_active: Instant::now(),
+            });
+            entry.last_active = Instant::now();
+            for id in chunk_ids {
+                entry.seen_chunk_ids.insert(id.clone());
+            }
+        }
+    }
+
+    pub fn prune_stale_sessions(&self, max_idle: std::time::Duration) {
+        if let Ok(mut map) = self.sessions.write() {
+            map.retain(|_, v| v.last_active.elapsed() < max_idle);
+        }
+    }
+}
+
 /// Global shared application state for Axum daemon routes.
 pub struct DaemonState {
     pub start_time: Instant,
@@ -131,4 +183,5 @@ pub struct DaemonState {
     pub data_dir: PathBuf,
     pub shutdown_notify: Arc<tokio::sync::Notify>,
     pub in_flight_queries: Arc<InFlightQueryRegistry>,
+    pub sessions: ChatSessionRegistry,
 }

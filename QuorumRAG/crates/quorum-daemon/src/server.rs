@@ -144,6 +144,8 @@ async fn chat_stream_compat_handler(
         access_tier: Some(0),
         history: Vec::new(),
         query_id: None,
+        session_id: None,
+        seen_chunk_ids: Vec::new(),
         bypass_cache: false,
     };
     chat::chat_sse_handler(State(state), axum::Json(req)).await

@@ -11,11 +11,13 @@ use crate::types::*;
 pub use classify::ClassifyIntentNode;
 pub use grade::GradeRelevanceNode;
 pub use retrieve::RetrieveMeshNode;
-pub use rewrite::RewriteQueryNode;
+pub use rewrite::{ContinuationFacetExtractor, RewriteContinuationNode, RewriteQueryNode};
 pub use synthesize::SynthesizeWithCitationsNode;
+pub use crate::types::AgenticGraphState;
 use tokio::sync::mpsc::Sender;
 use std::sync::Arc;
 use crate::cache::CacheManager;
+use quorum_contract::EmbeddingGenerator;
 
 pub struct AgenticStateGraphRunner {
     pub max_hops: usize,
@@ -85,6 +87,34 @@ impl AgenticStateGraphRunner {
         top_k: usize,
         telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
     ) -> Result<AgenticGraphState, String> {
+        self.run_with_history_and_session(
+            prompt,
+            history,
+            requested_family,
+            engine,
+            vector,
+            access_tier,
+            top_k,
+            std::collections::HashSet::new(),
+            telemetry_tx,
+        )
+        .await
+    }
+
+    /// Executes the LangGraph-style state graph with multi-turn conversation history and session seen chunks.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_with_history_and_session(
+        &self,
+        prompt: &str,
+        history: Vec<ChatTurnMessage>,
+        requested_family: SynthesisModelFamily,
+        engine: &ScatterGatherEngine,
+        vector: &[f32],
+        access_tier: u8,
+        top_k: usize,
+        seen_chunk_ids: std::collections::HashSet<String>,
+        telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
+    ) -> Result<AgenticGraphState, String> {
         let corrected_prompt =
             crate::offline_engine::DeterministicOfflineSynthesisEngine::correct_spelling(prompt);
         let prompt_lower = corrected_prompt.trim().to_ascii_lowercase();
@@ -122,8 +152,10 @@ impl AgenticStateGraphRunner {
         let mut state_name = AgenticStateName::ClassifyIntent;
         let mut graph_state =
             AgenticGraphState::new(&corrected_prompt, requested_family, self.max_hops)
+                .with_seen_chunks(seen_chunk_ids)
                 .with_conversation_history(history);
         let mut cache_key_query = graph_state.current_query.clone();
+        let mut rewritten_vector: Option<Vec<f32>> = None;
 
         let hw = HardwareTelemetry::probe();
         if let Some(ref tx) = telemetry_tx {
@@ -265,6 +297,25 @@ impl AgenticStateGraphRunner {
                         return Ok(graph_state);
                     }
 
+                    if is_continuation {
+                        let orig_q = graph_state.current_query.clone();
+                        let _ = crate::agentic::rewrite::RewriteContinuationNode::execute(&mut graph_state);
+                        let embedder = quorum_contract::DeterministicOfflineEngine::new();
+                        if let Ok(fresh) = embedder.embed_text(&graph_state.current_query) {
+                            rewritten_vector = Some(fresh);
+                        }
+                        if let Some(ref tx) = telemetry_tx {
+                            let _ = tx
+                                .send(AgenticTelemetryEvent::QueryRewritten {
+                                    hop: graph_state.hop_count,
+                                    original_query: orig_q,
+                                    rewritten_query: graph_state.current_query.clone(),
+                                    rewrite_strategy: "continuation_facet_expansion".to_string(),
+                                })
+                                .await;
+                        }
+                    }
+
                     if let Some(ref tx) = telemetry_tx {
                         let _ = tx
                             .send(AgenticTelemetryEvent::IntentClassified {
@@ -291,10 +342,11 @@ impl AgenticStateGraphRunner {
 
                 AgenticStateName::RetrieveMesh => {
                     let start = std::time::Instant::now();
+                    let effective_vec = rewritten_vector.as_deref().unwrap_or(vector);
                     RetrieveMeshNode::execute(
                         &mut graph_state,
                         engine,
-                        vector,
+                        effective_vec,
                         access_tier,
                         top_k,
                     )

@@ -68,6 +68,7 @@ async fn create_test_daemon() -> (axum::Router, Arc<DaemonState>, tempfile::Temp
         data_dir,
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
         in_flight_queries: Arc::new(quorum_daemon::InFlightQueryRegistry::new()),
+        sessions: quorum_daemon::ChatSessionRegistry::new(),
     });
 
     let app = build_router(Arc::clone(&state));

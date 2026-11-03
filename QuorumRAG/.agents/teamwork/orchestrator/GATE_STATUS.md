@@ -106,3 +106,35 @@ Key Outputs:
 - Solo PR ship script `scripts/solo_pr_ship.ps1` executed cleanly; GitHub Pull Request #5 created, reviewed by automated invariant checks, approved, and squash-merged cleanly into `main` (`fb90760`).
 - Working tree 100% clean (`git status -s d:\harfile\QuorumRAG` is empty).
 
+
+## Gate - Milestone M15 (Iteration 1)
+| Agent | Role | Verdict | Source |
+|-------|------|---------|--------|
+| worker_m15_p2p | teamwork_worker | DONE (build passed) | handoff.md |
+| reviewer_m15_1 | teamwork_reviewer | APPROVE | handoff.md |
+| reviewer_m15_2 | teamwork_reviewer | APPROVE | handoff.md |
+| challenger_m15_1 | teamwork_challenger | APPROVE | handoff.md |
+| challenger_m15_2 | teamwork_challenger | APPROVE | handoff.md |
+| auditor_m15_1 | teamwork_auditor | CLEAN | handoff.md |
+
+Gate Result: **PASS**
+Key Outputs:
+- Implemented persistent 32-byte Ed25519 node identity (`<data_dir>/node_identity.seed`) via `load_or_generate_node_seed` shared across `NetworkConfig` and `ScatterGatherEngine`. Inbound query verification passes without spoofing rejection.
+- Implemented `engine_mode: String` in `EmbeddingContract` ("DeterministicOffline" vs "GemmaCandle"), producing ~128 bits Hamming distance in the BLAKE3 contract hash and failing incompatible peer handshakes closed with `ContractMismatch`.
+- Federated entity and cue-term supplement queries in `RetrieveMeshNode::execute` via `ScatterGatherEngine::search_federated_text`.
+- Disambiguated citations and deduplication by `(source_peer, file_name)` across `RrfCombiner::fuse_rankings_with_peers`, `offline_engine.rs`, and `app.js` (`peerId + '::' + cleanFileName` with `[Peer: <short_id>]` badge).
+- Implemented configurable `max_peer_responses` across backend `CoordinatorConfig`, `OsoosiMeshSettings`, CLI (`--max-peer-responses`), REST API (`POST /api/mesh/config`), and Web UI settings input (`#mesh-max-peer-responses`).
+- Verified across unit, integration, and adversarial tests: `m15_p2p_gaps_tests`, `adversarial_contract_tests`, `quorum-network`, `quorum-contract`, `coordinator_tests`, `mesh_endpoints_tests`, and `daemon_tests`. Forensic audit verdict: CLEAN.
+
+## Gate - Milestone M16 (Iteration 1)
+| Agent | Role | Verdict | Source |
+|-------|------|---------|--------|
+| worker_m16_continuation | teamwork_worker | DONE (tests passed) | handoff.md |
+| reviewer_m16_1 | teamwork_reviewer | [PENDING] | handoff.md |
+| reviewer_m16_2 | teamwork_reviewer | [PENDING] | handoff.md |
+| challenger_m16_1 | teamwork_challenger | [PENDING] | handoff.md |
+| challenger_m16_2 | teamwork_challenger | [PENDING] | handoff.md |
+| auditor_m16_1 | teamwork_auditor | [PENDING] | handoff.md |
+
+Gate Result: **IN_PROGRESS**
+

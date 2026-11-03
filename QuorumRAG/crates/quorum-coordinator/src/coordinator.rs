@@ -158,17 +158,18 @@ impl QueryCoordinator {
             .await
     }
 
-    /// Executes iterative multi-hop retrieval and synthesis with multi-turn conversation history.
-    pub async fn query_agentic_with_history(
+    /// Executes iterative multi-hop retrieval and synthesis with multi-turn conversation history and session seen chunks.
+    pub async fn query_agentic_with_history_and_session(
         &self,
         prompt: &str,
         history: Vec<ChatTurnMessage>,
         family: SynthesisModelFamily,
         top_k: usize,
+        seen_chunk_ids: std::collections::HashSet<String>,
         telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
     ) -> Result<QueryResult, CoordinatorError> {
         let start = std::time::Instant::now();
-        tracing::info!(prompt, "Starting query_agentic_with_history");
+        tracing::info!(prompt, seen_count = seen_chunk_ids.len(), "Starting query_agentic_with_history_and_session");
         let embed_query = AgenticGraphState::expand_followup_query(prompt, &history);
         let embedder = quorum_contract::DeterministicOfflineEngine::new();
         let contract_hash = embedder.contract_hash();
@@ -185,7 +186,7 @@ impl QueryCoordinator {
 
         let final_state = self
             .agentic_runner
-            .run_with_history(
+            .run_with_history_and_session(
                 prompt,
                 history,
                 family,
@@ -193,6 +194,7 @@ impl QueryCoordinator {
                 &vector,
                 self.config.default_peer_access_tier,
                 top_k,
+                seen_chunk_ids,
                 telemetry_tx,
             )
             .await
@@ -214,5 +216,25 @@ impl QueryCoordinator {
             cache_hit: was_cached,
             cache_epoch: epoch,
         })
+    }
+
+    /// Executes iterative multi-hop retrieval and synthesis with multi-turn conversation history.
+    pub async fn query_agentic_with_history(
+        &self,
+        prompt: &str,
+        history: Vec<ChatTurnMessage>,
+        family: SynthesisModelFamily,
+        top_k: usize,
+        telemetry_tx: Option<Sender<AgenticTelemetryEvent>>,
+    ) -> Result<QueryResult, CoordinatorError> {
+        self.query_agentic_with_history_and_session(
+            prompt,
+            history,
+            family,
+            top_k,
+            std::collections::HashSet::new(),
+            telemetry_tx,
+        )
+        .await
     }
 }

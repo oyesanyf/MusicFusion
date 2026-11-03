@@ -1,50 +1,37 @@
-# BRIEFING — 2026-11-02T17:34:35Z
+# BRIEFING - 2026-11-03T16:51:30Z
 
 ## Mission
-Sentinel monitoring and progress reporting for QuorumRAG adaptation.
+Supervise execution of QuorumRAG cross-peer gap fixes, multi-turn continuation deduplication, and configurable max peer responses.
 
 ## 🔒 My Identity
 - Archetype: sentinel
 - Working directory: d:\harfile\QuorumRAG\.agents\teamwork\sentinel
-- Orchestrator: 6e43b521-b448-4762-842a-0bc8d66e2854
-- Victory Auditor: e80c0512-b52a-4ac2-8297-146b61bbeffb (victory_auditor_1)
+- Orchestrator: 0c913451-816c-4afd-8e1f-03ffbd9a8e52
+- Victory Auditor: to be spawned on victory claim
 
 ## 🔒 Key Constraints
-- No technical decisions — relay only
+- No technical decisions - relay only
 - Victory Audit is MANDATORY before reporting completion
-- Route: General path -> teamwork_orchestrator
-- Adapt Google LangExtract for chat extraction to RAG
-- Restate answers to questions grounded strictly in RAG chunks
-- Dynamic real-time spellcheck in chat box using LLM
-- URL/doc links with relevance scores at end of response; action buttons (Copy, Regenerate, Read Aloud, Feedback, Continue, Save File, Clear)
-- Adapt Mesh Config UI & TPM hardware identity/attestation from OshoosiClaw into QuorumRAG
-- Server test bypass_cache fix, CARGO_INCREMENTAL=0 on daemon, keep target/debug/quorumrag.exe live on 0.0.0.0:3031
-- Production code only (no mocks, no dummy personas)
-- NO line numbers in response body or bottom sources badges; deduplicate sources by file name; suppress ChatGPT export artifacts; prioritize CV/resumes for profile queries.
-- Q&A style opening repeating question/topic for every query; filename match priority bonus; calibrated grounding accuracy scores (78%–99%); restart fresh binary on port 3031 in M14.
-- User Architectural Blueprint: XML context blocks, 16k context, boundary-aware chunking & broken fragment stripping, 35% minimum similarity cutoff with clean no-match, "continue" pagination offset, action buttons.
+- R1: Fix 4 Cross-Peer Gaps in P2P Mesh + Configurable max_peer_responses end-to-end [M15: GATED PASS (commit 491cb92)]
+- R2: Multi-Turn Continuation Deduplication & State Graph Pipeline [M16: ALL 7 TASKS & TESTS PASSED -> Gate Review]
+- R3: Verification (cargo test, live P2P test, live 3-turn SSE query test with gemma4:26b), service rebuild, solo PR ship [M17: PLANNED]
+- Zero-wait incremental commits via scripts/solo_pr_ship.ps1 with git status/staging scoped with `-- .`
+- PATH/environment protection
 
 ## User Context
-- **Last user request**: Architectural Blueprint: XML context, 16k context, chunk cleaning & merging, 35% similarity cutoff, "continue" router, action buttons, hot restart 3031.
+- **Last user request**: Added requirement for configurable max_peer_responses across CLI, backend config, mesh runtime, and UI.
 - **Pending clarifications**: none
-- **Delivered results**: Sent Progress Updates 1–62 to caller, Final Delivery with VICTORY CONFIRMED.
+- **Delivered results**: Progress reports 1-12 sent; Milestone M15 verified and passed; Milestone M16 implementation complete.
 
 ## Project Status
-- **Phase**: complete
+- **Phase**: in progress (Milestone M16: Verification Handed Off -> Milestone M17 Deployment)
+- **Route**: General -> teamwork_orchestrator (0c913451-816c-4afd-8e1f-03ffbd9a8e52)
+- **Crons**: task-18 (Cron 1: Progress Reporting */8), task-19 (Cron 2: Liveness Check */10)
 
 ## Victory Audit Status
-- **Triggered**: yes
-- **Verdict**: VICTORY CONFIRMED
+- **Triggered**: no
+- **Verdict**: pending
 - **Retry count**: 0
 
 ## Artifact Index
-- d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md — Authoritative user intent record (with Follow-up §2, §3, & §4)
-- d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md — Orchestrator project scope & milestone plan
-- d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\GATE_STATUS.md — Gate verdicts (M11 PASS, M12 PASS)
-- d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1\handoff.md — Forensic Auditor M11 CLEAN verdict
-- d:\harfile\QuorumRAG\.agents\teamwork\worker_m12_remediation_1\handoff.md — Worker M12 Remediation report (commit 3ce1f7f)
-- d:\harfile\QuorumRAG\.agents\teamwork\auditor_m12_remediation_1\handoff.md — Forensic Auditor M12 Remediation CLEAN verdict
-- crates/quorum-coordinator/src/tpm.rs — Adapted OshoosiClaw TPM 2.0 silicon identity and attestation
-- crates/quorum-coordinator/tests/tpm_tests.rs — TPM 2.0 verification suite
-- crates/quorum-daemon/src/handlers/mesh.rs — Adapted OshoosiClaw daemon mesh routes
-- crates/quorum-daemon/tests/mesh_endpoints_tests.rs — Daemon mesh endpoint verification suite
+- d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md - Authoritative task prompt record with follow-ups
