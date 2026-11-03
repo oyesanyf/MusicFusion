@@ -25,6 +25,7 @@ pub fn build_router(state: Arc<DaemonState>) -> axum::Router {
 
         // ChatGPT Settings, OshoosiClaw P2P Mesh, Shared Folders & HIPAA PHI DLP Endpoints
         .route("/api/settings", get(settings::get_settings_handler).post(settings::update_settings_handler))
+        .route("/api/preferences", get(settings::get_settings_handler).post(settings::update_settings_handler))
         .route("/api/mesh/status", get(settings::mesh_status_handler))
         .route("/api/mesh/config", post(settings::update_mesh_config_handler))
         .route("/api/mesh/shared-folders", post(settings::manage_shared_folders_handler))

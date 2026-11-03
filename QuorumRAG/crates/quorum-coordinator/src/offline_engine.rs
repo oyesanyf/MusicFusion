@@ -1,6 +1,6 @@
 use crate::telemetry::AgenticTelemetryEvent;
 use crate::types::ChatTurnMessage;
-use quorum_types::{Citation, ScoredChunk};
+use quorum_types::{Citation, DocumentChunk, ScoredChunk};
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 use tokio::sync::mpsc::Sender;
@@ -226,11 +226,7 @@ impl DeterministicOfflineSynthesisEngine {
         };
 
         let prompt_lower = prompt_eff.to_ascii_lowercase();
-        let is_continuation = prompt_lower == "continue"
-            || prompt_lower.starts_with("continue ")
-            || prompt_lower.contains("tell me more")
-            || prompt_lower.contains("go on")
-            || prompt_lower.contains("what else");
+        let is_continuation = Self::is_continuation_query(&prompt_lower);
 
         let mut previous_snippets = std::collections::HashSet::new();
         if is_continuation {
@@ -251,10 +247,16 @@ impl DeterministicOfflineSynthesisEngine {
                 .rev()
                 .find(|t| {
                     t.role.eq_ignore_ascii_case("user")
-                        && !t.content.to_ascii_lowercase().starts_with("continue")
+                        && !Self::is_continuation_query(&t.content.to_ascii_lowercase())
                 })
                 .map(|t| t.content.as_str())
-                .unwrap_or(expanded_query)
+                .unwrap_or_else(|| {
+                    if !expanded_query.is_empty() && !Self::is_continuation_query(&expanded_query.to_ascii_lowercase()) {
+                        expanded_query
+                    } else {
+                        prompt_eff
+                    }
+                })
         } else if !expanded_query.is_empty() && expanded_query != prompt {
             expanded_query
         } else {
@@ -315,7 +317,7 @@ impl DeterministicOfflineSynthesisEngine {
             body.push_str("}\n");
             body.push_str("```\n");
             if let Some(tx) = telemetry_tx {
-                let _ = tx.try_send(AgenticTelemetryEvent::TokenDelta {
+                let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
                     delta: body.clone(),
                 });
             }
@@ -328,7 +330,7 @@ impl DeterministicOfflineSynthesisEngine {
                 prompt
             );
             if let Some(tx) = telemetry_tx {
-                let _ = tx.try_send(AgenticTelemetryEvent::TokenDelta {
+                let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
                     delta: fallback.clone(),
                 });
             }
@@ -336,7 +338,7 @@ impl DeterministicOfflineSynthesisEngine {
         }
 
         // Extract query terms from expanded_query (includes follow-up coreference expansion)
-        let query_terms: Vec<String> = expanded_lower
+        let mut query_terms: Vec<String> = expanded_lower
             .split(|c: char| !c.is_alphanumeric() && c != '_')
             .map(|t| t.trim().to_ascii_lowercase())
             .filter(|t| t.len() >= 3 && !STOPWORDS.contains(&t.as_str()))
@@ -346,6 +348,30 @@ impl DeterministicOfflineSynthesisEngine {
                 }
                 acc
             });
+
+        // For follow-up queries like "tell me more", "continue", "elaborate", extract context keywords from history
+        if query_terms.is_empty() && !history.is_empty() {
+            for turn in history.iter().rev() {
+                let turn_terms: Vec<String> = turn.content
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .map(|t| t.trim().to_ascii_lowercase())
+                    .filter(|t| t.len() >= 3 && !STOPWORDS.contains(&t.as_str()) && !GENERIC_ATTRIBUTE_TERMS.contains(&t.as_str()))
+                    .collect();
+                if !turn_terms.is_empty() {
+                    for t in turn_terms {
+                        if !query_terms.contains(&t) {
+                            query_terms.push(t);
+                            if query_terms.len() >= 8 {
+                                break;
+                            }
+                        }
+                    }
+                    if !query_terms.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
 
         // Separate specific entity/topic terms from generic attribute words (e.g. "school", "work", "income", "tax")
         let entity_terms: Vec<String> = query_terms
@@ -419,6 +445,13 @@ impl DeterministicOfflineSynthesisEngine {
 
             let matches_whole_word = |term: &str| -> bool {
                 if doc_tokens.contains(term) {
+                    return true;
+                }
+                if (term == "maths" || term == "math")
+                    && (doc_tokens.contains("mathematics")
+                        || doc_tokens.contains("mathematical")
+                        || file_l.contains("mathematics"))
+                {
                     return true;
                 }
                 // Allow simple plural/singular inflection ("letter" <-> "letters", "school" <-> "schools"),
@@ -496,15 +529,22 @@ impl DeterministicOfflineSynthesisEngine {
                     seen_snippets.push(norm_key);
                 }
 
+                let file_tokens: std::collections::HashSet<&str> = file_l
+                    .split(|c: char| !c.is_alphanumeric())
+                    .filter(|w| !w.is_empty())
+                    .collect();
+
                 let file_hits = query_terms
                     .iter()
-                    .filter(|t| matches_whole_word(t.as_str()) || file_l.contains(t.as_str()))
+                    .filter(|t| {
+                        let term = t.as_str();
+                        file_tokens.contains(term)
+                            || file_l.contains(term)
+                            || ((term == "maths" || term == "math") && file_l.contains("mathematics"))
+                            || (term.len() >= 4 && term.ends_with('s') && file_tokens.contains(&term[..term.len() - 1]))
+                            || (term.len() >= 4 && file_tokens.contains(format!("{}s", term).as_str()))
+                    })
                     .count();
-
-                // Strict minimum similarity cutoff: discard candidates below calibrated similarity threshold (0.35 / 35%)
-                if scored.score < 0.35 && scored.score > 0.0 && file_hits == 0 {
-                    continue;
-                }
 
                 let mut doc_bonus = (file_hits as i32) * 160;
                 if file_l.ends_with(".docx") || file_l.ends_with(".pdf") || file_l.ends_with(".doc") {
@@ -607,15 +647,36 @@ impl DeterministicOfflineSynthesisEngine {
                 })
         });
 
-        // Keep top 8 deduplicated RAG chunks for comprehensive multi-paragraph synthesis
-        let matched_chunks: Vec<&ScoredChunk> = scored_matches
+        let ui = crate::dlp_mesh::global_mesh_dlp_controller()
+            .settings
+            .read()
+            .map(|g| g.ui.clone())
+            .unwrap_or_default();
+
+        let chunk_limit = if ui.max_output_tokens >= 16384 || ui.agentic_loop_enabled {
+            36
+        } else if ui.max_output_tokens > 4096 {
+            24
+        } else {
+            12
+        };
+
+        // Keep top N deduplicated RAG chunks for comprehensive multi-paragraph synthesis
+        let mut candidate_chunks: Vec<ScoredChunk> = scored_matches
             .into_iter()
-            .take(8)
-            .map(|(c, _, _, _)| c)
+            .take(chunk_limit)
+            .map(|(c, _, _, _)| c.clone())
             .collect();
 
-        if !matched_chunks.is_empty() {
-            let citations: Vec<Citation> = matched_chunks
+        if ui.parent_document_retrieval {
+            candidate_chunks = Self::stitch_parent_document_chunks(candidate_chunks);
+        }
+
+        let matched_chunks = candidate_chunks;
+        let matched_chunk_refs: Vec<&ScoredChunk> = matched_chunks.iter().collect();
+
+        if !matched_chunk_refs.is_empty() {
+            let citations: Vec<Citation> = matched_chunk_refs
                 .iter()
                 .enumerate()
                 .map(|(idx, c)| {
@@ -636,7 +697,7 @@ impl DeterministicOfflineSynthesisEngine {
             if let Some(llm_orchestrated) = Self::query_local_ollama_chat(
                 prompt_eff,
                 history,
-                &matched_chunks,
+                &matched_chunk_refs,
                 model_tag,
                 telemetry_tx,
             ) {
@@ -647,7 +708,7 @@ impl DeterministicOfflineSynthesisEngine {
             let prefix = Self::format_question_restated_prefix(prompt_eff);
 
             let mut body_paragraphs: Vec<String> = Vec::new();
-            for (idx, c) in matched_chunks.iter().enumerate() {
+            for (idx, c) in matched_chunk_refs.iter().enumerate() {
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
                 // Strip residual artifacts, ChatGPT export markers, and dividers
                 let mut chunk_lines: Vec<String> = Vec::new();
@@ -701,7 +762,7 @@ impl DeterministicOfflineSynthesisEngine {
 
             // Synthesize affirmative restated opening grounded in top chunk
             if !prefix.is_empty() && !matched_chunks.is_empty() {
-                let top_chunk = matched_chunks[0];
+                let top_chunk = &matched_chunks[0];
                 let file_name = std::path::Path::new(&top_chunk.chunk.file_path)
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -761,7 +822,7 @@ impl DeterministicOfflineSynthesisEngine {
             answer_parts.extend(body_paragraphs);
 
             // Add end-of-response sources block with accuracy scores (zero line numbers!)
-            let sources_block = Self::format_sources_block(&matched_chunks);
+            let sources_block = Self::format_sources_block(&matched_chunk_refs);
             let synthesized_rag = format!("{}{}", answer_parts.join("\n\n"), sources_block);
 
             if let Some(tx) = telemetry_tx {
@@ -770,7 +831,7 @@ impl DeterministicOfflineSynthesisEngine {
                         tracing::debug!("Token streaming stopped: tx channel closed");
                         break;
                     }
-                    if tx.try_send(AgenticTelemetryEvent::TokenDelta {
+                    if tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
                         delta: word.to_string(),
                     }).is_err() {
                         break;
@@ -789,7 +850,7 @@ impl DeterministicOfflineSynthesisEngine {
                     if tx.is_closed() {
                         break;
                     }
-                    if tx.try_send(AgenticTelemetryEvent::TokenDelta {
+                    if tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
                         delta: word.to_string(),
                     }).is_err() {
                         break;
@@ -1079,6 +1140,296 @@ impl DeterministicOfflineSynthesisEngine {
         block
     }
 
+    /// Detects whether a query string represents a conversational continuation request.
+    pub fn is_continuation_query(lower: &str) -> bool {
+        let t = lower.trim();
+        t == "continue"
+            || t.starts_with("continue ")
+            || t.contains("tell me more")
+            || t.contains("go on")
+            || t.contains("what else")
+            || t.contains("elaborate")
+            || t.contains("more details")
+            || t.contains("keep going")
+            || t.contains("expand")
+            || t == "more"
+    }
+
+    /// Stitches adjacent or contiguous document chunks from the same source file into unbroken parent document sections.
+    pub fn stitch_parent_document_chunks(mut chunks: Vec<ScoredChunk>) -> Vec<ScoredChunk> {
+        if chunks.len() <= 1 {
+            return chunks;
+        }
+
+        let get_chunk_index = |chunk: &DocumentChunk| -> Option<usize> {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&chunk.metadata_json) {
+                if let Some(idx) = val.get("chunk_index").and_then(|v| v.as_u64()) {
+                    return Some(idx as usize);
+                }
+            }
+            chunk.chunk_id.rsplit_once(':').and_then(|(_, s)| s.parse::<usize>().ok())
+        };
+
+        // Sort by file_path, line_start, then chunk_index
+        chunks.sort_by(|a, b| {
+            a.chunk.file_path.cmp(&b.chunk.file_path)
+                .then_with(|| a.chunk.line_start.cmp(&b.chunk.line_start))
+                .then_with(|| {
+                    let idx_a = get_chunk_index(&a.chunk).unwrap_or(0);
+                    let idx_b = get_chunk_index(&b.chunk).unwrap_or(0);
+                    idx_a.cmp(&idx_b)
+                })
+        });
+
+        let mut stitched: Vec<ScoredChunk> = Vec::with_capacity(chunks.len());
+
+        for chunk in chunks {
+            if let Some(prev) = stitched.last_mut() {
+                let prev_idx = get_chunk_index(&prev.chunk);
+                let curr_idx = get_chunk_index(&chunk.chunk);
+
+                let same_file = prev.chunk.file_path == chunk.chunk.file_path;
+                let adjacent_idx = match (prev_idx, curr_idx) {
+                    (Some(p), Some(c)) => c == p + 1 || c == p,
+                    _ => false,
+                };
+                let contiguous_lines = chunk.chunk.line_start <= prev.chunk.line_end.saturating_add(3);
+
+                if same_file && (adjacent_idx || contiguous_lines) {
+                    let curr_text = chunk.chunk.text_content.trim();
+                    let prev_text = prev.chunk.text_content.trim();
+
+                    if !prev_text.contains(curr_text) {
+                        let max_overlap = 200.min(prev_text.len()).min(curr_text.len());
+                        let overlap_len = (1..=max_overlap)
+                            .rev()
+                            .find(|&len| {
+                                prev_text.is_char_boundary(prev_text.len() - len)
+                                    && curr_text.is_char_boundary(len)
+                                    && prev_text.ends_with(&curr_text[..len])
+                            })
+                            .unwrap_or(0);
+
+                        if overlap_len > 15 {
+                            prev.chunk.text_content.push_str(&curr_text[overlap_len..]);
+                        } else {
+                            prev.chunk.text_content.push_str("\n\n");
+                            prev.chunk.text_content.push_str(curr_text);
+                        }
+                    }
+
+                    prev.chunk.line_end = prev.chunk.line_end.max(chunk.chunk.line_end);
+                    prev.score = prev.score.max(chunk.score);
+                    continue;
+                }
+            }
+            stitched.push(chunk);
+        }
+
+        stitched
+    }
+
+    /// Map-Reduce Fact Sheet Extraction: Clusters retrieved chunks into groups of 3-4 chunks
+    /// and extracts dense factual nuggets (core definitions, metrics, formulas, dates, theorems, quotes)
+    /// before chapter writing.
+    pub fn extract_fact_sheets(chunks: &[&ScoredChunk], _prompt: &str) -> Vec<String> {
+        let mut fact_sheets = Vec::new();
+        if chunks.is_empty() {
+            return fact_sheets;
+        }
+
+        // Group into clusters of 3-4 chunks
+        for (cluster_idx, cluster) in chunks.chunks(4).enumerate() {
+            let mut definitions = Vec::new();
+            let mut metrics_and_formulas = Vec::new();
+            let mut dates_and_names = Vec::new();
+            let mut verbatim_quotes = Vec::new();
+            let mut primary_source = String::new();
+
+            for scored in cluster {
+                let file_name = std::path::Path::new(&scored.chunk.file_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&scored.chunk.file_path);
+                if primary_source.is_empty() {
+                    primary_source = file_name.to_string();
+                }
+
+                let cleaned = Self::clean_chunk_text(&scored.chunk.text_content);
+                for sentence in cleaned.split(". ") {
+                    let s = sentence.trim().trim_end_matches('.');
+                    if s.len() < 10 || s.len() > 300 {
+                        continue;
+                    }
+                    let s_low = s.to_ascii_lowercase();
+
+                    // Definitions
+                    if s_low.contains(" is ") || s_low.contains(" are ") || s_low.contains(" defined as ") || s_low.contains(" refers to ") {
+                        if definitions.len() < 3 && !definitions.contains(&s.to_string()) {
+                            definitions.push(s.to_string());
+                        }
+                    }
+
+                    // Metrics, Formulas, Numbers, Theorems
+                    if s.chars().any(|c| c.is_ascii_digit()) || s_low.contains("ratio") || s_low.contains("percent") || s_low.contains("formula") || s_low.contains("theorem") || s_low.contains("phi") || s_low.contains("fibonacci") || s_low.contains("geometry") {
+                        if metrics_and_formulas.len() < 3 && !metrics_and_formulas.contains(&s.to_string()) {
+                            metrics_and_formulas.push(s.to_string());
+                        }
+                    }
+
+                    // Historical Dates & Names (years 1000-2099)
+                    if s.split_whitespace().any(|w| {
+                        let clean_w = w.trim_matches(|c: char| !c.is_ascii_alphanumeric());
+                        clean_w.len() == 4 && clean_w.chars().all(|c| c.is_ascii_digit()) && (clean_w.starts_with('1') || clean_w.starts_with('2'))
+                    }) {
+                        if dates_and_names.len() < 3 && !dates_and_names.contains(&s.to_string()) {
+                            dates_and_names.push(s.to_string());
+                        }
+                    }
+
+                    // Verbatim Quotes
+                    if s.contains('"') || s.contains('“') || s.contains('”') {
+                        if verbatim_quotes.len() < 2 && !verbatim_quotes.contains(&s.to_string()) {
+                            verbatim_quotes.push(s.to_string());
+                        }
+                    }
+                }
+            }
+
+            let mut sheet = format!("<fact_sheet cluster=\"{}\" source=\"{}\">\n", cluster_idx + 1, primary_source);
+            for d in &definitions {
+                sheet.push_str(&format!("- [Core Definition]: {}\n", d));
+            }
+            for m in &metrics_and_formulas {
+                sheet.push_str(&format!("- [Metric/Formula/Theorem]: {}\n", m));
+            }
+            for dt in &dates_and_names {
+                sheet.push_str(&format!("- [Historical Date/Milestone]: {}\n", dt));
+            }
+            for q in &verbatim_quotes {
+                sheet.push_str(&format!("- [Verbatim Quote]: {}\n", q));
+            }
+            sheet.push_str("</fact_sheet>");
+            fact_sheets.push(sheet);
+        }
+
+        fact_sheets
+    }
+
+    /// Sentence-boundary completion guard: ensures generated text ends cleanly on a sentence terminal boundary
+    /// ('.', '!', '?') and never leaves trailing mid-sentence fragments like "Sacred math has been".
+    pub fn enforce_sentence_boundary_guard(
+        text: &mut String,
+        addr: &std::net::SocketAddr,
+        host_port: &str,
+        target_model: &str,
+        telemetry_tx: Option<&Sender<AgenticTelemetryEvent>>,
+    ) {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+        use std::time::Duration;
+
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let is_clean = trimmed.ends_with('.')
+            || trimmed.ends_with('!')
+            || trimmed.ends_with('?')
+            || trimmed.ends_with(".\"")
+            || trimmed.ends_with("!\"")
+            || trimmed.ends_with("?\"")
+            || trimmed.ends_with("```")
+            || trimmed.ends_with("---");
+
+        if is_clean {
+            return;
+        }
+
+        // Attempt micro-completion prompt if local Ollama daemon is reachable
+        let tail_slice: String = trimmed.chars().rev().take(200).collect::<String>().chars().rev().collect();
+        let prompt_payload = serde_json::json!({
+            "model": target_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a sentence completion assistant. Provide only the immediate concluding words to finish the sentence cleanly with a period. Output no conversational filler."
+                },
+                {
+                    "role": "user",
+                    "content": format!("Complete this unfinished sentence ending with a period:\n\"{}\"", tail_slice)
+                }
+            ],
+            "stream": false,
+            "options": {
+                "temperature": 0.1,
+                "num_predict": 48
+            }
+        });
+
+        if let Ok(mut stream) = TcpStream::connect_timeout(addr, Duration::from_millis(500)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+            let payload_str = prompt_payload.to_string();
+            let req = format!(
+                "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                host_port,
+                payload_str.len(),
+                payload_str
+            );
+            if stream.write_all(req.as_bytes()).is_ok() {
+                let mut resp_str = String::new();
+                if stream.read_to_string(&mut resp_str).is_ok() {
+                    if let Some(body_start) = resp_str.find("\r\n\r\n") {
+                        let body = &resp_str[body_start + 4..];
+                        if let Some(json_start) = body.find('{') {
+                            if let Some(json_end) = body.rfind('}') {
+                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&body[json_start..=json_end]) {
+                                    if let Some(concl) = val
+                                        .get("message")
+                                        .and_then(|m| m.get("content"))
+                                        .and_then(|c| c.as_str())
+                                    {
+                                        let clean_concl = concl.trim();
+                                        if !clean_concl.is_empty() && (clean_concl.ends_with('.') || clean_concl.ends_with('!') || clean_concl.ends_with('?')) {
+                                            if !clean_concl.starts_with(char::is_whitespace) {
+                                                text.push(' ');
+                                            }
+                                            text.push_str(clean_concl);
+                                            if let Some(tx) = telemetry_tx {
+                                                let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
+                                                    delta: format!(" {}", clean_concl),
+                                                });
+                                            }
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: Snap to the last complete sentence boundary if within reasonable distance
+        if let Some(last_boundary) = text.rfind(['.', '!', '?']) {
+            if last_boundary > text.len().saturating_sub(120) {
+                text.truncate(last_boundary + 1);
+                return;
+            }
+        }
+
+        // Final fallback: append period to ensure clean termination
+        text.push('.');
+        if let Some(tx) = telemetry_tx {
+            let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
+                delta: ".".to_string(),
+            });
+        }
+    }
+
     /// Multi-turn real-time streaming orchestration via local Ollama `POST /api/chat` (100% offline, zero internet access).
     /// Strictly orchestrates answers over non-empty `matched_chunks` and streams tokens directly to `telemetry_tx`.
     fn query_local_ollama_chat(
@@ -1151,8 +1502,15 @@ impl DeterministicOfflineSynthesisEngine {
         };
 
         let temp = ui.sampling_temperature.clamp(0.05, 0.20);
-        let num_predict = 1600usize;
-        let num_ctx = 16384usize;
+        let max_output_tokens = ui.max_output_tokens.clamp(256, 262144);
+        let agentic_loop_enabled = ui.agentic_loop_enabled;
+        let agentic_chunk_size = ui.agentic_chunk_size.clamp(2048, 8192);
+
+        let (per_hop_predict, num_ctx) = if !agentic_loop_enabled && max_output_tokens <= 4096 {
+            (max_output_tokens, 16384usize)
+        } else {
+            (agentic_chunk_size, 32768usize)
+        };
 
         let voice_directive = if ui.natural_human_voice {
             " Write in a clear, natural human voice with zero robotic filler."
@@ -1207,7 +1565,7 @@ impl DeterministicOfflineSynthesisEngine {
                     .and_then(|n| n.to_str())
                     .unwrap_or(&c.chunk.file_path);
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
-                let compact_text: String = cleaned.chars().take(1800).collect();
+                let compact_text: String = cleaned.chars().take(2500).collect();
                 format!(
                     "<document index=\"{}\" source=\"{}\">\n{}\n</document>",
                     i + 1,
@@ -1218,10 +1576,22 @@ impl DeterministicOfflineSynthesisEngine {
             .collect::<Vec<_>>()
             .join("\n\n");
 
+        let fact_sheets = if ui.map_reduce_fact_extraction {
+            Self::extract_fact_sheets(matched_chunks, prompt)
+        } else {
+            Vec::new()
+        };
+        let fact_sheet_block = if !fact_sheets.is_empty() {
+            format!("<distilled_fact_sheets>\n{}\n</distilled_fact_sheets>\n\n", fact_sheets.join("\n\n"))
+        } else {
+            String::new()
+        };
+
         let user_content = format!(
-            "<context>\n{}\n</context>\n\nUser Question: {}\n\n\
+            "<context>\n{}\n</context>\n\n{}User Question: {}\n\n\
             INSTRUCTION: Provide a complete, exhaustive, and fully cited multi-paragraph analysis answering ONLY the User Question above based strictly on `<context>`. Begin your response immediately with `{}` and include inline `[1]`, `[2]` citations. Do not include line numbers.",
             context_blocks,
+            fact_sheet_block,
             prompt,
             expected_prefix.trim()
         );
@@ -1231,96 +1601,163 @@ impl DeterministicOfflineSynthesisEngine {
             "content": user_content
         }));
 
-        let use_streaming = telemetry_tx.is_some();
-
         let send_chat_request = |target_model: &str| -> Option<String> {
-            let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(35)));
-            let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+            let max_hops = if agentic_loop_enabled {
+                ((max_output_tokens + per_hop_predict - 1) / per_hop_predict).clamp(1, 64)
+            } else {
+                1
+            };
 
-            let payload = serde_json::json!({
-                "model": target_model,
-                "messages": messages,
-                "stream": use_streaming,
-                "keep_alive": "24h",
-                "options": {
-                    "temperature": temp,
-                    "num_predict": num_predict,
-                    "num_ctx": num_ctx,
-                    "num_thread": 16,
-                    "top_p": 0.9,
-                    "repeat_penalty": 1.15
-                }
-            })
-            .to_string();
-
-            let request = format!(
-                "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                host_port,
-                payload.len(),
-                payload
-            );
-
-            stream.write_all(request.as_bytes()).ok()?;
+            let mut current_messages = messages.clone();
+            let mut full_text = String::new();
+            let mut accumulated_tokens = 0usize;
+            let mut hop_count = 0usize;
 
             if let Some(tx) = telemetry_tx {
-                // Real-time NDJSON streaming mode: emit TokenDelta immediately as each token arrives
-                let mut reader = BufReader::new(stream);
-                let mut header_line = String::new();
-                // Skip HTTP headers until blank line
-                loop {
-                    header_line.clear();
-                    let n = reader.read_line(&mut header_line).ok()?;
-                    if n == 0 || header_line == "\r\n" || header_line == "\n" {
-                        break;
-                    }
-                }
+                // Real-time NDJSON streaming mode: emit TokenDelta immediately with zero drops via blocking_send
+                while hop_count < max_hops && accumulated_tokens < max_output_tokens {
+                    hop_count += 1;
+                    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(45)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
 
-                let mut full_text = String::new();
-                let mut line_buf = String::new();
-                loop {
-                    // Immediately abort if the user clicked the Stop button on the chat box
-                    if tx.is_closed() {
-                        break;
-                    }
-                    line_buf.clear();
-                    let n = match reader.read_line(&mut line_buf) {
-                        Ok(n) => n,
-                        Err(_) => break,
-                    };
-                    if n == 0 {
-                        break;
-                    }
-                    let trimmed = line_buf.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                        if val.get("error").is_some() {
-                            return None;
+                    let payload = serde_json::json!({
+                        "model": target_model,
+                        "messages": current_messages,
+                        "stream": true,
+                        "keep_alive": "24h",
+                        "options": {
+                            "temperature": temp,
+                            "num_predict": per_hop_predict,
+                            "num_ctx": num_ctx,
+                            "num_thread": 16,
+                            "top_p": 0.9,
+                            "repeat_penalty": 1.15
                         }
-                        if let Some(tok) = val
-                            .get("message")
-                            .and_then(|m| m.get("content"))
-                            .and_then(|c| c.as_str())
-                        {
-                            if !tok.is_empty() {
-                                full_text.push_str(tok);
-                                let _ = tx.try_send(AgenticTelemetryEvent::TokenDelta {
-                                    delta: tok.to_string(),
-                                });
-                            }
-                        }
-                        if val.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
+                    })
+                    .to_string();
+
+                    let request = format!(
+                        "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        host_port,
+                        payload.len(),
+                        payload
+                    );
+
+                    stream.write_all(request.as_bytes()).ok()?;
+
+                    let mut reader = BufReader::new(stream);
+                    let mut header_line = String::new();
+                    // Skip HTTP headers until blank line
+                    loop {
+                        header_line.clear();
+                        let n = reader.read_line(&mut header_line).ok()?;
+                        if n == 0 || header_line == "\r\n" || header_line == "\n" {
                             break;
                         }
                     }
+
+                    let mut hop_text = String::new();
+                    let mut line_buf = String::new();
+                    let mut done_reason = String::new();
+                    let mut hop_eval_count = 0usize;
+
+                    loop {
+                        // Immediately abort if the user clicked Stop or channel disconnected
+                        if tx.is_closed() {
+                            break;
+                        }
+                        line_buf.clear();
+                        let n = match reader.read_line(&mut line_buf) {
+                            Ok(n) => n,
+                            Err(_) => break,
+                        };
+                        if n == 0 {
+                            break;
+                        }
+                        let trimmed = line_buf.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            if val.get("error").is_some() {
+                                return None;
+                            }
+                            if let Some(tok) = val
+                                .get("message")
+                                .and_then(|m| m.get("content"))
+                                .and_then(|c| c.as_str())
+                            {
+                                if !tok.is_empty() {
+                                    full_text.push_str(tok);
+                                    hop_text.push_str(tok);
+                                    // Zero-drop telemetry streaming inside block_in_place
+                                    if tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
+                                        delta: tok.to_string(),
+                                    }).is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Some(reason) = val.get("done_reason").and_then(|r| r.as_str()) {
+                                done_reason = reason.to_string();
+                            }
+                            if let Some(eval) = val.get("eval_count").and_then(|c| c.as_u64()) {
+                                hop_eval_count = eval as usize;
+                            }
+                            if val.get("done").and_then(|d| d.as_bool()).unwrap_or(false) {
+                                break;
+                            }
+                        }
+                    }
+
+                    if tx.is_closed() {
+                        break;
+                    }
+
+                    accumulated_tokens += if hop_eval_count > 0 {
+                        hop_eval_count
+                    } else {
+                        hop_text.len() / 4
+                    };
+
+                    // Recursive Agentic Loop Chaining:
+                    // If done_reason == "length" and accumulated_tokens < max_output_tokens, chain subsequent turn
+                    if done_reason == "length" && accumulated_tokens < max_output_tokens && hop_count < max_hops {
+                        let rolling_summary: String = if hop_text.len() > 1500 {
+                            let start = hop_text.len() - 1500;
+                            let safe_start = hop_text.char_indices().map(|(i, _)| i).find(|&i| i >= start).unwrap_or(start);
+                            hop_text[safe_start..].to_string()
+                        } else {
+                            hop_text.clone()
+                        };
+
+                        current_messages.push(serde_json::json!({
+                            "role": "assistant",
+                            "content": rolling_summary
+                        }));
+                        current_messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": "Continue immediately from where you stopped. Maintain the exact same analytical depth and Markdown structure. Do not repeat earlier text, do not emit conversational filler, and seamlessly complete the analysis."
+                        }));
+                    } else {
+                        break;
+                    }
                 }
+
+                // Sentence-boundary completion guard
+                Self::enforce_sentence_boundary_guard(
+                    &mut full_text,
+                    &addr,
+                    host_port,
+                    target_model,
+                    Some(tx),
+                );
 
                 if !full_text.contains("### 📚 Sources & Document Links") && !matched_chunks.is_empty() {
                     let sources_block = Self::format_sources_block(matched_chunks);
                     full_text.push_str(&sources_block);
-                    let _ = tx.try_send(AgenticTelemetryEvent::TokenDelta {
+                    let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
                         delta: sources_block,
                     });
                 }
@@ -1346,27 +1783,96 @@ impl DeterministicOfflineSynthesisEngine {
                 }
             } else {
                 // Non-streaming JSON mode for POST /api/query
-                let mut raw_resp = String::new();
-                stream.read_to_string(&mut raw_resp).ok()?;
+                while hop_count < max_hops && accumulated_tokens < max_output_tokens {
+                    hop_count += 1;
+                    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(45)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
 
-                let body_start = raw_resp.find("\r\n\r\n").map(|i| i + 4)?;
-                let body_str = &raw_resp[body_start..];
-                let json_start = body_str.find('{')?;
-                let json_end = body_str.rfind('}')?;
-                let val: serde_json::Value =
-                    serde_json::from_str(&body_str[json_start..=json_end]).ok()?;
+                    let payload = serde_json::json!({
+                        "model": target_model,
+                        "messages": current_messages,
+                        "stream": false,
+                        "keep_alive": "24h",
+                        "options": {
+                            "temperature": temp,
+                            "num_predict": per_hop_predict,
+                            "num_ctx": num_ctx,
+                            "num_thread": 16,
+                            "top_p": 0.9,
+                            "repeat_penalty": 1.15
+                        }
+                    })
+                    .to_string();
 
-                let text = val
-                    .get("message")
-                    .and_then(|m| m.get("content"))
-                    .and_then(|c| c.as_str())
-                    .or_else(|| val.get("response").and_then(|r| r.as_str()))?
-                    .trim();
+                    let request = format!(
+                        "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        host_port,
+                        payload.len(),
+                        payload
+                    );
 
-                if text.is_empty() {
+                    stream.write_all(request.as_bytes()).ok()?;
+
+                    let mut raw_resp = String::new();
+                    stream.read_to_string(&mut raw_resp).ok()?;
+
+                    let body_start = raw_resp.find("\r\n\r\n").map(|i| i + 4)?;
+                    let body_str = &raw_resp[body_start..];
+                    let json_start = body_str.find('{')?;
+                    let json_end = body_str.rfind('}')?;
+                    let val: serde_json::Value =
+                        serde_json::from_str(&body_str[json_start..=json_end]).ok()?;
+
+                    let text = val
+                        .get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_str())
+                        .or_else(|| val.get("response").and_then(|r| r.as_str()))?
+                        .trim();
+
+                    if text.is_empty() {
+                        break;
+                    }
+
+                    full_text.push_str(text);
+                    let eval_count = val.get("eval_count").and_then(|c| c.as_u64()).unwrap_or(0) as usize;
+                    accumulated_tokens += if eval_count > 0 { eval_count } else { text.len() / 4 };
+                    let done_reason = val.get("done_reason").and_then(|r| r.as_str()).unwrap_or("");
+
+                    if done_reason == "length" && accumulated_tokens < max_output_tokens && hop_count < max_hops {
+                        let rolling_summary: String = if text.len() > 1500 {
+                            let start = text.len() - 1500;
+                            let safe_start = text.char_indices().map(|(i, _)| i).find(|&i| i >= start).unwrap_or(start);
+                            text[safe_start..].to_string()
+                        } else {
+                            text.to_string()
+                        };
+                        current_messages.push(serde_json::json!({
+                            "role": "assistant",
+                            "content": rolling_summary
+                        }));
+                        current_messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": "Continue immediately from where you stopped. Maintain the exact same analytical depth and Markdown structure. Do not repeat earlier text, do not emit conversational filler, and seamlessly complete the analysis."
+                        }));
+                    } else {
+                        break;
+                    }
+                }
+
+                Self::enforce_sentence_boundary_guard(
+                    &mut full_text,
+                    &addr,
+                    host_port,
+                    target_model,
+                    None,
+                );
+
+                if full_text.trim().is_empty() {
                     None
                 } else {
-                    let mut final_text = text.to_string();
+                    let mut final_text = full_text.trim().to_string();
                     let prefix = Self::format_question_restated_prefix(prompt);
                     if !prefix.is_empty() && !final_text.starts_with(&prefix) {
                         let lower_start = final_text.chars().take(40).collect::<String>().to_ascii_lowercase();
@@ -2211,6 +2717,173 @@ mod tests {
             missing_body.contains("No matching documents were found in your local RAG index for **tell me about Eastern University**."),
             "Must report honest missing-info: {}",
             missing_body
+        );
+    }
+
+    #[test]
+    fn test_stitch_parent_document_chunks() {
+        let chunk1 = DocumentChunk::new(
+            "chunk_0",
+            "doc_sacred",
+            "C:/Users/oyesanyf/Documents/Sacred Mathematics.docx",
+            1,
+            25,
+            0,
+            vec![0.1; 768],
+            "Sacred mathematics explores geometric proportions and cosmological symmetries.",
+            Some("{\"chunk_index\": 0}".to_string()),
+        )
+        .unwrap();
+
+        let chunk2 = DocumentChunk::new(
+            "chunk_1",
+            "doc_sacred",
+            "C:/Users/oyesanyf/Documents/Sacred Mathematics.docx",
+            24,
+            50,
+            0,
+            vec![0.1; 768],
+            "Cosmological symmetries reflect the golden ratio and Platonic solids in nature.",
+            Some("{\"chunk_index\": 1}".to_string()),
+        )
+        .unwrap();
+
+        let chunk_other = DocumentChunk::new(
+            "chunk_other",
+            "doc_other",
+            "C:/Users/oyesanyf/Documents/Other.docx",
+            1,
+            30,
+            0,
+            vec![0.1; 768],
+            "Independent document content about something else.",
+            Some("{\"chunk_index\": 0}".to_string()),
+        )
+        .unwrap();
+
+        let chunks = vec![
+            ScoredChunk::new(chunk1, 0.85, "local", false),
+            ScoredChunk::new(chunk2, 0.90, "local", false),
+            ScoredChunk::new(chunk_other, 0.70, "local", false),
+        ];
+
+        let stitched = DeterministicOfflineSynthesisEngine::stitch_parent_document_chunks(chunks);
+        assert_eq!(stitched.len(), 2, "Adjacent chunks from Sacred Mathematics must be stitched into 1");
+        let sacred_stitched = stitched
+            .iter()
+            .find(|c| c.chunk.file_path.contains("Sacred Mathematics"))
+            .expect("Must find stitched Sacred Mathematics chunk");
+        assert_eq!(sacred_stitched.chunk.line_start, 1);
+        assert_eq!(sacred_stitched.chunk.line_end, 50);
+        assert!(sacred_stitched.chunk.text_content.contains("geometric proportions"));
+        assert!(sacred_stitched.chunk.text_content.contains("golden ratio"));
+        assert!(stitched.iter().any(|c| c.chunk.file_path.contains("Other.docx")));
+    }
+
+    #[test]
+    fn test_map_reduce_fact_sheet_extraction() {
+        let chunk = DocumentChunk::new(
+            "chunk_fact",
+            "doc_fact",
+            "C:/Users/oyesanyf/Documents/Sacred Geometry.docx",
+            1,
+            40,
+            0,
+            vec![0.1; 768],
+            "The golden ratio is defined as approximately 1.618. In 1909, mathematician Mark Barr proposed phi. Plato stated \"geometry existed before the creation\".",
+            None,
+        )
+        .unwrap();
+
+        let scored = ScoredChunk::new(chunk, 0.95, "local", false);
+        let refs = vec![&scored];
+        let fact_sheets = DeterministicOfflineSynthesisEngine::extract_fact_sheets(&refs, "tell me about golden ratio");
+
+        assert!(!fact_sheets.is_empty(), "Fact sheets must not be empty");
+        let sheet = &fact_sheets[0];
+        assert!(sheet.contains("<fact_sheet"), "Must produce <fact_sheet> tag");
+        assert!(sheet.contains("[Core Definition]:"), "Must extract core definition: {}", sheet);
+        assert!(sheet.contains("[Metric/Formula/Theorem]:"), "Must extract metric or theorem: {}", sheet);
+        assert!(sheet.contains("[Historical Date/Milestone]:"), "Must extract historical date: {}", sheet);
+        assert!(sheet.contains("[Verbatim Quote]:"), "Must extract verbatim quote: {}", sheet);
+    }
+
+    #[test]
+    fn test_continuation_query_retrieves_from_history() {
+        let chunk = DocumentChunk::new(
+            "chunk_sacred",
+            "doc_sacred",
+            "C:/Users/oyesanyf/Documents/Sacred Mathematics.docx",
+            1,
+            45,
+            0,
+            vec![0.1; 768],
+            "Sacred mathematics examines mathematical principles across ancient temple architectures and harmonic proportions.",
+            None,
+        )
+        .unwrap();
+
+        let scored = ScoredChunk::new(chunk, 0.92, "local", false);
+        let chunks = vec![scored];
+
+        let history = vec![
+            ChatTurnMessage {
+                role: "user".to_string(),
+                content: "tell me about sacred maths".to_string(),
+            },
+            ChatTurnMessage {
+                role: "assistant".to_string(),
+                content: "Sacred maths represents harmonic proportions in architecture and nature.".to_string(),
+            },
+        ];
+
+        let (resp, citations) = DeterministicOfflineSynthesisEngine::synthesize_with_history(
+            "tell me more",
+            "",
+            &history,
+            &chunks,
+            "qwen2.5:1.5b",
+            None,
+        );
+
+        assert!(!citations.is_empty(), "Continuation query must retrieve citations from history context");
+        assert!(!resp.contains("No matching documents were found"), "Must not fail on continuation query: {}", resp);
+        assert!(resp.contains("Sacred Mathematics.docx"), "Must ground answer in Sacred Mathematics document");
+    }
+
+    #[test]
+    fn test_sentence_boundary_guard() {
+        use std::net::SocketAddr;
+        let addr: SocketAddr = "127.0.0.1:59999".parse().unwrap();
+
+        // Case 1: Mid-sentence trailing fragment
+        let mut text1 = "Sacred math has been".to_string();
+        DeterministicOfflineSynthesisEngine::enforce_sentence_boundary_guard(
+            &mut text1,
+            &addr,
+            "127.0.0.1:59999",
+            "qwen2.5:1.5b",
+            None,
+        );
+        assert!(text1.ends_with('.'), "Must cleanly end on period: {}", text1);
+
+        // Case 2: Complete sentence followed by trailing incomplete fragment
+        let mut text2 = "The golden ratio governs harmonic proportions in architecture. In ancient".to_string();
+        DeterministicOfflineSynthesisEngine::enforce_sentence_boundary_guard(
+            &mut text2,
+            &addr,
+            "127.0.0.1:59999",
+            "qwen2.5:1.5b",
+            None,
+        );
+        assert!(
+            text2.ends_with('.'),
+            "Must end on period without trailing incomplete clause: {}",
+            text2
+        );
+        assert!(
+            text2.contains("harmonic proportions in architecture"),
+            "Must preserve preceding full sentences"
         );
     }
 }

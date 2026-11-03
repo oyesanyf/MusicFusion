@@ -183,6 +183,17 @@ impl Default for OsoosiMeshSettings {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_4096() -> usize {
+    4096
+}
+
+/// Type alias for ChatGPT UI preferences configuration.
+pub type UiPreferencesConfig = ChatGptUiSettings;
+
 /// Personal & Application Settings persisted in `settings.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -246,9 +257,17 @@ pub struct ChatGptUiSettings {
     pub natural_human_voice: bool,
     pub sampling_temperature: f32,
     pub max_output_tokens: usize,
+    #[serde(default = "default_true", alias = "agentic_loop_chaining")]
     pub agentic_loop_enabled: bool,
+    #[serde(default = "default_4096", alias = "agentic_loop_chunk_size")]
     pub agentic_chunk_size: usize,
     pub agentic_strategy: String,
+    #[serde(default = "default_true", alias = "deep_research")]
+    pub deep_research_iterative_rag: bool,
+    #[serde(default = "default_true", alias = "parent_doc_retrieval")]
+    pub parent_document_retrieval: bool,
+    #[serde(default = "default_true", alias = "map_reduce")]
+    pub map_reduce_fact_extraction: bool,
     pub restrl_daemon_running: bool,
     pub restrl_processed_tasks: u64,
     // Dynamic key-value settings for all interactive controls (Appearance, Personalization, Family, Contacts, Voice, etc.)
@@ -317,6 +336,9 @@ impl Default for ChatGptUiSettings {
             agentic_loop_enabled: true,
             agentic_chunk_size: 4096,
             agentic_strategy: "auto_continuation".to_string(),
+            deep_research_iterative_rag: true,
+            parent_document_retrieval: true,
+            map_reduce_fact_extraction: true,
             restrl_daemon_running: true,
             restrl_processed_tasks: 14,
             extra: std::collections::HashMap::new(),
@@ -1036,5 +1058,77 @@ mod tests {
         assert!(controller
             .check_file_shared_with_mesh(r"D:\femi\school\Femi-MedicalPharmacy-idcard.png")
             .is_none());
+    }
+
+    #[test]
+    fn test_ui_preferences_config_defaults() {
+        let cfg = UiPreferencesConfig::default();
+        assert_eq!(cfg.max_output_tokens, 262144);
+        assert!(cfg.agentic_loop_enabled);
+        assert_eq!(cfg.agentic_chunk_size, 4096);
+        assert_eq!(cfg.agentic_strategy, "auto_continuation");
+        assert!(cfg.deep_research_iterative_rag);
+        assert!(cfg.parent_document_retrieval);
+        assert!(cfg.map_reduce_fact_extraction);
+    }
+
+    #[test]
+    fn test_ui_preferences_config_serde_aliases() {
+        let json_data = serde_json::json!({
+            "deep_research": false,
+            "parent_doc_retrieval": false,
+            "map_reduce": false,
+            "agentic_loop_chaining": false,
+            "agentic_loop_chunk_size": 2048,
+            "max_output_tokens": 8192
+        });
+
+        let parsed: UiPreferencesConfig = serde_json::from_value(json_data).expect("Failed to deserialize with aliases");
+        assert!(!parsed.deep_research_iterative_rag);
+        assert!(!parsed.parent_document_retrieval);
+        assert!(!parsed.map_reduce_fact_extraction);
+        assert!(!parsed.agentic_loop_enabled);
+        assert_eq!(parsed.agentic_chunk_size, 2048);
+        assert_eq!(parsed.max_output_tokens, 8192);
+    }
+
+    #[test]
+    fn test_ui_preferences_config_serde_canonical_and_defaults() {
+        // Deserializing empty JSON should populate all defaults correctly
+        let empty_json = serde_json::json!({});
+        let from_empty: UiPreferencesConfig = serde_json::from_value(empty_json).expect("Failed to deserialize empty");
+        assert!(from_empty.deep_research_iterative_rag);
+        assert!(from_empty.parent_document_retrieval);
+        assert!(from_empty.map_reduce_fact_extraction);
+        assert!(from_empty.agentic_loop_enabled);
+        assert_eq!(from_empty.agentic_chunk_size, 4096);
+        assert_eq!(from_empty.max_output_tokens, 262144);
+
+        // Deserializing explicit canonical names
+        let canonical_json = serde_json::json!({
+            "deep_research_iterative_rag": false,
+            "parent_document_retrieval": false,
+            "map_reduce_fact_extraction": false,
+            "agentic_loop_enabled": false,
+            "agentic_chunk_size": 8192,
+            "max_output_tokens": 16384
+        });
+        let parsed_canonical: UiPreferencesConfig = serde_json::from_value(canonical_json).expect("Failed to deserialize canonical");
+        assert!(!parsed_canonical.deep_research_iterative_rag);
+        assert!(!parsed_canonical.parent_document_retrieval);
+        assert!(!parsed_canonical.map_reduce_fact_extraction);
+        assert!(!parsed_canonical.agentic_loop_enabled);
+        assert_eq!(parsed_canonical.agentic_chunk_size, 8192);
+        assert_eq!(parsed_canonical.max_output_tokens, 16384);
+
+        // Serialization round-trip
+        let serialized = serde_json::to_string(&parsed_canonical).expect("Serialization failed");
+        let round_trip: UiPreferencesConfig = serde_json::from_str(&serialized).expect("Deserialization failed");
+        assert_eq!(round_trip.deep_research_iterative_rag, parsed_canonical.deep_research_iterative_rag);
+        assert_eq!(round_trip.parent_document_retrieval, parsed_canonical.parent_document_retrieval);
+        assert_eq!(round_trip.map_reduce_fact_extraction, parsed_canonical.map_reduce_fact_extraction);
+        assert_eq!(round_trip.agentic_loop_enabled, parsed_canonical.agentic_loop_enabled);
+        assert_eq!(round_trip.agentic_chunk_size, parsed_canonical.agentic_chunk_size);
+        assert_eq!(round_trip.max_output_tokens, parsed_canonical.max_output_tokens);
     }
 }

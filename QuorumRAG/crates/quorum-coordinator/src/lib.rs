@@ -60,4 +60,5 @@ pub use dlp_mesh::{
     global_mesh_dlp_controller, ArchivedChatEntry, ChatGptUiSettings, DetectedPhiSpan,
     DlpAuditEvent, DlpEnforcementMode, DlpInspectionResult, DlpTelemetryStats, MeshDlpPolicy,
     OsoosiMeshDlpController, OsoosiMeshSettings, PersistedDaemonSettings, SharedFolderEntry,
+    UiPreferencesConfig,
 };

@@ -1,73 +1,62 @@
-# Task Assignment: Worker M11 1 (Google LangExtract & Question-Restating LLM Orchestration)
+## 2026-11-03T00:05:11Z
+You are Worker M11 (teamwork_worker). Your working directory is d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1.
+Read ORIGINAL_REQUEST.md at d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md.
+Read SCOPE.md at d:\harfile\QuorumRAG\.agents\teamwork\sub_orch_m11\SCOPE.md.
+Read Explorer 1's report at d:\harfile\QuorumRAG\.agents\teamwork\explorer_survey_gen4_1\report.md.
 
-## Working Directory
-d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\
-
-## Exclusively Owned Files
-- `crates/quorum-coordinator/src/langextract/extraction.rs`
-- `crates/quorum-coordinator/src/langextract/mod.rs`
-- `crates/quorum-coordinator/src/types.rs`
-- `crates/quorum-coordinator/src/agentic/classify.rs`
-- `crates/quorum-coordinator/src/agentic/retrieve.rs`
-- `crates/quorum-coordinator/src/agentic/mod.rs`
-- `crates/quorum-coordinator/src/offline_engine.rs`
-- `crates/quorum-coordinator/tests/coordinator_tests.rs` (or new test file `crates/quorum-coordinator/tests/m11_langextract_tests.rs`)
-
-## Mission & Implementation Instructions
-Implement Milestone M11 (Features 58 & 59) strictly following the specifications in:
-- `d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md`
-- `d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md`
-- `d:\harfile\QuorumRAG\.agents\teamwork\explorer_m11_1\handoff.md`
-- `d:\harfile\QuorumRAG\.agents\teamwork\explorer_m11_2\handoff.md`
-- `d:\harfile\QuorumRAG\.agents\teamwork\explorer_m11_3\handoff.md`
-
-### 1. `crates/quorum-coordinator/src/langextract/extraction.rs`
-- Implement `pub fn extract_chat_candidates(prompt: &str) -> Vec<Extraction>`:
-  - Extract question spans (interrogative prefixes or full prompt).
-  - Extract document references (`.pdf`, `.docx`, `.doc`, `.txt`, `.rs`, `.md`, e.g., `ResumeSec-AI-FemiOyesanya2025.pdf`, `Femi_Oyesanya_Enhanced_Resume_v3.docx`, `Femi_Oyesanya_CV_2026.pdf`, `Resume2026.pdf`).
-  - Extract named entities and technical terms (capitalized words, known entities: `Femi`, `Oyesanya`, `RedactX`, `VaultGemma`, `Presidio`, `PatientPoint`, `Cigna`, `Angela`, `Davis`).
-  - Guarantee all candidate extractions match verbatim in `prompt` so they pass `ground_extraction` and 4-arm consensus in `consensus.rs`.
-- Re-export `extract_chat_candidates` in `crates/quorum-coordinator/src/langextract/mod.rs`.
-
-### 2. `crates/quorum-coordinator/src/types.rs`
-- Add to `AgenticGraphState`:
-  - `pub langextract_result: Option<crate::langextract::ConsensusExtractionResult>,`
-  - `pub extracted_questions: Vec<String>,`
-  - `pub extracted_entities: Vec<crate::langextract::Extraction>,`
-- Initialize in `AgenticGraphState::new` (`langextract_result: None`, `extracted_questions: Vec::new()`, `extracted_entities: Vec::new()`).
-
-### 3. `crates/quorum-coordinator/src/agentic/classify.rs`
-- In `ClassifyIntentNode::execute`:
-  - Invoke `let candidates = crate::langextract::extraction::extract_chat_candidates(&state.original_prompt);`
-  - Evaluate via `crate::langextract::LlmFusionConsensus::evaluate_extractions(&state.original_prompt, candidates, Some(state));`
-  - Store `state.langextract_result = Some(consensus.clone());`
-  - Partition verified questions into `state.extracted_questions` and entities into `state.extracted_entities`.
-  - Merge metadata filters with `consensus.metadata_filters`.
-
-### 4. `crates/quorum-coordinator/src/agentic/retrieve.rs`
-- In `RetrieveMeshNode::execute`:
-  - Check `state.extracted_entities` for `document_reference`.
-  - In `precompute_criteria`, match target document filenames and apply +200 bonus (`intent_bonus += 200`), force `is_relevant = true` so requested documents are never pruned.
-  - Augment Tantivy BM25 keyword search with verified entity keywords.
-
-### 5. `crates/quorum-coordinator/src/agentic/mod.rs`
-- In `QueryCache::insert`, pass `graph_state.langextract_result.clone()` instead of `None`.
-- On cache hit, restore `langextract_result`, `extracted_questions`, and `extracted_entities` onto `graph_state`.
-
-### 6. `crates/quorum-coordinator/src/offline_engine.rs`
-- In `query_local_ollama_chat`:
-  - Update system prompt with mandatory question-restating rules ("Who is femi" becomes "Femi is ..."), grounding strictly in retrieved documents (e.g. `ResumeSec-AI-FemiOyesanya2025.pdf`, `Femi_Oyesanya_CV_2026.pdf`), and placing URLs/doc links strictly at the end with relevance scores.
-- Implement `format_question_restated_prefix(prompt: &str) -> String` and `format_sources_block(matched_chunks: &[&ScoredChunk]) -> String`.
-- In `synthesize_with_history`, prepend the restated prefix to the opening sentence and append the sources block at the end.
-- In streaming mode, stream the sources block upon completion.
-
-### 7. Build and Verification
-- Run:
-  `$env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator -- --test-threads=2`
-- Ensure all tests pass with zero warnings or errors.
-- Stage, commit verified changes incrementally (`git add -A; git commit -m "feat(coordinator): implement LangExtract chat extraction, question-restating synthesis, and end citations"`).
-
-### Mandatory Integrity Warning
+MANDATORY INTEGRITY WARNING:
 DO NOT CHEAT. All implementations must be genuine. DO NOT hardcode test results, create dummy/facade implementations, or circumvent the intended task. A teamwork_auditor will independently verify your work. Integrity violations WILL be detected and your work WILL be rejected.
 
-Write your report to `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\handoff.md` and report back via send_message.
+WRITE OWNERSHIP (You own exclusively):
+- `crates/quorum-coordinator/src/dlp_mesh.rs`
+- `crates/quorum-coordinator/src/lib.rs`
+- `crates/quorum-ui/assets/app.js`
+- `crates/quorum-daemon/src/server.rs`
+
+TASKS:
+1. `crates/quorum-coordinator/src/dlp_mesh.rs`:
+   - Define and export `pub type UiPreferencesConfig = ChatGptUiSettings;` (and re-export in `crates/quorum-coordinator/src/lib.rs`).
+   - Add the following typed fields to `ChatGptUiSettings`:
+     ```rust
+     #[serde(default = "default_true", alias = "deep_research")]
+     pub deep_research_iterative_rag: bool,
+     #[serde(default = "default_true", alias = "parent_doc_retrieval")]
+     pub parent_document_retrieval: bool,
+     #[serde(default = "default_true", alias = "map_reduce")]
+     pub map_reduce_fact_extraction: bool,
+     ```
+   - Ensure `agentic_loop_enabled` has `#[serde(default = "default_true", alias = "agentic_loop_chaining")]`.
+   - Ensure `agentic_chunk_size` has `#[serde(default = "default_4096", alias = "agentic_loop_chunk_size")]`.
+   - In `impl Default for ChatGptUiSettings`, set:
+     - `deep_research_iterative_rag: true,`
+     - `parent_document_retrieval: true,`
+     - `map_reduce_fact_extraction: true,`
+   - Add helper functions if needed (e.g. `fn default_true() -> bool { true }`).
+   - Add unit tests validating serialization and deserialization of `UiPreferencesConfig` with all new fields and aliases.
+2. `crates/quorum-ui/assets/app.js`:
+   - In `renderSettingsTabContent('models')` (around lines 2084-2405):
+     - Keep the 10-option dropdown for `setting-max-tokens` (256 up to 262144).
+     - Add interactive toggles with labels and descriptions for:
+       - `deep_research_iterative_rag`: "Deep Research & Iterative Section RAG" ("Generate structured DocumentPlan and SectionPlan multi-hop research outline.")
+       - `parent_document_retrieval`: "Parent Document Context Expansion" ("Stitch adjacent/surrounding chunks from the same document for broad context.")
+       - `map_reduce_fact_extraction`: "Map-Reduce Fact Sheet Extraction" ("Distill retrieved chunks into dense fact sheets before synthesis.")
+       - `agentic_loop_enabled`: "Recursive Agentic Loop Chaining" ("Auto-chain LLM turns recursively up to 256k tokens.")
+     - Each toggle must update via `window._saveUiPatch({ field_name: this.checked })` and display a toast notification.
+     - In `window._resetSettingsToDefaults()`, ensure all new toggles are reset to `true`.
+3. `crates/quorum-daemon/src/server.rs`:
+   - Add `.route("/api/preferences", get(settings::get_settings_handler).post(settings::update_settings_handler))` alongside `/api/settings`.
+4. Verification:
+   - Run `cargo test -p quorum-coordinator --lib dlp_mesh`.
+   - Run `cargo check --workspace`.
+
+OUTPUT:
+- Write `changes.md` and `handoff.md` to `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\`.
+- Update `progress.md` in your directory.
+- Send a completion message to the caller with test results.
+
+
+## 2026-11-03T00:18:14Z
+From: 8ca8fbc4-65aa-495d-9a0f-9c489a4299dc
+Context: Milestone M11 Execution
+Content: Heartbeat check: please provide an update on your progress implementing M11 in `dlp_mesh.rs`, `app.js`, and `server.rs`.
+Action: Please update progress.md and report current status or blockers.

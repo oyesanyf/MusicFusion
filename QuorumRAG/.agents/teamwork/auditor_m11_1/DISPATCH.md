@@ -1,42 +1,29 @@
-# Task Assignment: Forensic Auditor M11 1 (Integrity & Invariant Forensics)
+## 2026-11-03T00:22:07Z
+You are the Forensic Auditor for Milestone M11 (teamwork_auditor). Your working directory is d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1.
+Read ORIGINAL_REQUEST.md at d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md.
+Read SCOPE.md at d:\harfile\QuorumRAG\.agents\teamwork\sub_orch_m11\SCOPE.md.
+Read Worker handoff at d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\handoff.md.
+Read Worker changes at d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\changes.md.
 
-## Working Directory
-d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1\
+TASK:
+Perform strict forensic integrity auditing of the M11 code changes:
+1. Static analysis of changes in:
+   - `crates/quorum-coordinator/src/dlp_mesh.rs`
+   - `crates/quorum-coordinator/src/lib.rs`
+   - `crates/quorum-ui/assets/app.js`
+   - `crates/quorum-daemon/src/server.rs`
+2. Integrity checks:
+   - Verify ZERO mocks, dummy personas, fake datasets, or hardcoded strings substituting for real functionality.
+   - Verify that `UiPreferencesConfig` is genuine strongly-typed Rust struct / type alias with actual serde attributes.
+   - Verify that `app.js` controls bind to real settings fields and real persistence functions.
+   - Verify that `/api/preferences` in `server.rs` routes to real handler `settings::get_settings_handler` / `settings::update_settings_handler`.
+   - Verify Universal Zero-Touch PATH Law: ensure no system/user PATH mutations or registry tampering.
+3. Independent build & test execution:
+   - Run `cargo test -p quorum-coordinator --lib dlp_mesh`
+   - Run `cargo check --workspace`
+   - Inspect git diff using git commands to verify only intended files were modified.
 
-## Mission & Scope
-Perform comprehensive forensic integrity audit on Milestone M11 changes (commit `53af83a`):
-- Read `d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md`
-- Read `d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md`
-- Read `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\handoff.md`
-
-Audit Invariants:
-1. Production Code Invariant:
-   - Verify all implementations in `extraction.rs`, `types.rs`, `classify.rs`, `retrieve.rs`, `agentic/mod.rs`, and `offline_engine.rs` are 100% genuine, authentic production logic.
-   - Check for hardcoded test prompt returns, dummy mock branches, or fake data fixtures bypassing actual parsing or consensus.
-2. Invariant Check: Zero Line Numbers:
-   - Audit `crates/quorum-coordinator/src/offline_engine.rs` to assert that line numbers (`Lines `, `(Lines`, `:start-end`) have been completely purged from synthesized response text and Sources blocks.
-3. Invariant Check: Clean Sources Block:
-   - Assert `format_sources_block` outputs document name, link, and accuracy percentage, deduplicated by filename.
-4. Invariant Check: 4-Arm Consensus Rigor:
-   - Assert `extract_chat_candidates` outputs genuine substrings of `prompt` that undergo true grounding in Arm 1 and counterfactual verification in Arm 3.
-5. Invariant Check: Environment & PATH Safety:
-   - Assert zero mutations to system or user environment/PATH.
-6. Run:
-   `$env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator --test m11_langextract_tests -- --test-threads=2`
-7. Report forensic verdict (CLEAN or CHEATING DETECTED / INTEGRITY VIOLATION) in `d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1\handoff.md` and send message to orchestrator.
-
-
-## 2026-11-02T15:15:07Z
-You are Forensic Auditor M11 1 (teamwork_auditor).
-Your working directory is: d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1\
-Read d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md, d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md, d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\handoff.md, and d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1\DISPATCH.md immediately.
-
-Perform exhaustive forensic integrity audit on Milestone M11 (commit `53af83a`):
-1. Authenticity: Zero mocks, zero hardcoded test returns, zero dummy branches.
-2. Zero Line Numbers: Assert complete absence of line numbers in response bodies and Sources blocks.
-3. Clean Sources: Assert accuracy score percentage, deduplicated by filename.
-4. 4-Arm Consensus Rigor: Verbatim character intervals, counterfactual verification.
-5. Environment Safety: Zero mutations to system/user environment/PATH.
-Run:
-`$env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator --test m11_langextract_tests -- --test-threads=2`
-Write your forensic report and binary verdict (CLEAN or CHEATING DETECTED / INTEGRITY VIOLATION) to d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1\handoff.md and notify parent orchestrator via send_message.
+OUTPUT:
+- Write your forensic audit report to `d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1\report.md`.
+- Write your handoff report to `d:\harfile\QuorumRAG\.agents\teamwork\auditor_m11_1\handoff.md` with explicit binary verdict: `CLEAN` or `INTEGRITY VIOLATION`.
+- Send a completion message to the caller with your verdict and findings.

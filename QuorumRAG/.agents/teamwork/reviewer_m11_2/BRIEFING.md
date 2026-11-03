@@ -1,7 +1,7 @@
-# BRIEFING — 2026-11-02T15:18:00Z
+# BRIEFING — 2026-11-03T00:32:00Z
 
 ## Mission
-Review Milestone M11 implementation in `retrieve.rs` and `offline_engine.rs`: verify entity-guided retrieval, target doc boosting (+200), affirmative question-restating synthesis, zero line numbers, zero raw file headers, clean sources block with accuracy percentages, and execute verification tests.
+Independently and critically examine Milestone M11 Deep Research Settings & Preferences UI: examine `dlp_mesh.rs`, `lib.rs`, `app.js`, `server.rs`, check API design, type safety, serde serialization/deserialization, DOM element ID collisions, 10 max token options, route registration, run `cargo test -p quorum-coordinator --lib dlp_mesh` and `cargo check --workspace`, and issue an objective, evidence-based verdict.
 
 ## 🔒 My Identity
 - Archetype: teamwork_reviewer
@@ -19,53 +19,57 @@ Review Milestone M11 implementation in `retrieve.rs` and `offline_engine.rs`: ve
 - Production code only: no mocks, write actual code
 
 ## Current Parent
-- Conversation ID: 6e43b521-b448-4762-842a-0bc8d66e2854
-- Updated: 2026-11-02T15:18:00Z
+- Conversation ID: 8ca8fbc4-65aa-495d-9a0f-9c489a4299dc
+- Updated: 2026-11-03T00:32:00Z
 
 ## Review Scope
 - **Files to review**:
-  - `crates/quorum-coordinator/src/agentic/retrieve.rs`
-  - `crates/quorum-coordinator/src/offline_engine.rs`
-  - `crates/quorum-coordinator/src/langextract/extraction.rs`
-  - `crates/quorum-coordinator/tests/m11_langextract_tests.rs`
+  - `crates/quorum-coordinator/src/dlp_mesh.rs`
+  - `crates/quorum-coordinator/src/lib.rs`
+  - `crates/quorum-ui/assets/app.js`
+  - `crates/quorum-daemon/src/server.rs`
 - **Interface contracts**:
   - `d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md`
-  - `d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md`
+  - `d:\harfile\QuorumRAG\.agents\teamwork\sub_orch_m11\SCOPE.md`
   - `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\handoff.md`
+  - `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\changes.md`
 - **Review criteria**:
-  - Entity-guided retrieval & target document boosting (+200)
-  - Affirmative question-restating synthesis
-  - Zero line numbers in body or sources
-  - Zero raw file headers in synthesized prose body
-  - Clean Sources block with deduplication and accuracy percentages
-  - Strict absence of hardcoded outputs / integrity violations
+  - API design, naming, type safety, serde serialization/deserialization, edge cases (e.g. empty JSON `{}`).
+  - Verification of side effects on existing fields/methods.
+  - JavaScript syntax, event bindings, DOM element ID collisions, toast notifications in `app.js`.
+  - Verification of all 10 max token options matching R1.
+  - Route registration and handler signatures in `server.rs`.
+  - Strict absence of hardcoded outputs / integrity violations.
 
 ## Review Checklist
 - **Items reviewed**:
-  - `crates/quorum-coordinator/src/agentic/retrieve.rs` (reviewed, compliant)
-  - `crates/quorum-coordinator/src/offline_engine.rs` (reviewed, compliant)
-  - `crates/quorum-coordinator/src/langextract/extraction.rs` (reviewed, compliant)
-  - `crates/quorum-coordinator/tests/m11_langextract_tests.rs` (reviewed, compliant)
+  - `crates/quorum-coordinator/src/dlp_mesh.rs`: reviewed, verified compliant
+  - `crates/quorum-coordinator/src/lib.rs`: reviewed, verified compliant
+  - `crates/quorum-ui/assets/app.js`: reviewed, verified compliant
+  - `crates/quorum-daemon/src/server.rs`: reviewed, verified compliant
 - **Verdict**: APPROVE
 - **Unverified claims**: none
 
 ## Attack Surface
 - **Hypotheses tested**:
-  - Non-interrogative / statement query handling in synthesis
-  - Punctuation and casing stress testing in prefix extraction
-  - Line number leakage into body or citations
-  - Deduplication across mixed-case filenames
-  - Accuracy score normalization across 0.0-1.0 and 0-100 scales
-  - Target document boosting with punctuation in query
-- **Vulnerabilities found**: None. System adheres to fail-closed and air-gap rules.
-- **Untested angles**: Hardware TPM attestation (scoped for M13).
+  - Empty JSON `{}` deserialization fallback to defaults: Verified pass.
+  - Serde aliases deserialization (`deep_research`, `parent_doc_retrieval`, `map_reduce`, `agentic_loop_chaining`, `agentic_loop_chunk_size`): Verified pass.
+  - Round-trip serialization/deserialization: Verified pass.
+  - DOM element ID uniqueness and event binding: Verified pass.
+  - JS syntax validity with `node --check`: Verified pass.
+  - Daemon route registration and handler compatibility: Verified pass.
+  - Workspace compilation check: Verified pass.
+- **Vulnerabilities found**: None. No regressions, no integrity violations.
+- **Untested angles**: None within M11 scope.
 
 ## Key Decisions Made
-- All test suites passed (`m11_langextract_tests`, `offline_engine`, `agentic_tests`, `coordinator_tests`).
-- Code integrity verified: genuine algorithmic implementations without mock facades or hardcoded query answers.
-- Verdict: APPROVE.
+- All tests pass (`dlp_mesh` 5/5 passed; `daemon_tests` 2/2 passed; `adversarial_web_routes_challenge` 5/5 passed; `cargo check --workspace` clean).
+- Zero integrity violations.
+- Implementation satisfies all R1 and SCOPE.md requirements.
+- Final Verdict: APPROVE.
 
 ## Artifact Index
 - `BRIEFING.md` — persistent memory
 - `progress.md` — liveness heartbeat
+- `report.md` — detailed evaluation report
 - `handoff.md` — final review report and verdict
