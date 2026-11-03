@@ -341,6 +341,9 @@
     bodyEl._rawMarkdown = '';
     bodyEl.innerHTML = '';
     citationsEl._pendingCitations = [];
+    citationsEl._seenFiles = new Set();
+    citationsEl._hasSourcesHeading = false;
+    citationsEl._nextIndex = 0;
     citationsEl.innerHTML = '';
     if (actionsEl) {
       actionsEl.innerHTML = '';
@@ -454,10 +457,11 @@
       if (bodyEl._rawMarkdown) {
         bodyEl.style.whiteSpace = 'normal';
         bodyEl.innerHTML = renderMarkdownHtml(bodyEl._rawMarkdown);
+        const cleanAssistantHistory = stripSourcesFooterMarkdown(bodyEl._rawMarkdown);
         if (!bypassCache) {
           conversationHistoryTurns.push(
             { role: 'user', content: text },
-            { role: 'assistant', content: bodyEl._rawMarkdown }
+            { role: 'assistant', content: cleanAssistantHistory }
           );
         } else {
           // Regenerate: replace this turn's answer if it is already recorded, otherwise record it now
@@ -465,11 +469,11 @@
           const n = conversationHistoryTurns.length;
           const prevUser = n >= 2 ? conversationHistoryTurns[n - 2] : null;
           if (prevUser && prevUser.role === 'user' && prevUser.content === text) {
-            conversationHistoryTurns[n - 1] = { role: 'assistant', content: bodyEl._rawMarkdown };
+            conversationHistoryTurns[n - 1] = { role: 'assistant', content: cleanAssistantHistory };
           } else {
             conversationHistoryTurns.push(
               { role: 'user', content: text },
-              { role: 'assistant', content: bodyEl._rawMarkdown }
+              { role: 'assistant', content: cleanAssistantHistory }
             );
           }
         }
@@ -477,8 +481,11 @@
         const cursor = bodyEl.querySelector('.typing-cursor');
         if (cursor) cursor.remove();
       }
-      // 2. Render grounded RAG document Sources strictly AFTER the response is complete
+      // 2. Render single unified grounded RAG Sources footer strictly AFTER the response is complete
       const pending = citationsEl._pendingCitations || [];
+      citationsEl._seenFiles = new Set();
+      citationsEl._hasSourcesHeading = false;
+      citationsEl._nextIndex = 0;
       citationsEl.innerHTML = '';
       for (const cit of pending) {
         if (cit && cit.file_path && !String(cit.file_path).startsWith('Local Neural')) {
@@ -758,17 +765,29 @@
     }
   }
 
+  function stripSourcesFooterMarkdown(raw) {
+    if (!raw) return '';
+    let s = String(raw)
+      .split(/\n*---\s*\r?\n###\s*(?:📚\s*)?Sources\s*&\s*Document\s*Links/i)[0]
+      .split(/###\s*(?:📚\s*)?Sources\s*&\s*Document\s*Links/i)[0]
+      .split(/###\s*Supporting Evidence & Citations/i)[0]
+      .trim();
+    s = s.replace(/\n+---\s*$/, '').trim();
+    return s;
+  }
+
   function renderInlineMarkdown(escaped) {
     return escaped
       .replace(/`([^`]+)`/g, '<code style="background:rgba(128,128,128,0.16);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.88em;">$1</code>')
+      .replace(/\[([^\]]+)\]\(((?:https?:\/\/|file:\/\/\/)[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:underline;">$1</a>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/\*([^*]+)\*/g, '<em>$1</em>');
   }
 
   function renderMarkdownHtml(raw) {
     if (!raw) return '';
-    // Strip any legacy inline "### Supporting Evidence & Citations" block if cached
-    let cleanedRaw = String(raw).split(/###\s*Supporting Evidence & Citations/i)[0].trim();
+    // Consolidate to a single unified Sources footer (`citationsEl`) so the body never duplicates the file list
+    let cleanedRaw = stripSourcesFooterMarkdown(raw);
     // Strip ChatGPT export artifacts and file citation tokens
     cleanedRaw = cleanedRaw.replace(/fileciteturn\d+file\d+/gi, '').replace(/sandbox:\/mnt\/data\/\S*/gi, '');
     // Strip line number references e.g. (Lines 35–39), (Lines 1-10), (Line 42), :35-39 from prose body
@@ -791,7 +810,10 @@
         continue;
       }
 
-      if (trimmed.startsWith('#### ')) {
+      if (trimmed === '---' || trimmed === '***') {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += '<hr style="border:none;border-top:1px solid var(--border-color,rgba(128,128,128,0.25));margin:12px 0;">';
+      } else if (trimmed.startsWith('#### ')) {
         if (inList) { html += '</ul>'; inList = false; }
         const heading = renderInlineMarkdown(escapeHtml(trimmed.slice(5)));
         html += `<h5 style="margin:10px 0 4px 0;font-size:0.92rem;font-weight:600;">${heading}</h5>`;
@@ -859,19 +881,49 @@
       return;
     }
     citationsEl._seenFiles.add(cleanFileName.toLowerCase());
+    const citeNum = (citationsEl._nextIndex = (citationsEl._nextIndex || 0) + 1);
 
     const rawScore = Number(cit.score !== undefined ? cit.score : (cit.relevance_score || 0));
     let scorePct = rawScore > 1 ? Math.round(rawScore) : Math.round(rawScore * 100);
     scorePct = Math.max(0, Math.min(100, scorePct));
 
-    const badge = document.createElement('a');
+    const badge = document.createElement('button');
+    badge.type = 'button';
     badge.className = 'citation-badge';
-    badge.href = '#';
-    badge.title = `${cit.file_path}\nAccuracy: ${scorePct}%\n${cit.snippet || ''}`.trim();
-    badge.innerHTML = `📄 ${escapeHtml(cleanFileName)} <span class="score-pill" style="opacity:0.85; font-size:11px; margin-left:5px; padding:1px 6px; border-radius:4px; background:rgba(66,133,244,0.2); font-weight:600;">${scorePct}%</span>`;
-    badge.addEventListener('click', (e) => {
-      e.preventDefault();
-      alert(`Source Citation:\nFile: ${cit.file_path}\nAccuracy: ${scorePct}%\nPeer: ${cit.peer_id || 'local'}\nSnippet:\n${cit.snippet || '(no snippet)'}`);
+    badge.title = `[${citeNum}] ${cit.file_path}\nRelevance: ${scorePct}%\n${cit.snippet || ''}`.trim();
+    badge.innerHTML = `<span class="cite-index" style="font-weight:700;opacity:0.9;">[${citeNum}]</span> <span>📄 ${escapeHtml(cleanFileName)}</span> <span class="score-pill" style="opacity:0.85; font-size:11px; margin-left:3px; padding:1px 6px; border-radius:4px; background:rgba(66,133,244,0.2); font-weight:600;">· ${scorePct}%</span>`;
+    badge.addEventListener('click', () => {
+      let inspector = citationsEl.querySelector('.source-inspector-card');
+      if (inspector && inspector.dataset.citeNum === String(citeNum)) {
+        inspector.remove();
+        return;
+      }
+      if (!inspector) {
+        inspector = document.createElement('div');
+        inspector.className = 'source-inspector-card';
+        inspector.style.cssText = 'width:100%;margin-top:8px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color,rgba(128,128,128,0.3));background:rgba(128,128,128,0.08);font-size:12px;line-height:1.5;';
+        citationsEl.appendChild(inspector);
+      }
+      inspector.dataset.citeNum = String(citeNum);
+      inspector.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+          <strong>[${citeNum}] ${escapeHtml(cleanFileName)} (${scorePct}%)</strong>
+          <button type="button" class="btn-copy-source-path" style="padding:2px 8px;border-radius:5px;border:1px solid rgba(128,128,128,0.35);background:transparent;color:inherit;cursor:pointer;font-size:11px;">📋 Copy Path</button>
+        </div>
+        <div style="opacity:0.8;word-break:break-all;margin-bottom:4px;">${escapeHtml(cit.file_path || '')}</div>
+        ${cit.snippet ? `<div style="opacity:0.9;font-style:italic;border-left:2px solid var(--accent);padding-left:8px;margin-top:6px;">${escapeHtml(cit.snippet)}</div>` : ''}
+      `;
+      const copyPathBtn = inspector.querySelector('.btn-copy-source-path');
+      if (copyPathBtn) {
+        copyPathBtn.addEventListener('click', async () => {
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(String(cit.file_path || ''));
+              copyPathBtn.textContent = '✓ Path Copied';
+            }
+          } catch (_) {}
+        });
+      }
     });
     citationsEl.appendChild(badge);
   }
@@ -989,7 +1041,7 @@
     btnCopy.title = 'Copy response to clipboard';
     btnCopy.innerHTML = '<span>📋</span><span>Copy</span>';
     btnCopy.addEventListener('click', async () => {
-      const textToCopy = bodyEl._rawMarkdown || bodyEl.innerText || '';
+      const textToCopy = stripSourcesFooterMarkdown(bodyEl._rawMarkdown || bodyEl.innerText || '');
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(textToCopy);
@@ -1058,7 +1110,7 @@
     btnSave.title = 'Save response and citations as Markdown file';
     btnSave.innerHTML = '<span>💾</span><span>Save File</span>';
     btnSave.addEventListener('click', () => {
-      const markdown = bodyEl._rawMarkdown || bodyEl.innerText || '';
+      const markdown = stripSourcesFooterMarkdown(bodyEl._rawMarkdown || bodyEl.innerText || '');
       let citationsText = '';
       if (citationsEl && citationsEl.innerText) {
         citationsText = '\n\n---\n### Sources\n' + citationsEl.innerText.trim();

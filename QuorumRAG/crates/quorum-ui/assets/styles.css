@@ -564,7 +564,12 @@ body {
   border-top: 1px dashed var(--border-color);
 }
 
+.citation-container:empty {
+  display: none;
+}
+
 .citation-badge {
+  font-family: inherit;
   display: inline-flex;
   align-items: center;
   gap: 4px;

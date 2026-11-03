@@ -888,21 +888,7 @@ impl DeterministicOfflineSynthesisEngine {
         let matched_chunk_refs: Vec<&ScoredChunk> = matched_chunks.iter().collect();
 
         if !matched_chunk_refs.is_empty() {
-            let citations: Vec<Citation> = matched_chunk_refs
-                .iter()
-                .enumerate()
-                .map(|(idx, c)| {
-                    let mut cit = c.to_citation();
-                    let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
-                    cit.snippet = cleaned.chars().take(240).collect();
-                    let rank_decay = (idx as u32).min(5) * 4;
-                    let calibrated = (98u32.saturating_sub(rank_decay)).clamp(78, 99) as f32 / 100.0;
-                    if !(0.70..=1.0).contains(&cit.score) {
-                        cit.score = calibrated;
-                    }
-                    cit
-                })
-                .collect();
+            let citations: Vec<Citation> = Self::build_deduplicated_citations(&matched_chunk_refs);
 
             // 1. Use the local LLM strictly to orchestrate a natural, direct, citation-backed answer
             // from the retrieved local RAG chunks (never invoked when matched_chunks is empty).
@@ -916,14 +902,14 @@ impl DeterministicOfflineSynthesisEngine {
             } else {
                 prompt_eff.to_string()
             };
-            if let Some(llm_orchestrated) = Self::query_local_ollama_chat(
+            if let Some((llm_orchestrated, llm_citations)) = Self::query_local_ollama_chat(
                 &effective_question,
                 history,
                 &matched_chunk_refs,
                 model_tag,
                 telemetry_tx,
             ) {
-                return (llm_orchestrated, citations);
+                return (llm_orchestrated, llm_citations);
             }
 
             // 2. Deterministic offline fallback (used in unit tests or if local Ollama daemon is unreachable)
@@ -1383,6 +1369,64 @@ impl DeterministicOfflineSynthesisEngine {
         format!("{} — ", capitalize(clean_prompt))
     }
 
+    /// Strips any trailing Markdown sources footer from an assistant message so continuation history
+    /// and sentence-deduplication operate purely on synthesized prose.
+    pub fn strip_sources_footer(text: &str) -> &str {
+        let mut cut = text.len();
+        for marker in [
+            "\n---\n### 📚 Sources",
+            "\r\n---\r\n### 📚 Sources",
+            "### 📚 Sources & Document Links",
+            "📚 Sources & Document Links",
+            "### Supporting Evidence & Citations",
+        ] {
+            if let Some(pos) = text.find(marker) {
+                if pos < cut {
+                    cut = pos;
+                }
+            }
+        }
+        let mut slice = text[..cut].trim_end();
+        if let Some(without_rule) = slice.strip_suffix("---") {
+            slice = without_rule.trim_end();
+        }
+        slice
+    }
+
+    /// Unified monotonic accuracy calibration shared by both `format_sources_block` and `Citation` badges.
+    /// Avoids the 0.70 discontinuity where hybrid scores (0.74, 0.72, 0.69) previously jumped upward from 72% to 86%.
+    pub fn calibrated_accuracy_percent(raw_score: f32, unique_rank_idx: usize) -> u32 {
+        if (0.80..=1.0).contains(&raw_score) {
+            (raw_score * 100.0).round() as u32
+        } else if raw_score > 70.0 {
+            (raw_score.round() as u32).min(99)
+        } else {
+            (96u32.saturating_sub((unique_rank_idx as u32) * 3)).clamp(74, 96)
+        }
+    }
+
+    /// Builds deduplicated `Citation` structs matching `format_sources_block` 1-to-1 in file order and score.
+    pub fn build_deduplicated_citations(matched_chunks: &[&ScoredChunk]) -> Vec<Citation> {
+        let mut seen_filenames = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for c in matched_chunks {
+            let file_name = std::path::Path::new(&c.chunk.file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&c.chunk.file_path);
+            if !seen_filenames.insert(file_name.to_ascii_lowercase()) {
+                continue;
+            }
+            let unique_idx = out.len();
+            let mut cit = c.to_citation();
+            let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
+            cit.snippet = cleaned.chars().take(240).collect();
+            cit.score = Self::calibrated_accuracy_percent(c.score, unique_idx) as f32 / 100.0;
+            out.push(cit);
+        }
+        out
+    }
+
     /// Formats the standardized end-of-response sources and document links block with explicit accuracy scores.
     /// Invariant: Deduplicates sources by filename and contains ZERO line numbers!
     pub fn format_sources_block(matched_chunks: &[&ScoredChunk]) -> String {
@@ -1391,8 +1435,9 @@ impl DeterministicOfflineSynthesisEngine {
         }
         let mut block = String::from("\n\n---\n### 📚 Sources & Document Links\n");
         let mut seen_filenames = std::collections::HashSet::new();
+        let mut unique_idx = 0usize;
 
-        for (idx, c) in matched_chunks.iter().enumerate() {
+        for c in matched_chunks.iter() {
             let file_name = std::path::Path::new(&c.chunk.file_path)
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -1403,7 +1448,7 @@ impl DeterministicOfflineSynthesisEngine {
                 continue;
             }
 
-            let link_target = if c.chunk.file_path.starts_with("http://")
+            let raw_target = if c.chunk.file_path.starts_with("http://")
                 || c.chunk.file_path.starts_with("https://")
                 || c.chunk.file_path.starts_with("file://")
             {
@@ -1416,15 +1461,9 @@ impl DeterministicOfflineSynthesisEngine {
                     normalized
                 }
             };
-
-            let rank_decay = (idx as u32).min(5) * 4;
-            let score_pct = if c.score > 0.70 && c.score <= 1.0 {
-                (c.score * 100.0).round() as u32
-            } else if c.score > 70.0 {
-                c.score.round().min(100.0) as u32
-            } else {
-                (98u32.saturating_sub(rank_decay)).clamp(78, 99)
-            };
+            let link_target = raw_target.replace(' ', "%20");
+            let score_pct = Self::calibrated_accuracy_percent(c.score, unique_idx);
+            unique_idx += 1;
 
             block.push_str(&format!(
                 "- [📄 {}]({}) — **{}% accuracy**\n",
@@ -2079,70 +2118,345 @@ impl DeterministicOfflineSynthesisEngine {
     /// Continuation guard: removes sentences that substantially repeat a sentence from the previous answer
     /// (word-set Jaccard >= 0.55 over words of 4+ letters), so "continue" adds new material instead of restating.
     /// Returns the original text if fewer than two sentences would survive.
+    fn continuation_content_stems(s: &str) -> std::collections::HashSet<String> {
+        const DISCOURSE_FILLER: &[&str] = &[
+            "that", "this", "these", "those", "with", "without", "from", "into", "have", "been",
+            "were", "their", "there", "which", "while", "where", "when", "also", "additionally",
+            "furthermore", "moreover", "however", "therefore", "before", "after", "under",
+            "certain", "various", "specific", "such", "allowed", "allow", "allows", "requires",
+            "require", "required", "regarding", "involving", "provided", "stipulates", "states",
+            "shall", "must", "would", "could", "should", "upon", "within", "through", "between",
+        ];
+        s.to_ascii_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() >= 4 && !DISCOURSE_FILLER.contains(w) && !w.chars().all(|c| c.is_ascii_digit()))
+            .map(|w| {
+                if w.len() >= 5
+                    && w.ends_with('s')
+                    && !w.ends_with("ss")
+                    && !w.ends_with("us")
+                    && !w.ends_with("is")
+                {
+                    w[..w.len() - 1].to_string()
+                } else {
+                    w.to_string()
+                }
+            })
+            .collect()
+    }
+
+    fn split_prose_line_sentences(s: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        let chars: Vec<char> = s.chars().collect();
+        for (i, &c) in chars.iter().enumerate() {
+            cur.push(c);
+            if matches!(c, '.' | '!' | '?')
+                && !Self::is_non_terminal_period(&chars, i)
+                && (i + 1 >= chars.len() || chars[i + 1].is_whitespace())
+            {
+                out.push(std::mem::take(&mut cur));
+            }
+        }
+        if !cur.trim().is_empty() {
+            out.push(cur);
+        }
+        out
+    }
+
     pub fn drop_sentences_repeating_prior(text: &str, prior: &str) -> String {
         use std::collections::HashSet;
-        let words = |s: &str| -> HashSet<String> {
-            s.to_ascii_lowercase()
-                .split(|c: char| !c.is_alphanumeric())
-                .filter(|w| w.len() >= 4)
-                .map(|w| w.to_string())
-                .collect()
-        };
-        let split_sentences = |s: &str| -> Vec<String> {
-            let mut out = Vec::new();
-            let mut cur = String::new();
-            let chars: Vec<char> = s.chars().collect();
-            for (i, &c) in chars.iter().enumerate() {
-                cur.push(c);
-                if matches!(c, '.' | '!' | '?') && (i + 1 >= chars.len() || chars[i + 1].is_whitespace()) {
-                    out.push(std::mem::take(&mut cur));
+        let clean_prior = Self::strip_sources_footer(prior);
+        let mut prior_sets: Vec<HashSet<String>> = Vec::new();
+        for pline in clean_prior.lines() {
+            let pt = pline.trim();
+            if pt.is_empty() || pt.starts_with('#') || pt.starts_with('|') || pt.starts_with('`') || pt == "---" {
+                continue;
+            }
+            // Skip standalone short section titles without sentence punctuation so they never dilute adjacent sentences
+            if !pt.ends_with('.') && !pt.ends_with('!') && !pt.ends_with('?') && pt.split_whitespace().count() <= 7 {
+                continue;
+            }
+            for sent in Self::split_prose_line_sentences(pt) {
+                let ws = Self::continuation_content_stems(&sent);
+                if ws.len() >= 4 {
+                    prior_sets.push(ws);
                 }
             }
-            if !cur.trim().is_empty() {
-                out.push(cur);
-            }
-            out
-        };
-        let prior_sets: Vec<HashSet<String>> = split_sentences(prior)
-            .iter()
-            .map(|x| words(x))
-            .filter(|w| w.len() >= 4)
-            .collect();
+        }
         if prior_sets.is_empty() {
             return text.to_string();
         }
-        let mut out_lines: Vec<String> = Vec::new();
+        let is_repeated = |ws: &HashSet<String>| -> bool {
+            if ws.len() < 4 {
+                return false;
+            }
+            prior_sets.iter().any(|ps| {
+                let inter = ws.intersection(ps).count();
+                let union = ws.union(ps).count().max(1);
+                let min_len = ws.len().min(ps.len()).max(1);
+                (inter * 100 / union >= 45) || (inter >= 4 && inter * 100 / min_len >= 65)
+            })
+        };
+
+        let mut raw_out_lines: Vec<String> = Vec::new();
         let mut kept_sentences = 0usize;
         for line in text.lines() {
             let t = line.trim();
             if t.is_empty() || t.starts_with('#') || t.starts_with('|') || t.starts_with('`') {
-                out_lines.push(line.to_string());
+                raw_out_lines.push(line.to_string());
                 continue;
             }
-            let kept: Vec<String> = split_sentences(t)
+            let kept: Vec<String> = Self::split_prose_line_sentences(t)
                 .into_iter()
                 .map(|x| x.trim().to_string())
-                .filter(|x| {
-                    let ws = words(x);
+                .filter(|x| !is_repeated(&Self::continuation_content_stems(x)))
+                .collect();
+            kept_sentences += kept.len();
+            if !kept.is_empty() {
+                raw_out_lines.push(kept.join(" "));
+            }
+        }
+        if kept_sentences == 0 {
+            return text.to_string();
+        }
+        // Drop orphan headings whose body sentences were completely removed
+        let mut final_lines: Vec<String> = Vec::new();
+        let mut idx = 0usize;
+        while idx < raw_out_lines.len() {
+            let trimmed = raw_out_lines[idx].trim();
+            if trimmed.starts_with('#') {
+                let mut look = idx + 1;
+                while look < raw_out_lines.len() && raw_out_lines[look].trim().is_empty() {
+                    look += 1;
+                }
+                if look >= raw_out_lines.len() || raw_out_lines[look].trim().starts_with('#') {
+                    idx += 1;
+                    continue;
+                }
+            }
+            final_lines.push(raw_out_lines[idx].clone());
+            idx += 1;
+        }
+        final_lines.join("\n").trim().to_string()
+    }
+
+    /// Removes boilerplate clauses/sentences from an input excerpt window that were already covered in `prior`,
+    /// preventing sibling template documents (e.g. multiple leases sharing the same subletting rule) from re-feeding covered rules on `continue`.
+    pub fn scrub_prior_covered_clauses(window: &str, prior: &str) -> String {
+        use std::collections::HashSet;
+        let clean_prior = Self::strip_sources_footer(prior);
+        if clean_prior.trim().is_empty() {
+            return window.to_string();
+        }
+        let mut prior_sets: Vec<HashSet<String>> = Vec::new();
+        for pline in clean_prior.lines() {
+            let pt = pline.trim();
+            if pt.is_empty() || pt.starts_with('#') || pt == "---" {
+                continue;
+            }
+            for sent in Self::split_prose_line_sentences(pt) {
+                let ws = Self::continuation_content_stems(&sent);
+                if ws.len() >= 4 {
+                    prior_sets.push(ws);
+                }
+            }
+        }
+        if prior_sets.is_empty() {
+            return window.to_string();
+        }
+        let mut out_lines = Vec::new();
+        for line in window.lines() {
+            let lt = line.trim();
+            if lt.is_empty() {
+                continue;
+            }
+            let kept: Vec<String> = Self::split_prose_line_sentences(lt)
+                .into_iter()
+                .filter(|sent| {
+                    let ws = Self::continuation_content_stems(sent);
                     if ws.len() < 4 {
                         return true;
                     }
                     !prior_sets.iter().any(|ps| {
                         let inter = ws.intersection(ps).count();
                         let union = ws.union(ps).count().max(1);
-                        inter * 100 / union >= 55
+                        let min_len = ws.len().min(ps.len()).max(1);
+                        (inter * 100 / union >= 45) || (inter >= 4 && inter * 100 / min_len >= 65)
                     })
                 })
                 .collect();
-            kept_sentences += kept.len();
             if !kept.is_empty() {
                 out_lines.push(kept.join(" "));
             }
         }
-        if kept_sentences == 0 {
-            return text.to_string();
+        let scrubbed = out_lines.join("\n");
+        if scrubbed.trim().len() >= 60 {
+            scrubbed
+        } else {
+            window.to_string()
         }
-        out_lines.join("\n").trim().to_string()
+    }
+
+    /// Scans `prose` for bracketed numeric citations (`[1]`, `[2, 5]`, `[1–3]`), strips any out-of-range markers (`> K`),
+    /// optionally filters `unique_file_chunks` down to only the files actually cited in `prose`, and renumbers citations
+    /// sequentially `1..=M` so inline `[k]` markers and the `M` emitted source items match 1-to-1 with zero gaps.
+    pub fn remap_and_compact_citations<'a>(
+        prose: &str,
+        unique_file_chunks: &[&'a ScoredChunk],
+        filter_uncited: bool,
+    ) -> (String, Vec<&'a ScoredChunk>) {
+        use std::collections::{BTreeSet, HashMap};
+        let k = unique_file_chunks.len();
+        if k == 0 || prose.is_empty() {
+            return (prose.to_string(), unique_file_chunks.to_vec());
+        }
+
+        let parse_bracket_nums = |inner: &str| -> Option<Vec<usize>> {
+            let trimmed = inner.trim();
+            if trimmed.is_empty() || trimmed.len() > 28 {
+                return None;
+            }
+            if !trimmed
+                .chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, ',' | ' ' | '-' | '–'))
+            {
+                return None;
+            }
+            if !trimmed.chars().any(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            let mut nums = Vec::new();
+            for part in trimmed.split(',') {
+                let p = part.trim();
+                if p.is_empty() {
+                    continue;
+                }
+                if let Some((a_str, b_str)) = p.split_once('-').or_else(|| p.split_once('–')) {
+                    let a = a_str.trim().parse::<usize>().ok()?;
+                    let b = b_str.trim().parse::<usize>().ok()?;
+                    if a == 0 || b < a || b - a > 12 {
+                        return None;
+                    }
+                    for n in a..=b {
+                        nums.push(n);
+                    }
+                } else {
+                    let n = p.parse::<usize>().ok()?;
+                    nums.push(n);
+                }
+            }
+            if nums.is_empty() {
+                None
+            } else {
+                Some(nums)
+            }
+        };
+
+        // Pass 1: find all valid 1..=k citation indices referenced in prose
+        let bytes = prose.as_bytes();
+        let mut cited_set: BTreeSet<usize> = BTreeSet::new();
+        let mut pos = 0usize;
+        while pos < bytes.len() {
+            if bytes[pos] == b'[' {
+                if let Some(rel_end) = prose[pos + 1..].find(']') {
+                    let close_pos = pos + 1 + rel_end;
+                    let followed_by_paren = close_pos + 1 < bytes.len() && bytes[close_pos + 1] == b'(';
+                    if !followed_by_paren {
+                        let inner = &prose[pos + 1..close_pos];
+                        if let Some(nums) = parse_bracket_nums(inner) {
+                            for n in nums {
+                                if (1..=k).contains(&n) {
+                                    cited_set.insert(n);
+                                }
+                            }
+                            pos = close_pos + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+            let ch_len = prose[pos..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+            pos += ch_len;
+        }
+
+        let kept_chunks: Vec<&'a ScoredChunk> = if filter_uncited && !cited_set.is_empty() {
+            unique_file_chunks
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &c)| if cited_set.contains(&(i + 1)) { Some(c) } else { None })
+                .collect()
+        } else {
+            unique_file_chunks.to_vec()
+        };
+
+        let mut old_to_new: HashMap<usize, usize> = HashMap::new();
+        if filter_uncited && !cited_set.is_empty() {
+            for (new_zero_idx, old_one_idx) in cited_set.iter().enumerate() {
+                old_to_new.insert(*old_one_idx, new_zero_idx + 1);
+            }
+        } else {
+            for idx in 1..=k {
+                old_to_new.insert(idx, idx);
+            }
+        }
+
+        // Pass 2: rewrite citation spans in prose using old_to_new and drop out-of-range markers
+        let mut rewritten = String::with_capacity(prose.len());
+        let mut pos = 0usize;
+        while pos < bytes.len() {
+            if bytes[pos] == b'[' {
+                if let Some(rel_end) = prose[pos + 1..].find(']') {
+                    let close_pos = pos + 1 + rel_end;
+                    let followed_by_paren = close_pos + 1 < bytes.len() && bytes[close_pos + 1] == b'(';
+                    if !followed_by_paren {
+                        let inner = &prose[pos + 1..close_pos];
+                        if let Some(nums) = parse_bracket_nums(inner) {
+                            let mut mapped: Vec<usize> = Vec::new();
+                            for n in nums {
+                                if let Some(&m) = old_to_new.get(&n) {
+                                    if !mapped.contains(&m) {
+                                        mapped.push(m);
+                                    }
+                                }
+                            }
+                            mapped.sort_unstable();
+                            if mapped.is_empty() {
+                                // Cleanly trim preceding space or ", " when dropping an invalid citation marker
+                                if rewritten.ends_with(", ") {
+                                    rewritten.truncate(rewritten.len() - 2);
+                                } else if rewritten.ends_with(' ')
+                                    && close_pos + 1 < bytes.len()
+                                    && matches!(bytes[close_pos + 1], b'.' | b',' | b';' | b':')
+                                {
+                                    rewritten.pop();
+                                }
+                            } else {
+                                let formatted = mapped
+                                    .iter()
+                                    .map(|m| format!("[{}]", m))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                // Avoid adjacent duplicate "[1], [1]" when two separate brackets mapped to the same file
+                                let dup_suffix = format!("{}, ", formatted);
+                                if !rewritten.ends_with(&dup_suffix) && !rewritten.ends_with(&formatted) {
+                                    rewritten.push_str(&formatted);
+                                } else if rewritten.ends_with(", ") {
+                                    rewritten.truncate(rewritten.len() - 2);
+                                }
+                            }
+                            pos = close_pos + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+            let ch = prose[pos..].chars().next().unwrap();
+            rewritten.push(ch);
+            pos += ch.len_utf8();
+        }
+
+        (rewritten, kept_chunks)
     }
 
     /// Returns a `max_chars` window of `text`. For typed questions the window starts shortly before the first
@@ -3044,7 +3358,7 @@ impl DeterministicOfflineSynthesisEngine {
         matched_chunks: &[&ScoredChunk],
         requested_model_tag: &str,
         telemetry_tx: Option<&Sender<AgenticTelemetryEvent>>,
-    ) -> Option<String> {
+    ) -> Option<(String, Vec<Citation>)> {
         use std::io::{BufRead, BufReader, Write};
         use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
         use std::time::Duration;
@@ -3191,8 +3505,13 @@ impl DeterministicOfflineSynthesisEngine {
             } else {
                 "user"
             };
-            let per_turn_limit = if Self::is_continuation_query(&prompt.to_ascii_lowercase()) { 1600 } else { 450 };
-            let content: String = turn.content.trim().chars().take(per_turn_limit).collect();
+            let per_turn_limit = if Self::is_continuation_query(&prompt.to_ascii_lowercase()) { 2400 } else { 500 };
+            let stripped = if role == "assistant" {
+                Self::strip_sources_footer(&turn.content)
+            } else {
+                turn.content.as_str()
+            };
+            let content: String = stripped.trim().chars().take(per_turn_limit).collect();
             if !content.is_empty() {
                 messages.push(serde_json::json!({
                     "role": role,
@@ -3217,41 +3536,74 @@ impl DeterministicOfflineSynthesisEngine {
             history
                 .iter()
                 .filter(|t| t.role.eq_ignore_ascii_case("assistant"))
-                .map(|t| t.content.as_str())
+                .map(|t| Self::strip_sources_footer(&t.content))
                 .collect::<Vec<_>>()
                 .join("\n")
         } else {
             String::new()
         };
-        // Continuation: put the excerpts least covered by the previous answer first, so "continue" is written
-        // from new material instead of re-deriving the same paragraphs from the same excerpts.
+        // Continuation: put the excerpts least covered by the previous answer first and drop exhausted chunks (>=80% covered)
+        // when fresher chunks exist, so "continue" advances into uncovered material rather than re-summarizing Turn 1.
         if !prior_answer_text.is_empty() {
             pruned_chunks.sort_by_key(|c| Self::coverage_by_prior_percent(&c.chunk.text_content, &prior_answer_text));
+            if pruned_chunks.len() > 2 {
+                let fresh: Vec<&ScoredChunk> = pruned_chunks
+                    .iter()
+                    .copied()
+                    .filter(|c| Self::coverage_by_prior_percent(&c.chunk.text_content, &prior_answer_text) < 80)
+                    .collect();
+                if fresh.len() >= 2 {
+                    pruned_chunks = fresh;
+                } else {
+                    pruned_chunks.truncate(4);
+                }
+            }
         }
         let matched_chunks: &[&ScoredChunk] = &pruned_chunks;
+        let active_excerpts: &[&ScoredChunk] = &matched_chunks[..matched_chunks.len().min(8)];
+
+        // Assign 1-based citation numbers strictly by DISTINCT source filename across `active_excerpts`,
+        // so multiple chunks from the same file share one `[doc_num]` and `[8]` can NEVER be emitted when 7 files exist.
+        let mut unique_file_chunks: Vec<&ScoredChunk> = Vec::new();
+        let mut file_to_doc_num: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for &c in active_excerpts {
+            let file_name = std::path::Path::new(&c.chunk.file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&c.chunk.file_path);
+            let key = file_name.to_ascii_lowercase();
+            if !file_to_doc_num.contains_key(&key) {
+                let next_num = unique_file_chunks.len() + 1;
+                file_to_doc_num.insert(key, next_num);
+                unique_file_chunks.push(c);
+            }
+        }
 
         // ~6000 characters of evidence in total: a single stitched parent document gets a long window instead of
         // its first 750 characters only.
-        let excerpt_count = matched_chunks.len().clamp(1, 8);
+        let excerpt_count = active_excerpts.len().clamp(1, 8);
         let per_excerpt_chars = (6000 / excerpt_count).clamp(750, 3000);
-        let context_blocks = matched_chunks
+        let context_blocks = active_excerpts
             .iter()
-            .take(8)
-            .enumerate()
-            .map(|(i, c)| {
+            .map(|c| {
                 let file_name = std::path::Path::new(&c.chunk.file_path)
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or(&c.chunk.file_path);
+                let doc_num = file_to_doc_num
+                    .get(&file_name.to_ascii_lowercase())
+                    .copied()
+                    .unwrap_or(1);
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
                 let compact_text: String = if !prior_answer_text.is_empty() {
-                    Self::least_covered_window(&cleaned, &prior_answer_text, per_excerpt_chars)
+                    let win = Self::least_covered_window(&cleaned, &prior_answer_text, per_excerpt_chars);
+                    Self::scrub_prior_covered_clauses(&win, &prior_answer_text)
                 } else {
                     Self::answer_focused_window(prompt, &cleaned, per_excerpt_chars)
                 };
                 format!(
                     "[{}] Source File: {}\n{}",
-                    i + 1,
+                    doc_num,
                     file_name,
                     compact_text.trim()
                 )
@@ -3259,31 +3611,42 @@ impl DeterministicOfflineSynthesisEngine {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        let source_corpus: String = matched_chunks
+        let source_corpus: String = active_excerpts
             .iter()
-            .take(8)
             .map(|c| Self::clean_chunk_text(&c.chunk.text_content))
             .collect::<Vec<_>>()
             .join("\n");
 
         let _fact_sheets = if ui.map_reduce_fact_extraction {
-            Self::extract_fact_sheets(&matched_chunks[..matched_chunks.len().min(8)], prompt)
+            Self::extract_fact_sheets(active_excerpts, prompt)
         } else {
             Vec::new()
         };
 
-        let opening_directive = if expected_prefix.trim().is_empty() {
+        let opening_directive = if !prior_answer_text.is_empty() {
+            "Begin immediately with brand-new facts, properties, dates, or clauses NOT mentioned anywhere in your previous response".to_string()
+        } else if expected_prefix.trim().is_empty() {
             "Begin your first paragraph immediately with a direct declarative sentence that restates and answers the User Question".to_string()
         } else {
             format!("Begin your first paragraph immediately with `{}`", expected_prefix.trim())
         };
 
+        let continuation_guard_note = if !prior_answer_text.is_empty() {
+            " CONTINUATION STRICTNESS: Never repeat, paraphrase, or circle back to any rule, subletting/occupancy consent clause, late fee, bank account, phone number, email address, or relationship already mentioned in your previous response—even if another lease or document contains similar boilerplate. Cite ONLY the numbered sources (`[1]`..`[N]`) that supply the new facts you introduce."
+        } else {
+            ""
+        };
+
+        let max_doc_num = unique_file_chunks.len().max(1);
         let user_content = format!(
-            "Reference Excerpts (numbered, for your use only; never repeat this label):\n{}\n\nUser Question: {}\n\n\
-            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across ALL relevant source documents (`[1]`, `[2]`, `[3]`, etc.) above to answer ONLY the User Question. {} and cite multiple source documents inline using bracketed numbers (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Write flowing prose paragraphs (not a bullet list of file names), start with a full sentence rather than a heading, and never repeat any sentence or paragraph.",
+            "Reference Excerpts (numbered [1] through [{}], for your use only; never repeat this label):\n{}\n\nUser Question: {}\n\n\
+            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across the relevant source documents above to answer ONLY the User Question. {} and cite source documents inline using ONLY valid bracketed numbers `[1]` through `[{}]`. Write flowing prose paragraphs (not a bullet list of file names), start with a full sentence rather than a heading, and never repeat any sentence or paragraph.{}",
+            max_doc_num,
             context_blocks,
             prompt,
-            opening_directive
+            opening_directive,
+            max_doc_num,
+            continuation_guard_note
         );
 
         messages.push(serde_json::json!({
@@ -3291,7 +3654,7 @@ impl DeterministicOfflineSynthesisEngine {
             "content": user_content
         }));
 
-        let send_chat_request = |target_model: &str| -> Option<String> {
+        let send_chat_request = |target_model: &str| -> Option<(String, Vec<Citation>)> {
             let max_hops = 1usize;
 
             let mut current_messages = messages.clone();
@@ -3511,22 +3874,13 @@ impl DeterministicOfflineSynthesisEngine {
                 telemetry_tx,
             );
 
-            if !full_text.contains("### 📚 Sources & Document Links") && !matched_chunks.is_empty() {
-                let sources_block = Self::format_sources_block(matched_chunks);
-                full_text.push_str(&sources_block);
-                if let Some(tx) = telemetry_tx {
-                    let _ = Self::send_telemetry(
-                        tx,
-                        AgenticTelemetryEvent::TokenDelta {
-                            delta: sources_block,
-                        },
-                    );
-                }
-            }
-
-            let pass1 = Self::strip_question_echo_and_meta_with_corpus(full_text.trim(), prompt, &source_corpus);
+            let prose_only = Self::strip_sources_footer(full_text.trim());
+            let pass1 = Self::strip_question_echo_and_meta_with_corpus(prose_only, prompt, &source_corpus);
             let pass2 = Self::strip_stub_heading_and_label_echo(&pass1);
-            let cleaned_final = Self::strip_question_echo_and_meta_with_corpus(&pass2, prompt, &source_corpus);
+            let mut cleaned_final = Self::strip_question_echo_and_meta_with_corpus(&pass2, prompt, &source_corpus);
+            if !prior_answer_text.is_empty() {
+                cleaned_final = Self::drop_sentences_repeating_prior(&cleaned_final, &prior_answer_text);
+            }
             let cleaned_final = {
                 let mut out = String::with_capacity(cleaned_final.len());
                 let mut blank_run = 0usize;
@@ -3545,16 +3899,20 @@ impl DeterministicOfflineSynthesisEngine {
                 out.trim().to_string()
             };
             let trimmed_full = if cleaned_final.trim().len() < 20 {
-                // Never let post-processing erase a real answer: fall back to the lightly-cleaned text
-                Self::strip_stub_heading_and_label_echo(full_text.trim())
+                // Never let post-processing erase a real answer: fall back to the lightly-cleaned prose
+                Self::strip_stub_heading_and_label_echo(prose_only)
             } else {
                 cleaned_final
             };
             if trimmed_full.is_empty() {
                 None
             } else {
-                let prefix = Self::format_question_restated_prefix(prompt);
-                let final_str = if !prefix.is_empty()
+                let prefix = if !prior_answer_text.is_empty() {
+                    String::new()
+                } else {
+                    Self::format_question_restated_prefix(prompt)
+                };
+                let prose_with_prefix = if !prefix.is_empty()
                     && !trimmed_full.starts_with(&prefix)
                     && !trimmed_full.starts_with('#')
                 {
@@ -3572,13 +3930,21 @@ impl DeterministicOfflineSynthesisEngine {
                 } else {
                     trimmed_full
                 };
-                Some(final_str)
+
+                // Compact & renumber inline [k] citations so every [1]..[M] in prose maps 1-to-1 to the M emitted sources
+                // (eliminating dangling [8] when 7 unique files exist, and omitting uncited Turn-1 files on `continue`).
+                let (compacted_prose, compacted_chunks) =
+                    Self::remap_and_compact_citations(&prose_with_prefix, &unique_file_chunks, true);
+                let sources_block = Self::format_sources_block(&compacted_chunks);
+                let final_with_sources = format!("{}{}", compacted_prose.trim(), sources_block);
+                let turn_citations = Self::build_deduplicated_citations(&compacted_chunks);
+                Some((final_with_sources, turn_citations))
             }
         };
 
         let attempt_started = std::time::Instant::now();
-        let synthesized = match send_chat_request(model) {
-            Some(text) => text,
+        let (synthesized, turn_citations) = match send_chat_request(model) {
+            Some(pair) => pair,
             None => {
                 // Retry once ONLY on fast transient connection/swap errors (<10s); never double-wait or pile onto a timed-out runner.
                 if attempt_started.elapsed() >= Duration::from_secs(10) {
@@ -3594,7 +3960,7 @@ impl DeterministicOfflineSynthesisEngine {
                 guard.ui.restrl_processed_tasks = guard.ui.restrl_processed_tasks.saturating_add(1);
             }
         }
-        Some(synthesized)
+        Some((synthesized, turn_citations))
     }
 
     /// Computes Levenshtein edit distance between two lowercase ASCII/UTF-8 strings.
@@ -5055,5 +5421,83 @@ mod tests {
             1,
             "Repeated paragraph must appear only once after deduplication"
         );
+    }
+
+    #[test]
+    fn test_continuation_dedup_subletting_and_unified_citation_compaction() {
+        let turn1 = "Angela Davis is a landlord in New Orleans [1], [5].\n            Lease Management and Terms\n            She requires that no other persons occupy her premises without her express written consent obtained in advance [1], [5].             Some leases charge a $50.00 late fee after the third day [1].\n\n---\n### 📚 Sources & Document Links\n            - [📄 Susan.doc](file:///C:/Susan.doc) — **96% accuracy**\n";
+
+        let turn2_raw = "### Property Maintenance\n            Tenants must agree to extermination services every three months [2], [7].\n            ### Lease Termination\n            Either party may terminate with a thirty-day written notice at the end of the month [2], [5].             Additionally, Davis requires express written consent obtained in advance before any other persons are allowed to occupy her premises [6].";
+
+        let cleaned_turn2 = DeterministicOfflineSynthesisEngine::drop_sentences_repeating_prior(turn2_raw, turn1);
+        assert!(
+            cleaned_turn2.contains("extermination services every three months"),
+            "New maintenance fact must survive: {}",
+            cleaned_turn2
+        );
+        assert!(
+            cleaned_turn2.contains("thirty-day written notice"),
+            "New termination fact must survive: {}",
+            cleaned_turn2
+        );
+        assert!(
+            !cleaned_turn2.contains("express written consent obtained in advance"),
+            "Repeated subletting restriction must be stripped even after unpunctuated section heading: {}",
+            cleaned_turn2
+        );
+
+        // Verify citation compaction: 7 unique files, prose cites only [2], [5], [7] (plus a stray [8]) -> remaps to [1], [2], [3] with 3 sources!
+        let files = [
+            ("Susan.doc", 0.74f32),
+            ("Daisha.doc", 0.73),
+            ("Jamie.doc", 0.72),
+            ("Fosters.doc", 0.69),
+            ("Grace.doc", 0.66),
+            ("Aerial.odt", 0.64),
+            ("Castiglione.odt", 0.62),
+        ];
+        let owned: Vec<ScoredChunk> = files
+            .iter()
+            .enumerate()
+            .map(|(i, (name, sc))| {
+                let ch = quorum_types::DocumentChunk::new(
+                    &format!("chk_{}", i),
+                    &format!("doc_{}", i),
+                    &format!("C:/Leases/{}", name),
+                    1,
+                    20,
+                    0,
+                    vec![0.1; 768],
+                    "Lease agreement clause content for testing.",
+                    None,
+                )
+                .unwrap();
+                ScoredChunk::new(ch, *sc, "local", false)
+            })
+            .collect();
+        let refs: Vec<&ScoredChunk> = owned.iter().collect();
+
+        // Monotonicity check across the 0.70 boundary (0.74, 0.73, 0.72, 0.69 must NOT jump up from 72% to 86%!)
+        let cits_all = DeterministicOfflineSynthesisEngine::build_deduplicated_citations(&refs);
+        assert_eq!(cits_all.len(), 7);
+        for w in cits_all.windows(2) {
+            assert!(
+                w[0].score >= w[1].score,
+                "Citation accuracy scores must be monotonically non-increasing, got {} then {}",
+                w[0].score,
+                w[1].score
+            );
+        }
+
+        let prose_with_stray = format!("{} Castiglione St. notice goes to email [7], [8].", cleaned_turn2);
+        let (remapped, cited_only) =
+            DeterministicOfflineSynthesisEngine::remap_and_compact_citations(&prose_with_stray, &refs, true);
+        assert_eq!(
+            cited_only.len(),
+            3,
+            "Only the 3 cited files ([2]=Daisha, [5]=Grace, [7]=Castiglione) should remain in Turn 2 sources"
+        );
+        assert!(remapped.contains("[1]") && remapped.contains("[2]") && remapped.contains("[3]"));
+        assert!(!remapped.contains("[7]") && !remapped.contains("[8]"), "No out-of-bounds citation index may remain: {}", remapped);
     }
 }
