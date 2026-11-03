@@ -62,9 +62,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # ML / Embeddings / Deep Content
-candle-core = "0.9.1"
-candle-nn = "0.9.1"
-candle-transformers = "0.9.1"
+candle-core = "0.11.1"
+candle-nn = "0.11.1"
+candle-transformers = "0.11.1"
 tokenizers = "0.19"
 magika = "1.1"
 
