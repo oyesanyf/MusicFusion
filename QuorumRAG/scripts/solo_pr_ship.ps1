@@ -49,6 +49,7 @@ $pythonExe = if (Test-Path "C:\Python314\python.exe") {
 # Optional Pre-Ship Test Verification Gate
 if (-not $SkipTest) {
     Write-Host "[0/5] Executing deterministic benchmark suite and regression tests..." -ForegroundColor Magenta
+    Remove-Item "target\debug\deps\benchmarks_r4-*.exe" -Force -ErrorAction SilentlyContinue
     cargo test -p quorum-daemon --test benchmarks_r4 --no-run 2>$null
     Get-ChildItem -Path "target\debug\deps\benchmarks_r4-*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
         try {
@@ -68,7 +69,7 @@ Write-Host "[1/5] Setting up feature branch $branchName..." -ForegroundColor Cya
 # Fetch origin/main reference to know exact remote commit
 git fetch origin main --quiet
 
-$uncommitted = (git status --porcelain)
+$uncommitted = (git status --porcelain -- .)
 $headSha = (git rev-parse HEAD).Trim()
 $originMainSha = (git rev-parse origin/main).Trim()
 
@@ -92,7 +93,7 @@ if ($uncommitted) {
     git checkout -b $branchName
     Start-Sleep -Milliseconds 400
     Wait-GitLock
-    git add -A
+    git add -A -- .
     Wait-GitLock
     git commit -m "$Title"
 } elseif ($headSha -ne $originMainSha) {
@@ -315,6 +316,6 @@ if (Test-Path "scripts\resolve_open_prs.py") {
 }
 
 Write-Host "Clean working tree verification..." -ForegroundColor Cyan
-git status -s
+git status -s -- .
 
 Write-Host "Successfully shipped PR #$prNumber with full verification!" -ForegroundColor Green

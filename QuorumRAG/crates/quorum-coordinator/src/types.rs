@@ -45,9 +45,15 @@ pub struct RelevanceGrade {
 #[serde(rename_all = "snake_case")]
 pub enum SynthesisModelFamily {
     #[default]
+    #[serde(alias = "Glm4Agentic", alias = "glm4", alias = "glm-4")]
     Glm4Agentic,
+    #[serde(alias = "Qwen25Code", alias = "qwen", alias = "qwen2.5")]
     Qwen25Code,
+    #[serde(alias = "GemmaProse", alias = "gemma", alias = "gemma3")]
     GemmaProse,
+    #[serde(alias = "Gemma4_26b", alias = "gemma4:26b", alias = "gemma4")]
+    Gemma4_26b,
+    #[serde(alias = "AutoFusion")]
     AutoFusion,
 }
 

@@ -101,9 +101,10 @@ pub async fn chat_sse_handler(
     let _access_tier = payload.access_tier.unwrap_or(0);
 
     let family = match payload.model_family.as_deref() {
-        Some("Glm4Agentic") | Some("glm4") | Some("glm-4") => SynthesisModelFamily::Glm4Agentic,
-        Some("Qwen25Code") | Some("qwen") | Some("qwen2.5") => SynthesisModelFamily::Qwen25Code,
-        Some("GemmaProse") | Some("gemma") | Some("gemma3") => SynthesisModelFamily::GemmaProse,
+        Some("Glm4Agentic") | Some("glm4") | Some("glm-4") | Some("glm4:9b") => SynthesisModelFamily::Glm4Agentic,
+        Some("Qwen25Code") | Some("qwen") | Some("qwen2.5") | Some("qwen2.5:32b") | Some("qwen2.5:14b") | Some("qwen2.5:7b") | Some("qwen2.5:3b") | Some("qwen2.5:1.5b") => SynthesisModelFamily::Qwen25Code,
+        Some("Gemma4_26b") | Some("gemma4_26b") | Some("gemma4:26b") | Some("gemma4") => SynthesisModelFamily::Gemma4_26b,
+        Some("GemmaProse") | Some("gemma") | Some("gemma3") | Some("gemma2:9b") | Some("gemma2:2b") | Some("gemma3:4b") => SynthesisModelFamily::GemmaProse,
         Some("AutoFusion") | Some("auto_fusion") => SynthesisModelFamily::AutoFusion,
         _ => state.default_model_family,
     };
@@ -183,10 +184,11 @@ pub async fn query_handler(
 
     let top_k = payload.top_k.unwrap_or(32).clamp(24, 50);
     let family = match payload.model_family.as_deref() {
-        Some("Glm4Agentic") => SynthesisModelFamily::Glm4Agentic,
-        Some("Qwen25Code") => SynthesisModelFamily::Qwen25Code,
-        Some("GemmaProse") => SynthesisModelFamily::GemmaProse,
-        Some("AutoFusion") => SynthesisModelFamily::AutoFusion,
+        Some("Glm4Agentic") | Some("glm4") | Some("glm-4") | Some("glm4:9b") => SynthesisModelFamily::Glm4Agentic,
+        Some("Qwen25Code") | Some("qwen") | Some("qwen2.5") | Some("qwen2.5:32b") | Some("qwen2.5:14b") | Some("qwen2.5:7b") | Some("qwen2.5:3b") | Some("qwen2.5:1.5b") => SynthesisModelFamily::Qwen25Code,
+        Some("Gemma4_26b") | Some("gemma4_26b") | Some("gemma4:26b") | Some("gemma4") => SynthesisModelFamily::Gemma4_26b,
+        Some("GemmaProse") | Some("gemma") | Some("gemma3") | Some("gemma2:9b") | Some("gemma2:2b") | Some("gemma3:4b") => SynthesisModelFamily::GemmaProse,
+        Some("AutoFusion") | Some("auto_fusion") => SynthesisModelFamily::AutoFusion,
         _ => state.default_model_family,
     };
 

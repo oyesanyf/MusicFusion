@@ -74,6 +74,12 @@ pub enum AgenticTelemetryEvent {
     TokenDelta {
         delta: String,
     },
+    /// Final post-processed answer (repeat/meta/hallucination guards applied). Clients must replace the
+    /// streamed token text with this content, since guards run after streaming.
+    #[serde(rename = "final_answer")]
+    FinalAnswer {
+        content: String,
+    },
     /// Grounded source citation emitted
     #[serde(rename = "citation")]
     CitationEmitted {

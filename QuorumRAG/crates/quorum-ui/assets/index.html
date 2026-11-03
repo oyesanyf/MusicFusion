@@ -103,16 +103,19 @@
           <button id="btn-mobile-sidebar" class="btn-icon mobile-only">☰</button>
           <!-- Multi-Model Selector Pill Bar -->
           <div class="model-selector-bar">
-            <button class="model-pill active" data-model="AutoFusion" title="Hardware-aware Auto-Fusion dynamic router">
+            <button class="model-pill active" data-model="AutoFusion" title="Hardware-aware Auto-Fusion dynamic router (prefers Gemma 4 26B when installed &amp; memory-eligible)">
               ✨ Auto-Fusion
+            </button>
+            <button class="model-pill" data-model="Gemma4_26b" title="Gemma 4 26B MoE high-precision synthesis (gated on &gt;=18GB free RAM or &gt;=16GB free VRAM)">
+              💎 Gemma 4 26B
             </button>
             <button class="model-pill" data-model="Glm4Agentic" title="GLM-4-9B 128K multi-hop agentic synthesis">
               🧠 GLM-4-9B
             </button>
-            <button class="model-pill" data-model="Qwen25Code" title="Qwen 2.5 code specialist (sized by RAM/VRAM)">
+            <button class="model-pill" data-model="Qwen25Code" title="Qwen 2.5 code specialist (sized by runtime free RAM/VRAM)">
               💻 Qwen 2.5
             </button>
-            <button class="model-pill" data-model="GemmaProse" title="Google Gemma natural prose">
+            <button class="model-pill" data-model="GemmaProse" title="Google Gemma natural prose (sized by runtime free RAM/VRAM)">
               📜 Gemma 3
             </button>
           </div>

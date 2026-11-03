@@ -74,8 +74,8 @@ impl DeterministicOfflineSynthesisEngine {
         if non_ws >= 20 && (weird_symbols * 100 / non_ws) > 6 {
             return true;
         }
-        let alpha_count: usize = trimmed.chars().filter(|c| c.is_alphabetic()).count();
-        if non_ws >= 25 && (alpha_count * 100 / non_ws) < 55 {
+        let alnum_count: usize = trimmed.chars().filter(|c| c.is_alphanumeric()).count();
+        if non_ws >= 25 && (alnum_count * 100 / non_ws) < 60 {
             return true;
         }
         false
@@ -168,14 +168,12 @@ impl DeterministicOfflineSynthesisEngine {
                 let weird_symbols: usize = trimmed
                     .chars()
                     .filter(|&c| {
-                        matches!(
-                            c,
-                            '~' | '`' | '^' | '|' | '\\' | '{' | '}' | '<' | '>' | '@' | '#' | '%' | '*' | '='
-                        )
+                        matches!(c, '~' | '`' | '^' | '\\' | '{' | '}' | '<' | '>' | '#' | '%' | '*' | '=')
                     })
                     .count();
-                let alpha_count: usize = trimmed.chars().filter(|c| c.is_alphabetic()).count();
-                if (weird_symbols * 100 / non_ws) > 6 || (alpha_count * 100 / non_ws) < 50 {
+                // Phone numbers, ZIP codes, dates and amounts are digits, not garbage: measure alphanumerics
+                let alnum_count: usize = trimmed.chars().filter(|c| c.is_alphanumeric()).count();
+                if (weird_symbols * 100 / non_ws) > 8 || (alnum_count * 100 / non_ws) < 55 {
                     continue;
                 }
             }
@@ -295,6 +293,11 @@ impl DeterministicOfflineSynthesisEngine {
             "like", "likes", "make", "makes", "made", "take", "takes", "took", "come", "comes",
             "came", "look", "looks", "looked", "summarize", "detail", "details", "info", "information",
             "anything", "everything", "something", "nothing", "someone", "anyone", "all", "any", "some",
+            "much", "many", "often", "long", "kind", "type", "sort", "way", "get", "gets", "got", "use",
+            "uses", "used", "which", "whose", "whom", "its", "our", "your", "one", "ones", "not", "than",
+            "then", "very", "just", "only", "each", "every", "both", "either", "other", "others", "own",
+            "same", "such", "been", "being", "off", "out", "over", "under", "again", "here", "now",
+            "still", "yet", "ever", "even",
         ];
 
         const GENERIC_ATTRIBUTE_TERMS: &[&str] = &[
@@ -312,6 +315,9 @@ impl DeterministicOfflineSynthesisEngine {
             "sections", "page", "pages", "total", "day", "days", "heart", "soul",
             "life", "time", "world", "reading", "book", "books", "system", "systems",
             "model", "models", "data", "report", "reports", "policy", "policies",
+            "pay", "pays", "paid", "paying", "cost", "costs", "price", "prices", "fee", "fees",
+            "start", "started", "starts", "begin", "began", "end", "ended", "ends", "date", "dates",
+            "important", "importance", "result", "results", "respond", "responds", "response",
         ];
 
         const SOURCE_CODE_EXTENSIONS: &[&str] = &[
@@ -512,6 +518,33 @@ impl DeterministicOfflineSynthesisEngine {
             Vec::new()
         };
 
+        // Proper-noun anchors the user capitalised mid-sentence ("how much rent does Casey Ringgold pay").
+        let proper_terms: Vec<String> = prompt_eff
+            .split_whitespace()
+            .enumerate()
+            .filter_map(|(i, raw)| {
+                if i == 0 {
+                    return None;
+                }
+                let w = raw
+                    .trim_matches(|c: char| !c.is_alphanumeric() && c != '\'')
+                    .trim_end_matches("'s")
+                    .trim_matches(|c: char| !c.is_alphanumeric());
+                let first_upper = w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                let lw = w.to_ascii_lowercase();
+                (first_upper
+                    && lw.len() >= 3
+                    && !STOPWORDS.contains(&lw.as_str())
+                    && !GENERIC_ATTRIBUTE_TERMS.contains(&lw.as_str()))
+                .then_some(lw)
+            })
+            .fold(Vec::new(), |mut acc, w| {
+                if !acc.contains(&w) {
+                    acc.push(w);
+                }
+                acc
+            });
+
         // Filter and rank retrieved chunks using whole-word token matching and multi-term quorum threshold
         let mut scored_matches: Vec<(&ScoredChunk, usize, usize, i32)> = Vec::new();
         let mut seen_snippets: Vec<String> = Vec::new();
@@ -645,10 +678,15 @@ impl DeterministicOfflineSynthesisEngine {
                 1
             };
 
+            let proper_hits = proper_terms
+                .iter()
+                .filter(|t| matches_whole_word(t.as_str()))
+                .count();
             let is_relevant = if query_terms.is_empty() {
                 true
             } else {
-                total_hits >= required_query_hits && entity_hits >= required_entity_hits
+                (total_hits >= required_query_hits && entity_hits >= required_entity_hits)
+                    || (!proper_terms.is_empty() && proper_hits == proper_terms.len())
             };
 
             if is_relevant {
@@ -750,6 +788,7 @@ impl DeterministicOfflineSynthesisEngine {
                 {
                     doc_bonus -= 75;
                 }
+                doc_bonus += Self::answer_type_cue_score(prompt_eff, &text_l);
                 scored_matches.push((scored, entity_hits + prompt_entity_hits * 2, total_hits, doc_bonus));
             }
         }
@@ -795,7 +834,13 @@ impl DeterministicOfflineSynthesisEngine {
                         let lower = word.to_ascii_lowercase();
                         let is_all_caps = word.chars().all(|c| c.is_ascii_uppercase());
                         if !is_all_caps {
-                            vocab.entry(lower).or_insert_with(|| word.to_string());
+                            // A word ever seen in lowercase is a common noun ("phone", "number"); only words seen
+                            // exclusively capitalised (names, places) keep a capitalised canonical form.
+                            if word.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                                vocab.insert(lower, word.to_string());
+                            } else {
+                                vocab.entry(lower).or_insert_with(|| word.to_string());
+                            }
                         }
                     }
                 }
@@ -861,7 +906,12 @@ impl DeterministicOfflineSynthesisEngine {
 
             // 1. Use the local LLM strictly to orchestrate a natural, direct, citation-backed answer
             // from the retrieved local RAG chunks (never invoked when matched_chunks is empty).
-            let effective_question = if query_source_eff != prompt_eff && !is_continuation {
+            let effective_question = if is_continuation && query_source_eff != prompt_eff {
+                format!(
+                    "continue the previous answer about {} with additional details that were not already covered",
+                    query_source_eff.trim()
+                )
+            } else if query_source_eff != prompt_eff && !is_continuation {
                 format!("{} (Subject context: {})", prompt_eff, query_source_eff)
             } else {
                 prompt_eff.to_string()
@@ -880,7 +930,7 @@ impl DeterministicOfflineSynthesisEngine {
             let prefix = Self::format_question_restated_prefix(prompt_eff);
 
             let mut body_paragraphs: Vec<String> = Vec::new();
-            for (idx, c) in matched_chunk_refs.iter().enumerate() {
+            for (idx, c) in matched_chunk_refs.iter().enumerate().take(6) {
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
                 // Strip residual artifacts, ChatGPT export markers, and dividers
                 let mut chunk_lines: Vec<String> = Vec::new();
@@ -1042,7 +1092,7 @@ impl DeterministicOfflineSynthesisEngine {
 
     /// Runtime-safe non-panicking telemetry sender with backpressure retry.
     /// Avoids `blocking_send` panics on single-threaded `#[tokio::test]` runtimes while guaranteeing zero dropped tokens.
-    fn send_telemetry(
+    pub fn send_telemetry(
         tx: &Sender<AgenticTelemetryEvent>,
         mut event: AgenticTelemetryEvent,
     ) -> bool {
@@ -1074,6 +1124,9 @@ impl DeterministicOfflineSynthesisEngine {
             return String::new();
         }
         let lower = clean_prompt.to_ascii_lowercase();
+        if Self::is_continuation_query(&lower) {
+            return String::new();
+        }
 
         let capitalize = |s: &str| -> String {
             s.split_whitespace()
@@ -1288,17 +1341,45 @@ impl DeterministicOfflineSynthesisEngine {
             "can you tell me about ", "can you explain ", "explain ", "describe ",
             "please tell me about ", "please show me ", "show me ", "what about ",
         ];
-        let mut topic = lower.as_str();
+        let mut topic: Option<&str> = None;
         for prefix in &conversational_prefixes {
-            if let Some(rest) = topic.strip_prefix(prefix) {
-                topic = rest.trim();
+            if let Some(rest) = lower.strip_prefix(prefix) {
+                topic = Some(rest.trim());
                 break;
             }
         }
-        let clean_topic = topic.trim_matches(|c: char| !c.is_alphanumeric() && c != ' ').trim();
-        if !clean_topic.is_empty() {
-            return format!("{} — ", capitalize(clean_topic));
+        if let Some(t) = topic {
+            let clean_topic = t.trim_matches(|c: char| !c.is_alphanumeric() && c != ' ').trim();
+            if !clean_topic.is_empty() {
+                return format!("{} — ", capitalize(clean_topic));
+            }
         }
+        // "tell me all you know about X", "can you tell me what you know about X", "what can you tell me about X"
+        if (lower.starts_with("tell ") || lower.contains(" know about ") || lower.contains(" tell me about "))
+            && lower.contains(" about ")
+        {
+            if let Some(idx) = lower.rfind(" about ") {
+                let raw = clean_prompt[idx + " about ".len()..].trim();
+                let raw = raw.trim_matches(|c: char| !c.is_alphanumeric() && c != ' ').trim();
+                if !raw.is_empty() {
+                    return format!("{} — ", capitalize(raw));
+                }
+            }
+        }
+        // Any other natural-language question shape ("how much rent does X pay", "which bank...", "why is...",
+        // "list all...", "compare A and B") has no safe mechanical restatement: return "" so the model opens with a
+        // direct declarative answer instead of a title-cased copy of the question.
+        const QUESTION_LEADS: &[&str] = &[
+            "how", "which", "when", "why", "whose", "whom", "what", "who", "where", "list", "compare", "tell",
+            "summarize", "summarise", "show", "give", "find", "name", "does", "do", "did", "is", "are",
+            "was", "were", "can", "could", "should", "would", "will", "has", "have", "had", "please",
+        ];
+        let first_word = lower.split_whitespace().next().unwrap_or("");
+        let is_question_shaped = trimmed.ends_with('?') || QUESTION_LEADS.contains(&first_word);
+        if is_question_shaped {
+            return String::new();
+        }
+        // Bare noun-phrase topic ("African Churches and Gang Violence") -> "African Churches And Gang Violence — "
         format!("{} — ", capitalize(clean_prompt))
     }
 
@@ -1635,6 +1716,885 @@ impl DeterministicOfflineSynthesisEngine {
         (out_lines.join("\n"), had_repeat)
     }
 
+    /// Removes a leading stub heading that only restates the topic without a sentence (e.g. `### Angela Davis is`)
+    /// and any echoed `Source Documents:` / `Reference Excerpts` label line produced by small local models.
+    pub fn strip_stub_heading_and_label_echo(text: &str) -> String {
+        let mut lines: Vec<&str> = text.lines().collect();
+        let is_label = |l: &str| {
+            let t = l.trim().trim_matches(|c: char| c == '*' || c == '#' || c == ':' || c == ' ').to_ascii_lowercase();
+            t == "source documents" || t == "sources" || t.starts_with("reference excerpts")
+        };
+        // Drop leading blank lines, then stub heading, then label echoes (repeat until stable)
+        loop {
+            while lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {
+                lines.remove(0);
+            }
+            let Some(first) = lines.first().copied() else { break };
+            let ft = first.trim();
+            let heading_body = ft.trim_start_matches('#').trim();
+            let is_stub_heading = ft.starts_with('#')
+                && heading_body.chars().count() <= 80
+                && !heading_body.ends_with('.')
+                && !heading_body.ends_with('!')
+                && !heading_body.ends_with('?');
+            if is_stub_heading && lines.len() > 1 {
+                lines.remove(0);
+                continue;
+            }
+            if is_label(ft) && lines.len() > 1 {
+                lines.remove(0);
+                continue;
+            }
+            break;
+        }
+        let normalized: Vec<String> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                let t = line.trim_start();
+                if !t.starts_with('#') {
+                    return (*line).to_string();
+                }
+                let body = t.trim_start_matches('#').trim();
+                // `#### [1] Source File: name.doc` (echo of the context header) -> `**name.doc** [1]`
+                if body.starts_with('[') {
+                    if let Some(close) = body.find(']') {
+                        let tag = &body[..=close];
+                        let rest = body[close + 1..].trim();
+                        if let Some(name) = rest
+                            .strip_prefix("Source File:")
+                            .or_else(|| rest.strip_prefix("Source:"))
+                        {
+                            return format!("**{}** {}", name.trim(), tag);
+                        }
+                    }
+                }
+                // `#### Source Document [2]: Sacred math and disruption.docx` -> `**Sacred math and disruption.docx** [2]`
+                let lb = body.to_ascii_lowercase();
+                if lb.starts_with("source document") || lb.starts_with("document [") || lb.starts_with("source [") {
+                    if let (Some(o), Some(c)) = (body.find('['), body.find(']')) {
+                        if o < c {
+                            let tag = &body[o..=c];
+                            let name = body[c + 1..].trim_start_matches(':').trim();
+                            if !name.is_empty() {
+                                return format!("**{}** {}", name, tag);
+                            }
+                            return String::new();
+                        }
+                    }
+                }
+                // The very first line is a full sentence wrongly prefixed with `###` -> drop the hashes
+                let looks_like_sentence = body.chars().count() > 80
+                    || body.ends_with('.')
+                    || body.ends_with('!')
+                    || body.ends_with('?')
+                    || body.contains(". ");
+                if i == 0 && looks_like_sentence {
+                    return body.to_string();
+                }
+                (*line).to_string()
+            })
+            .collect();
+        normalized.join("\n").trim().to_string()
+    }
+
+    /// Deterministic anti-hallucination guard: removes prose sentences whose content words are mostly absent from
+    /// the retrieved source text (generic LLM padding such as "his LinkedIn profile provides additional insights").
+    /// The first sentence (question-restating opening) is always kept. Returns the original text if filtering would
+    /// remove almost everything.
+    /// Returns true when `chars[dot_idx] == '.'` follows a single-letter initial (`P. B.`) or common title/street
+    /// abbreviation (`St.`, `Ave.`, `Rd.`, `Dr.`, `Mr.`, `Mrs.`, `Ms.`, `No.`, `vs.`, `Inc.`, etc.), not a sentence end.
+    fn is_non_terminal_period(chars: &[char], dot_idx: usize) -> bool {
+        if dot_idx == 0 || chars.get(dot_idx) != Some(&'.') {
+            return false;
+        }
+        // Single uppercase initial ("P. B. Randolph")
+        if chars[dot_idx - 1].is_uppercase() && (dot_idx < 2 || !chars[dot_idx - 2].is_alphanumeric()) {
+            return true;
+        }
+        let mut start = dot_idx;
+        while start > 0 && chars[start - 1].is_alphabetic() {
+            start -= 1;
+        }
+        if start < dot_idx && (start == 0 || !chars[start - 1].is_alphanumeric()) {
+            let word: String = chars[start..dot_idx].iter().collect::<String>().to_ascii_lowercase();
+            const ABBREVS: &[&str] = &[
+                "st", "ave", "rd", "blvd", "dr", "ln", "ct", "pl", "ste", "apt", "mr", "mrs", "ms",
+                "prof", "sr", "jr", "inc", "ltd", "corp", "co", "no", "vs", "etc", "fig", "al",
+            ];
+            if ABBREVS.contains(&word.as_str()) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn drop_ungrounded_sentences(text: &str, corpus: &str) -> String {
+        use std::collections::HashSet;
+        const STOP: &[&str] = &[
+            "that", "with", "this", "from", "have", "been", "their", "which", "also", "such", "into",
+            "these", "those", "there", "where", "while", "about", "through", "across", "within",
+            "between", "being", "over", "other", "more", "most", "some", "only", "than", "them",
+            "they", "what", "when", "will", "would", "could", "should", "both", "each", "well", "very",
+            "many", "much", "like", "make", "made", "help", "helps", "provide", "provides", "providing",
+            "including", "includes", "include", "overall", "furthermore", "additionally", "moreover",
+            "his", "her", "its", "and", "the", "for", "are", "was", "were", "has", "had", "not", "but",
+        ];
+        let word_key = |w: &str| -> String { w.chars().take(5).collect() };
+        let split_words = |s: &str| -> Vec<String> {
+            s.to_ascii_lowercase()
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| w.len() >= 4 && !w.chars().all(|c| c.is_ascii_digit()))
+                .map(|w| w.to_string())
+                .collect()
+        };
+        let corpus_keys: HashSet<String> = split_words(corpus).iter().map(|w| word_key(w)).collect();
+        if corpus_keys.is_empty() {
+            return text.to_string();
+        }
+
+        let mut first_sentence_done = false;
+        let mut out_lines: Vec<String> = Vec::new();
+        let mut kept_prose = 0usize;
+        let mut total_prose = 0usize;
+
+        for line in text.lines() {
+            let t = line.trim();
+            if t.is_empty()
+                || t.starts_with('#')
+                || t.starts_with('-')
+                || t.starts_with('*')
+                || t.starts_with('>')
+                || t.starts_with('|')
+                || t.starts_with('`')
+                || Self::is_numbered_list_item(t)
+            {
+                out_lines.push(line.to_string());
+                continue;
+            }
+            // split into sentences keeping terminators
+            let chars: Vec<char> = t.chars().collect();
+            let mut sentences: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            for (i, &c) in chars.iter().enumerate() {
+                cur.push(c);
+                if matches!(c, '.' | '!' | '?') {
+                    let next_ws = i + 1 >= chars.len() || chars[i + 1].is_whitespace();
+                    let non_term = c == '.' && Self::is_non_terminal_period(&chars, i);
+                    if next_ws && !non_term {
+                        sentences.push(std::mem::take(&mut cur));
+                    }
+                }
+            }
+            if !cur.trim().is_empty() {
+                sentences.push(cur);
+            }
+            let mut kept: Vec<String> = Vec::new();
+            for sent in sentences {
+                let sent_trim = sent.trim().to_string();
+                total_prose += sent_trim.len();
+                let words: Vec<String> = split_words(&sent_trim)
+                    .into_iter()
+                    .filter(|w| !STOP.contains(&w.as_str()))
+                    .collect();
+                let keep = if !first_sentence_done {
+                    true
+                } else if words.len() < 6 {
+                    true
+                } else {
+                    let novel = words.iter().filter(|w| !corpus_keys.contains(&word_key(w))).count();
+                    novel * 100 / words.len() <= 45
+                };
+                first_sentence_done = true;
+                if keep {
+                    kept_prose += sent_trim.len();
+                    kept.push(sent_trim);
+                }
+            }
+            if !kept.is_empty() {
+                out_lines.push(kept.join(" "));
+            }
+        }
+        if total_prose > 0 && kept_prose * 100 / total_prose < 25 {
+            return text.to_string();
+        }
+        out_lines.join("\n").trim().to_string()
+    }
+
+    /// Extra keyword cues for a targeted lexical search, by the kind of fact a question asks for
+    /// (address/phone/date/amount). Empty for questions with no specific answer type.
+    pub fn answer_type_cue_terms(prompt: &str) -> Vec<&'static str> {
+        let q = prompt.to_ascii_lowercase();
+        let qw: Vec<&str> = q.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+        let has = |w: &str| qw.contains(&w);
+        let mut out: Vec<&'static str> = Vec::new();
+        if ["live", "lives", "living", "reside", "resides", "address", "located", "location", "hometown"].iter().any(|w| has(w)) {
+            out.extend(["address", "street", "avenue", "phone", "email"]);
+        }
+        if ["phone", "email", "contact", "telephone", "reach"].iter().any(|w| has(w)) {
+            out.extend(["phone", "email", "contact", "mobile"]);
+        }
+        if q.contains("how much") || ["cost", "price", "rent", "fee", "fees", "salary", "pay", "pays", "paid", "amount", "deposit"].iter().any(|w| has(w)) {
+            out.extend(["rent", "month", "amount", "payable", "fee"]);
+        }
+        if qw.first() == Some(&"when") || ["date", "dated", "start", "started", "began", "begin"].iter().any(|w| has(w)) {
+            out.extend(["dated", "date", "starting", "day", "entered"]);
+        }
+        out.dedup();
+        out
+    }
+
+    /// Answer-type cue score: rewards chunks that contain the *kind* of fact a natural-language question asks for
+    /// (a street address / ZIP for "where does X live", a `$` amount for "how much", a date for "when", a phone or
+    /// email for "contact"), so the excerpt that actually answers the question ranks above excerpts that merely
+    /// mention the subject. `text_l` must be lowercase.
+    pub fn answer_type_cue_score(prompt: &str, text_l: &str) -> i32 {
+        let q = prompt.to_ascii_lowercase();
+        let qw: Vec<&str> = q.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+        let has = |w: &str| qw.contains(&w);
+        let tokens: Vec<&str> = text_l.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+        let tok = |w: &str| tokens.contains(&w);
+        let mut score = 0i32;
+
+        let asks_location = ["live", "lives", "living", "reside", "resides", "address", "located", "location", "hometown", "based"]
+            .iter()
+            .any(|w| has(w));
+        if asks_location {
+            if tokens.iter().any(|t| t.len() == 5 && t.chars().all(|c| c.is_ascii_digit())) {
+                score += 220;
+            }
+            let cues = ["address", "street", "st", "avenue", "ave", "road", "rd", "drive", "lane", "city", "suite", "apt"]
+                .iter()
+                .filter(|w| tok(w))
+                .count();
+            score += (cues.min(3) as i32) * 60;
+        }
+
+        let asks_amount = q.contains("how much")
+            || q.contains("how many")
+            || ["cost", "costs", "price", "rent", "fee", "fees", "salary", "pay", "pays", "paid", "amount", "charge", "deposit"]
+                .iter()
+                .any(|w| has(w));
+        if asks_amount {
+            if text_l.contains('$') {
+                score += 200;
+            }
+            if text_l.contains("per month") || text_l.contains("per day") || text_l.contains("per year") {
+                score += 60;
+            }
+        }
+
+        let asks_date = qw.first() == Some(&"when")
+            || ["date", "dated", "start", "started", "began", "begin", "year", "since", "until"].iter().any(|w| has(w));
+        if asks_date {
+            const MONTHS: &[&str] = &[
+                "january", "february", "march", "april", "may", "june", "july", "august", "september",
+                "october", "november", "december",
+            ];
+            if MONTHS.iter().any(|m| tok(m)) {
+                score += 120;
+            }
+            if tokens.iter().any(|t| t.len() == 4 && (t.starts_with("19") || t.starts_with("20")) && t.chars().all(|c| c.is_ascii_digit())) {
+                score += 80;
+            }
+        }
+
+        let asks_contact = ["phone", "email", "contact", "reach", "number", "telephone"].iter().any(|w| has(w));
+        if asks_contact {
+            if tok("phone") || tok("tel") || tok("mobile") {
+                score += 120;
+            }
+            if text_l.contains('@') || tok("email") {
+                score += 120;
+            }
+        }
+        score
+    }
+
+    /// Lowercases a sentence the model wrote In Title Case (>= 70% of 5+ words capitalised), keeping the first word,
+    /// acronyms, numbers/amounts, words the user capitalised, and words never seen in lowercase (proper names).
+    fn detitle_sentence(
+        sentence: &str,
+        prompt: &str,
+        text: &str,
+        corpus_lower_words: &std::collections::HashSet<&str>,
+    ) -> String {
+        let words: Vec<&str> = sentence.split_whitespace().collect();
+        if words.len() < 5 {
+            return sentence.to_string();
+        }
+        let caps = words
+            .iter()
+            .filter(|w| w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
+            .count();
+        if caps * 100 / words.len() < 70 {
+            return sentence.to_string();
+        }
+        const FUNCTION_WORDS: &[&str] = &[
+            "the", "a", "an", "of", "on", "in", "is", "are", "was", "were", "to", "for", "and", "or", "per",
+            "by", "at", "with", "from", "after", "before", "each", "until", "be", "has", "have", "its", "this",
+            "that", "as", "if", "not", "will", "must", "also", "there", "an", "any", "all", "within", "into",
+            "day", "days", "week", "weeks", "month", "months", "year", "years", "first", "second", "third",
+            "fourth", "fifth", "last", "total", "maximum", "minimum", "late", "fee", "fees", "rent", "lease",
+            "leases", "tenant", "tenants", "landlord", "amount", "payment", "payments", "due", "paid",
+            "additionally", "additional", "plus", "afterwards", "included", "includes", "agreement", "end",
+            "period", "requirements", "security", "deposit", "equal", "one", "two", "three", "ten", "been", "being", "had", "do", "does", "did", "can", "could", "should", "would", "may", "might", "shall", "he", "she", "it", "they", "we", "you", "his", "her", "their", "our", "than", "then", "when", "where", "which", "who", "what", "so", "but", "no", "up", "out", "over", "under", "about", "such", "more", "most", "other", "only", "very", "these", "those", "both", "between",
+        ];
+        let fixed: Vec<String> = words
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let bare = w.trim_matches(|c: char| !c.is_alphanumeric());
+                let is_acronym = bare.chars().filter(|c| c.is_alphabetic()).count() >= 2
+                    && bare.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_uppercase());
+                if i == 0 || is_acronym || w.contains('$') || w.chars().any(|c| c.is_ascii_digit()) {
+                    return (*w).to_string();
+                }
+                let lbare = bare.to_ascii_lowercase();
+                let user_capitalised = prompt.split_whitespace().any(|pw| {
+                    let pb = pw.trim_matches(|c: char| !c.is_alphanumeric());
+                    pb == bare && pb.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                });
+                if user_capitalised {
+                    return (*w).to_string();
+                }
+                let typed_lower = prompt.split_whitespace().any(|pw| {
+                    let pb = pw.trim_matches(|c: char| !c.is_alphanumeric());
+                    pb == lbare.as_str()
+                        || (lbare.len() >= 4 && pb.starts_with(lbare.as_str()) && pb.chars().all(|c| !c.is_uppercase()))
+                });
+                let lower_elsewhere = lbare.len() >= 3
+                    && text.split(|c: char| !c.is_alphanumeric()).any(|tw| tw == lbare.as_str());
+                let lower_in_corpus = corpus_lower_words.contains(lbare.as_str());
+                if FUNCTION_WORDS.contains(&lbare.as_str()) || typed_lower || lower_elsewhere || lower_in_corpus {
+                    w.to_lowercase()
+                } else {
+                    (*w).to_string()
+                }
+            })
+            .collect();
+        fixed.join(" ")
+    }
+
+    /// Continuation guard: removes sentences that substantially repeat a sentence from the previous answer
+    /// (word-set Jaccard >= 0.55 over words of 4+ letters), so "continue" adds new material instead of restating.
+    /// Returns the original text if fewer than two sentences would survive.
+    pub fn drop_sentences_repeating_prior(text: &str, prior: &str) -> String {
+        use std::collections::HashSet;
+        let words = |s: &str| -> HashSet<String> {
+            s.to_ascii_lowercase()
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| w.len() >= 4)
+                .map(|w| w.to_string())
+                .collect()
+        };
+        let split_sentences = |s: &str| -> Vec<String> {
+            let mut out = Vec::new();
+            let mut cur = String::new();
+            let chars: Vec<char> = s.chars().collect();
+            for (i, &c) in chars.iter().enumerate() {
+                cur.push(c);
+                if matches!(c, '.' | '!' | '?') && (i + 1 >= chars.len() || chars[i + 1].is_whitespace()) {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            if !cur.trim().is_empty() {
+                out.push(cur);
+            }
+            out
+        };
+        let prior_sets: Vec<HashSet<String>> = split_sentences(prior)
+            .iter()
+            .map(|x| words(x))
+            .filter(|w| w.len() >= 4)
+            .collect();
+        if prior_sets.is_empty() {
+            return text.to_string();
+        }
+        let mut out_lines: Vec<String> = Vec::new();
+        let mut kept_sentences = 0usize;
+        for line in text.lines() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') || t.starts_with('|') || t.starts_with('`') {
+                out_lines.push(line.to_string());
+                continue;
+            }
+            let kept: Vec<String> = split_sentences(t)
+                .into_iter()
+                .map(|x| x.trim().to_string())
+                .filter(|x| {
+                    let ws = words(x);
+                    if ws.len() < 4 {
+                        return true;
+                    }
+                    !prior_sets.iter().any(|ps| {
+                        let inter = ws.intersection(ps).count();
+                        let union = ws.union(ps).count().max(1);
+                        inter * 100 / union >= 55
+                    })
+                })
+                .collect();
+            kept_sentences += kept.len();
+            if !kept.is_empty() {
+                out_lines.push(kept.join(" "));
+            }
+        }
+        if kept_sentences == 0 {
+            return text.to_string();
+        }
+        out_lines.join("\n").trim().to_string()
+    }
+
+    /// Returns a `max_chars` window of `text`. For typed questions the window starts shortly before the first
+    /// occurrence of the requested fact type (5-digit ZIP for location, `$` for amounts, a month/year for dates,
+    /// "phone"/"@" for contact) instead of always taking the opening characters.
+    pub fn answer_focused_window(prompt: &str, text: &str, max_chars: usize) -> String {
+        let chars: Vec<char> = text.chars().collect();
+        if chars.len() <= max_chars {
+            return text.to_string();
+        }
+        let cues = Self::answer_type_cue_terms(prompt);
+        if cues.is_empty() {
+            return chars[..max_chars].iter().collect();
+        }
+        let lower: String = text.to_ascii_lowercase();
+        let lower_chars: Vec<char> = lower.chars().collect();
+        let mut anchor: Option<usize> = None;
+        let find = |needle: &str| -> Option<usize> {
+            lower.find(needle).map(|byte_i| lower[..byte_i].chars().count())
+        };
+        let q = prompt.to_ascii_lowercase();
+        if cues.contains(&"address") {
+            // first 5-digit token (ZIP)
+            let mut run = 0usize;
+            for (i, c) in lower_chars.iter().enumerate() {
+                if c.is_ascii_digit() {
+                    run += 1;
+                } else {
+                    if run == 5 {
+                        anchor = Some(i - 5);
+                        break;
+                    }
+                    run = 0;
+                }
+            }
+            if anchor.is_none() {
+                anchor = find("address").or_else(|| find("street")).or_else(|| find("avenue"));
+            }
+        }
+        if anchor.is_none() && (cues.contains(&"phone") || q.contains("phone") || q.contains("email")) {
+            anchor = find("phone").or_else(|| find("@")).or_else(|| find("email"));
+        }
+        if anchor.is_none() && cues.contains(&"rent") {
+            anchor = find("$");
+        }
+        if anchor.is_none() && cues.contains(&"dated") {
+            const MONTHS: &[&str] = &["january", "february", "march", "april", "may ", "june", "july", "august", "september", "october", "november", "december"];
+            anchor = MONTHS.iter().filter_map(|m| find(m)).min();
+        }
+        let start = anchor.map(|a| a.saturating_sub(200)).unwrap_or(0);
+        let start = start.min(chars.len().saturating_sub(max_chars));
+        chars[start..start + max_chars].iter().collect()
+    }
+
+    /// Byte index just past the last sentence terminator that is followed by whitespace (or a paragraph break).
+    pub fn last_sentence_boundary(text: &str) -> Option<usize> {
+        let bytes = text.as_bytes();
+        let mut found: Option<usize> = None;
+        for i in 0..bytes.len().saturating_sub(1) {
+            let is_initial = bytes[i] == b'.'
+                && i >= 1
+                && bytes[i - 1].is_ascii_uppercase()
+                && (i < 2 || !bytes[i - 2].is_ascii_alphanumeric());
+            if !is_initial && matches!(bytes[i], b'.' | b'!' | b'?' | b'\n') && bytes[i + 1].is_ascii_whitespace() {
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if text.is_char_boundary(j) {
+                    found = Some(j);
+                }
+            }
+        }
+        found
+    }
+
+    /// Splits `segment` into sentences (keeping their trailing whitespace/paragraph breaks) and drops those that
+    /// substantially repeat a sentence of `prior` (word-set Jaccard >= 0.55 over words of 4+ letters).
+    pub fn filter_repeating_segments(segment: &str, prior: &str) -> String {
+        use std::collections::HashSet;
+        let words = |s: &str| -> HashSet<String> {
+            s.to_ascii_lowercase()
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| w.len() >= 4)
+                .map(|w| w.to_string())
+                .collect()
+        };
+        let prior_sets: Vec<HashSet<String>> = prior
+            .split(|c: char| c == '.' || c == '!' || c == '?' || c == '\n')
+            .map(|x| words(x))
+            .filter(|w| w.len() >= 4)
+            .collect();
+        let mut out = String::new();
+        let mut cur = String::new();
+        let chars: Vec<char> = segment.chars().collect();
+        let mut i = 0usize;
+        let flush = |cur: &mut String, out: &mut String| {
+            let ws = words(cur);
+            let word_count = cur.split_whitespace().count();
+            let is_fragment = word_count > 0 && word_count < 3 && !cur.trim_start().starts_with('#') && !cur.trim_start().starts_with('-');
+            let repeats = is_fragment
+                || ws.len() >= 4
+                && prior_sets.iter().any(|ps| {
+                    let inter = ws.intersection(ps).count();
+                    let union = ws.union(ps).count().max(1);
+                    inter * 100 / union >= 55
+                });
+            if !repeats {
+                out.push_str(cur);
+            } else {
+                // keep paragraph structure: preserve trailing newlines of a dropped sentence
+                let trailing_nl: String = cur.chars().rev().take_while(|c| c.is_whitespace()).collect::<String>();
+                if trailing_nl.contains('\n') && !out.ends_with('\n') && !out.is_empty() {
+                    out.push_str("\n\n");
+                }
+            }
+            cur.clear();
+        };
+        while i < chars.len() {
+            let c = chars[i];
+            cur.push(c);
+            let is_term = matches!(c, '.' | '!' | '?' | '\n');
+            // "P. B. Randolph": a single capital letter before '.' is an initial, not a sentence end
+            let is_initial = c == '.'
+                && i >= 1
+                && chars[i - 1].is_uppercase()
+                && (i < 2 || !chars[i - 2].is_alphanumeric());
+            if is_term && !is_initial && (i + 1 >= chars.len() || chars[i + 1].is_whitespace()) {
+                // absorb following whitespace into this sentence
+                while i + 1 < chars.len() && chars[i + 1].is_whitespace() {
+                    i += 1;
+                    cur.push(chars[i]);
+                }
+                flush(&mut cur, &mut out);
+            }
+            i += 1;
+        }
+        if !cur.is_empty() {
+            flush(&mut cur, &mut out);
+        }
+        out
+    }
+
+    /// Percentage (0-100) of an excerpt's distinct 5+ letter words that already appear in the previous answer.
+    pub fn coverage_by_prior_percent(excerpt: &str, prior: &str) -> u32 {
+        use std::collections::HashSet;
+        let words = |s: &str| -> HashSet<String> {
+            s.to_ascii_lowercase()
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| w.len() >= 5)
+                .map(|w| w.to_string())
+                .collect()
+        };
+        let ex = words(excerpt);
+        if ex.is_empty() {
+            return 100;
+        }
+        let pr = words(prior);
+        (ex.iter().filter(|w| pr.contains(*w)).count() * 100 / ex.len()) as u32
+    }
+
+    /// Slides a `max_chars` window over `text` (step = a quarter window) and returns the window whose content is
+    /// least covered by `prior` — the material a continuation has not used yet.
+    pub fn least_covered_window(text: &str, prior: &str, max_chars: usize) -> String {
+        let chars: Vec<char> = text.chars().collect();
+        if chars.len() <= max_chars {
+            return text.to_string();
+        }
+        let step = (max_chars / 4).max(1);
+        let mut best_start = 0usize;
+        let mut best_cov = u32::MAX;
+        let mut start = 0usize;
+        while start < chars.len() {
+            let end = (start + max_chars).min(chars.len());
+            let window: String = chars[start..end].iter().collect();
+            let cov = Self::coverage_by_prior_percent(&window, prior);
+            if cov < best_cov {
+                best_cov = cov;
+                best_start = start;
+            }
+            if end == chars.len() {
+                break;
+            }
+            start += step;
+        }
+        let end = (best_start + max_chars).min(chars.len());
+        let begin = end.saturating_sub(max_chars);
+        chars[begin..end].iter().collect()
+    }
+
+    /// True for Markdown ordered-list lines such as `1. **Python**: ...` or `2) Rust`.
+    pub fn is_numbered_list_item(line: &str) -> bool {
+        let t = line.trim_start();
+        let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() || digits.len() > 3 {
+            return false;
+        }
+        let rest = &t[digits.len()..];
+        rest.starts_with(". ") || rest.starts_with(") ") || rest == "." || rest == ")"
+    }
+
+    /// Content terms of a natural-language question (lowercase, >= 3 chars, minus question/filler words).
+    pub fn question_content_terms(prompt: &str) -> Vec<String> {
+        const FILLER: &[&str] = &[
+            "what", "whats", "does", "did", "where", "when", "who", "whom", "whose", "how", "why",
+            "which", "the", "and", "for", "with", "from", "into", "about", "have", "has", "had",
+            "will", "would", "should", "could", "can", "you", "tell", "show", "give", "please",
+            "are", "was", "were", "his", "her", "hers", "him", "she", "they", "them", "their",
+            "that", "this", "these", "those", "much", "many", "any", "all", "some", "know", "explain",
+            "describe", "summarize", "summarise", "list", "find", "also", "more", "there", "its",
+            "our", "your", "out", "get", "got", "use", "used", "way", "kind", "type", "everything",
+            "anything", "something", "info", "information", "detail", "details", "not",
+            "continue", "previous", "answer", "additional", "covered", "already", "new", "expand",
+            "elaborate", "were", "live", "lives", "living", "reside", "resides", "located", "based",
+            "work", "works", "worked", "working", "born", "say", "says", "said", "talk", "talks",
+            "mention", "mentions", "mean", "means", "call", "called",
+        ];
+        let mut out: Vec<String> = Vec::new();
+        for w in prompt
+            .to_ascii_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() >= 3 && !FILLER.contains(w))
+        {
+            let s = w.to_string();
+            if !out.contains(&s) {
+                out.push(s);
+            }
+        }
+        out
+    }
+
+    /// Keeps excerpts whose question-term coverage is at least half the best excerpt's coverage (min 1 term).
+    pub fn prune_weak_excerpts<'a>(prompt: &str, chunks: &[&'a ScoredChunk]) -> Vec<&'a ScoredChunk> {
+        let terms = Self::question_content_terms(prompt);
+        if terms.is_empty() || chunks.len() <= 1 {
+            return chunks.to_vec();
+        }
+        let coverage = |c: &ScoredChunk| -> usize {
+            let file_name = std::path::Path::new(&c.chunk.file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let hay = format!("{} {}", file_name, c.chunk.text_content.to_ascii_lowercase());
+            let tokens: std::collections::HashSet<&str> =
+                hay.split(|ch: char| !ch.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+            let base = terms
+                .iter()
+                .filter(|t| {
+                    tokens.contains(t.as_str())
+                        || (t.len() >= 4
+                            && (tokens.contains(format!("{}s", t).as_str())
+                                || t.strip_suffix('s').map(|st| tokens.contains(st)).unwrap_or(false)))
+                })
+                .count();
+            if base >= 1 && Self::answer_type_cue_score(prompt, &hay) >= 120 {
+                (base + 1).min(terms.len())
+            } else {
+                base
+            }
+        };
+        let scored: Vec<(usize, &'a ScoredChunk)> = chunks.iter().map(|c| (coverage(c), *c)).collect();
+        let best = scored.iter().map(|(n, _)| *n).max().unwrap_or(0);
+        if best == 0 {
+            return chunks.to_vec();
+        }
+        let threshold = ((best * 3 + 3) / 4).max(1);
+        let kept: Vec<&'a ScoredChunk> = scored
+            .into_iter()
+            .filter(|(n, _)| *n >= threshold)
+            .map(|(_, c)| c)
+            .collect();
+        if kept.is_empty() {
+            chunks[..1].to_vec()
+        } else {
+            kept
+        }
+    }
+
+    /// Deduplicates excerpts from multiple copies/exports of the same document on disk (e.g. `RedactX-v3.pdf` and
+    /// `RedactX-v3 (1).pdf`) by collapsing chunks that share an identical 160-character alphanumeric opening signature.
+    pub fn dedup_near_identical_excerpts<'a>(chunks: Vec<&'a ScoredChunk>) -> Vec<&'a ScoredChunk> {
+        use std::collections::HashSet;
+        let mut seen_sigs: HashSet<String> = HashSet::new();
+        let mut out: Vec<&'a ScoredChunk> = Vec::with_capacity(chunks.len());
+        for c in chunks {
+            let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
+            let sig: String = cleaned
+                .chars()
+                .filter(|ch| ch.is_alphanumeric())
+                .flat_map(|ch| ch.to_lowercase())
+                .take(160)
+                .collect();
+            if sig.len() < 40 || seen_sigs.insert(sig) {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    /// Removes a first line that merely echoes the question ("How Much Rent Does Casey Ringgold Pay?"),
+    /// meta sentences ("The user's question asks...", "Firstly, let us consider..."), and un-Title-Cases an
+    /// opening sentence that the model wrote In Title Case.
+    pub fn strip_question_echo_and_meta(text: &str, prompt: &str) -> String {
+        Self::strip_question_echo_and_meta_with_corpus(text, prompt, "")
+    }
+
+    /// Same as [`Self::strip_question_echo_and_meta`], additionally lowercasing Title-Cased words that the source
+    /// excerpts (`corpus`) only ever use in lowercase (common nouns), while keeping proper names capitalised.
+    pub fn strip_question_echo_and_meta_with_corpus(text: &str, prompt: &str, corpus: &str) -> String {
+        let corpus_lower_words: std::collections::HashSet<&str> = corpus
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() >= 3 && w.chars().all(|c| c.is_lowercase() || c.is_ascii_digit()))
+            .collect();
+        let norm = |s: &str| -> String {
+            s.to_ascii_lowercase()
+                .chars()
+                .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+                .collect::<String>()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let prompt_norm = norm(prompt);
+        let mut lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+
+        // 0. drop any heading line that merely echoes the question ("### When Did Michael Lewis's Lease Start?")
+        lines.retain(|l| {
+            let t = l.trim();
+            !(t.starts_with('#') && !prompt_norm.is_empty() && norm(t.trim_start_matches('#').trim_matches('*')) == prompt_norm)
+        });
+
+        // 1. drop an echoed-question first line
+        while let Some(first) = lines.first() {
+            let f = first.trim();
+            if f.is_empty() {
+                lines.remove(0);
+                continue;
+            }
+            let fn_ = norm(f.trim_start_matches('#').trim_matches('*'));
+            if !prompt_norm.is_empty() && fn_ == prompt_norm && lines.len() > 1 {
+                lines.remove(0);
+                continue;
+            }
+            break;
+        }
+
+        // 2. drop meta sentences anywhere in prose lines
+        const META_STARTS: &[&str] = &[
+            "the user's question", "the users question", "the user's query", "the users query",
+            "the user is asking", "the user asks", "the question asks", "to address this question",
+            "to directly address this query", "to answer this question", "firstly, let us consider",
+            "first, let us consider", "let us consider", "let's consider", "to address this query",
+            "to directly address", "to address the", "i'll synthesize", "i will synthesize",
+            "based on the provided", "based on the information provided", "based on the reference",
+            "given this comprehensive analysis", "given the information gathered", "in conclusion, based on the",
+            "we need to", "let's look", "let us look", "let's examine", "let us examine",
+            "to determine", "inquiring about", "we must synthesize", "we must review", "it's essential to examine",
+            "it is essential to examine", "it's important to examine", "it is important to note that the user",
+        ];
+        // Leading clauses that wrap a real answer ("Based on the provided documents, X") are cut, not the sentence.
+        const META_CLAUSES: &[&str] = &[
+            "based on the", "based on information", "according to the", "to directly address", "to address",
+            "to answer", "to compare", "as per the", "from the provided", "in the provided",
+        ];
+        const DISCOURSE_PREFIXES: &[&str] = &[
+            "Firstly, ", "Secondly, ", "Thirdly, ", "Lastly, ", "Moving on to ", "Next, ", "First, we find ",
+            "Firstly we find ",
+        ];
+        // Sentences mentioning the user's question are dropped only when they carry no fact (no digit, `$`, or
+        // citation); excerpt jargon is rewritten to plain "documents" rather than deleting the sentence.
+        const META_CONTAINS: &[&str] = &[
+            "the user's question", "the user's query", "the users question", "the users query",
+            "user's question", "provided in the question",
+        ];
+        const META_REWRITES: &[(&str, &str)] = &[
+            ("the reference excerpts", "the documents"),
+            ("the provided excerpts", "the documents"),
+            ("reference excerpts", "documents"),
+            ("provided excerpts", "documents"),
+            ("the provided sources", "the documents"),
+            ("[1] Source File: ", ""),
+            ("Source File: ", ""),
+        ];
+        let mut out: Vec<String> = Vec::new();
+        for line in lines {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') || t.starts_with('-') || t.starts_with('*') || t.starts_with('|') || Self::is_numbered_list_item(t) {
+                out.push(line);
+                continue;
+            }
+            let mut sentences: Vec<String> = Vec::new();
+            let mut cur = String::new();
+            let chars: Vec<char> = t.chars().collect();
+            for (i, &c) in chars.iter().enumerate() {
+                cur.push(c);
+                if matches!(c, '.' | '!' | '?' | ':') && (i + 1 >= chars.len() || chars[i + 1].is_whitespace()) {
+                    sentences.push(std::mem::take(&mut cur));
+                }
+            }
+            if !cur.trim().is_empty() {
+                sentences.push(cur);
+            }
+            let kept: Vec<String> = sentences
+                .into_iter()
+                .map(|x| {
+                    let mut x = x.trim().to_string();
+                    for (from, to) in META_REWRITES {
+                        if x.contains(from) {
+                            x = x.replace(from, to);
+                        }
+                    }
+                    let lx0 = x.to_ascii_lowercase();
+                    if META_CLAUSES.iter().any(|m| lx0.starts_with(m)) {
+                        if let Some(ci) = x.find(", ") {
+                            let rest = x[ci + 2..].trim().to_string();
+                            if ci < 180 && rest.chars().filter(|c| c.is_alphabetic()).count() >= 12 {
+                                let mut cs = rest.chars();
+                                x = match cs.next() {
+                                    Some(f) => f.to_uppercase().collect::<String>() + cs.as_str(),
+                                    None => String::new(),
+                                };
+                            }
+                        }
+                    }
+                    for dp in DISCOURSE_PREFIXES {
+                        if let Some(rest) = x.strip_prefix(dp) {
+                            let mut cs = rest.chars();
+                            x = match cs.next() {
+                                Some(f) => f.to_uppercase().collect::<String>() + cs.as_str(),
+                                None => String::new(),
+                            };
+                            break;
+                        }
+                    }
+                    Self::detitle_sentence(&x, prompt, text, &corpus_lower_words)
+                })
+                .filter(|x| {
+                    let lx = x.to_ascii_lowercase().replace('\u{2019}', "'");
+                    let carries_fact = x.chars().any(|c| c.is_ascii_digit() || c == '$');
+                    !META_STARTS.iter().any(|m| lx.starts_with(m))
+                        && (carries_fact || !META_CONTAINS.iter().any(|m| lx.contains(m)))
+                })
+                .collect();
+            if !kept.is_empty() {
+                out.push(kept.join(" "));
+            }
+        }
+
+        out.join("\n").trim().to_string()
+    }
+
     /// Sentence-boundary completion guard: ensures generated text ends cleanly on a sentence terminal boundary
     /// ('.', '!', '?') and never leaves trailing mid-sentence fragments like "Sacred math has been".
     pub fn enforce_sentence_boundary_guard(
@@ -1668,7 +2628,7 @@ impl DeterministicOfflineSynthesisEngine {
 
         // Attempt micro-completion prompt if local Ollama daemon is reachable
         let tail_slice: String = trimmed.chars().rev().take(200).collect::<String>().chars().rev().collect();
-        let prompt_payload = serde_json::json!({
+        let mut prompt_payload = serde_json::json!({
             "model": target_model,
             "messages": [
                 {
@@ -1681,14 +2641,25 @@ impl DeterministicOfflineSynthesisEngine {
                 }
             ],
             "stream": false,
+            "keep_alive": "24h",
             "options": {
                 "temperature": 0.1,
                 "num_predict": 48
             }
         });
+        if Self::model_uses_thinking_flag(target_model) {
+            if let Some(obj) = prompt_payload.as_object_mut() {
+                obj.insert("think".to_string(), serde_json::Value::Bool(false));
+            }
+        }
 
+        let guard_timeout_ms = if target_model.contains("26b") || target_model.contains("27b") || target_model.contains("32b") {
+            6000u64
+        } else {
+            2500u64
+        };
         if let Ok(mut stream) = TcpStream::connect_timeout(addr, Duration::from_millis(500)) {
-            let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(guard_timeout_ms)));
             let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
             let payload_str = prompt_payload.to_string();
             let req = format!(
@@ -1753,9 +2724,10 @@ impl DeterministicOfflineSynthesisEngine {
             }
         }
 
-        // Snap to the last real sentence boundary (not a dot inside `.doc` or `.pdf`) if within reasonable distance
+        // Snap to the last real sentence boundary (not a dot inside `.doc` or `.pdf`) if within reasonable distance:
+        // dropping a cut-off clause ("...into doctrinally refined and") reads better than sealing it with a period.
         let bytes = text.as_bytes();
-        let min_pos = text.len().saturating_sub(140);
+        let min_pos = text.len().saturating_sub(600);
         for idx in (min_pos..bytes.len()).rev() {
             let b = bytes[idx];
             if b == b'.' || b == b'!' || b == b'?' {
@@ -1781,6 +2753,287 @@ impl DeterministicOfflineSynthesisEngine {
                 },
             );
         }
+    }
+
+    /// Returns true if the Ollama model supports hybrid reasoning (`"think": false`) and must disable thinking
+    /// during direct RAG synthesis so token budgets stream straight into `message.content`.
+    pub fn model_uses_thinking_flag(tag: &str) -> bool {
+        let low = tag.trim().to_ascii_lowercase();
+        low.starts_with("gemma4")
+            || low.starts_with("qwen3")
+            || low.starts_with("deepseek-r1")
+            || low.starts_with("glm-4.7")
+            || low.starts_with("qwq")
+    }
+
+    /// Adaptive socket read timeout scaled by model parameter size so large models (26B/32B) on CPU or hybrid offload
+    /// have sufficient headroom for cold weight loading (~30s) and ~6,000-character prompt prefill before first token.
+    pub fn socket_read_timeout_for_model(tag: &str) -> std::time::Duration {
+        let low = tag.trim().to_ascii_lowercase();
+        if low.contains("26b")
+            || low.contains("27b")
+            || low.contains("32b")
+            || low.contains("70b")
+            || low.contains("flash")
+        {
+            std::time::Duration::from_secs(150)
+        } else if low.contains("12b") || low.contains("13b") || low.contains("14b") || low.contains("22b") {
+            std::time::Duration::from_secs(90)
+        } else if low.contains("7b") || low.contains("8b") || low.contains("9b") {
+            std::time::Duration::from_secs(60)
+        } else {
+            std::time::Duration::from_secs(30)
+        }
+    }
+
+    /// Dynamic Available Memory Law: evaluates strictly runtime free RAM / free VRAM (never total physical RAM).
+    pub fn model_fits_free_memory(tag: &str, hw: &crate::hardware::HardwareTelemetry) -> bool {
+        let low = tag.trim().to_ascii_lowercase();
+        if low.contains("32b") || low.contains("70b") {
+            hw.free_ram_gb >= 48.0 || hw.free_vram_mb >= 24_000
+        } else if low.contains("26b") || low.contains("27b") || low.starts_with("glm-4.7") {
+            crate::model_router::AutoFusionRouter::can_run_gemma4_26b(hw)
+        } else if low.contains("14b") || low.contains("12b") || low.contains("13b") {
+            hw.free_ram_gb >= 24.0 || hw.free_vram_mb >= 14_000
+        } else if low.contains("9b") || low.contains("8b") || low.contains("7b") {
+            hw.free_ram_gb >= 12.0 || hw.free_vram_mb >= 4_500
+        } else if low.contains("4b") || low.contains("3b") {
+            hw.free_ram_gb >= 6.0 || hw.free_vram_mb >= 2_000
+        } else {
+            true
+        }
+    }
+
+    /// Normalizes a requested Ollama model tag and strips forbidden `-coder` suffixes that trigger 404 aborts.
+    pub fn normalize_requested_model_tag(raw: &str) -> String {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        let no_coder = trimmed.replace("-coder:", ":").replace("-coder", "");
+        match no_coder.to_ascii_lowercase().as_str() {
+            "gemma4_26b" | "gemma4" => "gemma4:26b".to_string(),
+            "glm4agentic" | "glm4" | "glm-4" => "glm4:9b".to_string(),
+            "gemmaprose" => "gemma4:26b".to_string(),
+            _ => no_coder,
+        }
+    }
+
+    /// Queries local Ollama `GET /api/tags` with a strict 400ms timeout (Fast Timeout Law) and 10s in-memory cache.
+    pub fn probe_installed_ollama_models(
+        addr: &std::net::SocketAddr,
+        host_port: &str,
+        force_refresh: bool,
+    ) -> Vec<String> {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+        use std::sync::{Mutex, OnceLock};
+        use std::time::{Duration, Instant};
+
+        if !addr.ip().is_loopback() {
+            return Vec::new();
+        }
+
+        static TAGS_CACHE: OnceLock<Mutex<Option<(Instant, Vec<String>)>>> = OnceLock::new();
+        let cache = TAGS_CACHE.get_or_init(|| Mutex::new(None));
+        if !force_refresh {
+            if let Ok(guard) = cache.lock() {
+                if let Some((ts, ref list)) = *guard {
+                    if ts.elapsed() < Duration::from_secs(10) {
+                        return list.clone();
+                    }
+                }
+            }
+        }
+
+        let mut discovered = Vec::new();
+        if let Ok(mut stream) = TcpStream::connect_timeout(addr, Duration::from_millis(400)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(400)));
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(400)));
+            let req = format!(
+                "GET /api/tags HTTP/1.0\r\nHost: {}\r\nConnection: close\r\n\r\n",
+                host_port
+            );
+            if stream.write_all(req.as_bytes()).is_ok() {
+                let mut raw = String::new();
+                if stream.read_to_string(&mut raw).is_ok() {
+                    if let Some(idx) = raw.find("\r\n\r\n") {
+                        let body = &raw[idx + 4..];
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(body.trim()) {
+                            if let Some(arr) = val.get("models").and_then(|m| m.as_array()) {
+                                for item in arr {
+                                    if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+                                        discovered.push(name.trim().to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !discovered.is_empty() {
+            if let Ok(mut guard) = cache.lock() {
+                *guard = Some((Instant::now(), discovered.clone()));
+            }
+        }
+        discovered
+    }
+
+    /// Convenience probe against the configured local loopback Ollama endpoint (`127.0.0.1:11434` by default).
+    pub fn probe_installed_ollama_models_default() -> Vec<String> {
+        use std::net::{SocketAddr, ToSocketAddrs};
+        let ui = crate::dlp_mesh::global_mesh_dlp_controller()
+            .settings
+            .read()
+            .map(|g| g.ui.clone())
+            .unwrap_or_default();
+        let raw_url = if ui.ollama_url.trim().is_empty() {
+            "http://127.0.0.1:11434"
+        } else {
+            ui.ollama_url.trim()
+        };
+        let host_port = raw_url
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .split('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("127.0.0.1:11434");
+        let addr = host_port
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut it| it.next())
+            .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 11434)));
+        Self::probe_installed_ollama_models(&addr, host_port, false)
+    }
+
+    /// Triggers an idempotent background `ollama pull <model>` when a memory-eligible model is requested before installation.
+    pub fn trigger_background_ollama_pull(model_tag: &str) -> bool {
+        use std::collections::HashSet;
+        use std::sync::{Mutex, OnceLock};
+
+        let clean = model_tag.trim();
+        if clean.is_empty()
+            || clean.len() > 64
+            || !clean
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '-' | '_' | '/'))
+        {
+            return false;
+        }
+
+        static PULLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+        let set = PULLED.get_or_init(|| Mutex::new(HashSet::new()));
+        if let Ok(mut guard) = set.lock() {
+            if !guard.insert(clean.to_ascii_lowercase()) {
+                return false;
+            }
+        }
+
+        let mut cmd = std::process::Command::new("ollama");
+        cmd.args(["pull", clean]);
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        cmd.spawn().is_ok()
+    }
+
+    /// Resolves the best installed, runtime-free-memory-safe Ollama model tag to execute.
+    pub fn resolve_ollama_model_tag(
+        requested_tag: &str,
+        hw: &crate::hardware::HardwareTelemetry,
+        installed: &[String],
+    ) -> String {
+        let req = Self::normalize_requested_model_tag(requested_tag);
+        let is_synthesis_capable = |name: &str| -> bool {
+            let low = name.to_ascii_lowercase();
+            !low.contains("embed")
+                && !low.starts_with("bge-")
+                && !low.starts_with("moondream")
+                && !low.starts_with("llava")
+                && !low.starts_with("minicpm-v")
+        };
+        let find_installed = |cand: &str| -> Option<String> {
+            if installed.is_empty() {
+                return Some(cand.to_string());
+            }
+            let cand_low = cand.to_ascii_lowercase();
+            let cand_latest = format!("{}:latest", cand_low);
+            installed
+                .iter()
+                .find(|m| {
+                    let ml = m.to_ascii_lowercase();
+                    ml == cand_low || ml == cand_latest
+                })
+                .cloned()
+        };
+
+        if !req.is_empty() && is_synthesis_capable(&req) && Self::model_fits_free_memory(&req, hw) {
+            if let Some(matched) = find_installed(&req) {
+                return matched;
+            }
+        }
+
+        let req_low = req.to_ascii_lowercase();
+        let candidates: &[&str] = if req_low.starts_with("gemma") {
+            &[
+                "gemma4:26b",
+                "gemma3:27b",
+                "gemma2:9b",
+                "gemma3:4b",
+                "gemma2:2b",
+                "glm4:9b",
+                "qwen2.5:7b",
+                "qwen2.5:1.5b",
+            ]
+        } else if req_low.starts_with("qwen") {
+            &[
+                "qwen2.5:32b",
+                "qwen2.5:14b",
+                "qwen2.5:7b",
+                "qwen2.5:3b",
+                "qwen2.5:1.5b",
+                "gemma4:26b",
+                "glm4:9b",
+            ]
+        } else {
+            &[
+                "gemma4:26b",
+                "glm4:9b",
+                "qwen2.5:32b",
+                "qwen2.5:14b",
+                "qwen2.5:7b",
+                "gemma2:9b",
+                "mistral:latest",
+                "gemma3:4b",
+                "qwen2.5:3b",
+                "gemma2:2b",
+                "qwen2.5:1.5b",
+            ]
+        };
+
+        for &cand in candidates {
+            if Self::model_fits_free_memory(cand, hw) {
+                if let Some(matched) = find_installed(cand) {
+                    return matched;
+                }
+            }
+        }
+
+        for item in installed {
+            if is_synthesis_capable(item) && Self::model_fits_free_memory(item, hw) {
+                return item.clone();
+            }
+        }
+
+        "qwen2.5:1.5b".to_string()
     }
 
     /// Multi-turn real-time streaming orchestration via local Ollama `POST /api/chat` (100% offline, zero internet access).
@@ -1845,20 +3098,38 @@ impl DeterministicOfflineSynthesisEngine {
         }
         let addr: SocketAddr = parsed_addr;
 
-        // Keep qwen2.5:1.5b pinned in memory as the primary fast orchestrator (<200ms TTFT, shared with live spellcheck)
-        // unless the user explicitly requested Qwen25Code (qwen2.5:7b) or GemmaProse (gemma3:4b).
-        let requested = requested_model_tag.trim();
-        let model = match requested {
-            "qwen2.5-coder:7b" | "qwen2.5:7b" => "qwen2.5:7b",
-            "gemma3:4b" => "gemma3:4b",
-            _ => "qwen2.5:1.5b",
-        };
+        let hw = crate::hardware::HardwareTelemetry::probe();
+        let mut installed_models = Self::probe_installed_ollama_models(&addr, host_port, false);
+        let normalized_req = Self::normalize_requested_model_tag(requested_model_tag);
+        if !normalized_req.is_empty()
+            && !installed_models.is_empty()
+            && !installed_models
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case(&normalized_req))
+        {
+            // Refresh /api/tags once in case `ollama pull` just finished, and auto-pull if still absent
+            installed_models = Self::probe_installed_ollama_models(&addr, host_port, true);
+            if !installed_models
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case(&normalized_req))
+                && Self::model_fits_free_memory(&normalized_req, &hw)
+            {
+                let _ = Self::trigger_background_ollama_pull(&normalized_req);
+            }
+        }
+        let resolved_model_owned =
+            Self::resolve_ollama_model_tag(requested_model_tag, &hw, &installed_models);
+        let model: &str = resolved_model_owned.as_str();
 
         let temp = ui.sampling_temperature.clamp(0.05, 0.20);
         let max_output_tokens = ui.max_output_tokens.clamp(256, 262144);
         let _agentic_loop_enabled = ui.agentic_loop_enabled;
 
-        let (per_hop_predict, num_ctx) = (max_output_tokens.min(600), 4096usize);
+        let (per_hop_predict, num_ctx) = if hw.free_ram_gb >= 18.0 || hw.free_vram_mb >= 12_000 {
+            (max_output_tokens.min(900), 6144usize)
+        } else {
+            (max_output_tokens.min(600), 4096usize)
+        };
 
         let voice_directive = if ui.natural_human_voice {
             " Write in a clear, natural human voice with zero robotic filler."
@@ -1878,6 +3149,8 @@ impl DeterministicOfflineSynthesisEngine {
             1. QUESTION-RESTATING OPENING: Always begin your answer immediately with a natural declarative sentence (not a `#` heading) that restates and directly answers the user's question using the concrete facts in the provided documents.\n\
             2. DIRECT FACTUAL SYNTHESIS (NEVER REFUSE OR DISCLAIM): Synthesize ALL concrete facts, roles, properties, agreements, addresses, phone numbers, financial terms, credentials, career experience, education, or research findings about the subject present in the provided documents. Never say \"The user's query is not directly addressed\" or complain about what type of documents are provided—report what the documents actually establish about the subject!\n\
             3. ZERO META-FILLER & ZERO REPETITION: Never begin with greetings or meta-announcements (never say \"Based on the documents provided...\", \"According to the text...\", \"Your sacred dissertation-style preface...\", or \"Click here to download\"). Never repeat the same sentence or paragraph more than once. Write complete, grammatical sentences.\n\
+            3a. ANSWER FIRST: The first sentence must contain the actual answer (a name, number, date, amount, place, or definition) when the excerpts contain it. Never restate the question as a title, never write \"The user's question asks...\", \"Firstly, let us consider...\", or analyse excerpts one by one. Silently ignore excerpts that are unrelated to the question. If the excerpts do not contain the answer, say so in one sentence and summarise only what they do say about the subject.\n\
+            3b. STRICT GROUNDING (NO INVENTION, NO CROSS-SUBJECT BLEED): State ONLY facts that literally appear in the numbered source documents of THIS request. Never carry over facts about a different person or subject from earlier chat turns, and never invent profiles, platforms (LinkedIn, GitHub), courses, or credentials that the documents do not state. If the sources are a different kind of document (for example leases naming the subject as landlord), describe exactly what those documents say about the subject (role, dates, tenants, rent, addresses) and nothing else.\n\
             4. MULTI-FILE SYNTHESIS & INLINE CITATIONS: You are given excerpts from MULTIPLE distinct files (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Look across ALL provided documents and cite multiple document numbers inline using simple bracketed numbers (`[1]`, `[2]`, `[3]`, `[4]`, etc.) throughout your response. Never write XML tags like `<document>` or `<Document Index=...>`.\n\
             5. CLEAN STRUCTURE: Organize your response into thorough, flowing paragraphs and `###` section headings where helpful (after the opening paragraph). Never include line numbers `(Lines X-Y)`.";
 
@@ -1888,15 +3161,38 @@ impl DeterministicOfflineSynthesisEngine {
             "content": system_prompt
         }));
 
-        // Append up to the last 4 turns of conversation history (trimmed for fast prefill)
-        let history_start = history.len().saturating_sub(4);
+        // Conversation history is injected ONLY for genuine follow-ups (continuations or short pronoun references
+        // such as "does he have cissp"). A fresh standalone subject ("tell me about angela davis") must be answered
+        // strictly from the retrieved documents; otherwise the model copies the previous answer's facts about a
+        // different subject into the new answer (cross-subject history bleed).
+        let prompt_lower_words: Vec<String> = prompt
+            .to_ascii_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(|w| w.to_string())
+            .collect();
+        const FOLLOW_UP_PRONOUNS: &[&str] = &[
+            "he", "she", "him", "her", "his", "hers", "they", "them", "their", "it", "its",
+            "that", "those", "this", "these",
+        ];
+        let is_follow_up = Self::is_continuation_query(&prompt.to_ascii_lowercase())
+            || (prompt_lower_words.len() <= 8
+                && prompt_lower_words
+                    .iter()
+                    .any(|w| FOLLOW_UP_PRONOUNS.contains(&w.as_str())));
+        let history_start = if is_follow_up {
+            history.len().saturating_sub(4)
+        } else {
+            history.len()
+        };
         for turn in &history[history_start..] {
             let role = if turn.role.eq_ignore_ascii_case("assistant") {
                 "assistant"
             } else {
                 "user"
             };
-            let content: String = turn.content.trim().chars().take(450).collect();
+            let per_turn_limit = if Self::is_continuation_query(&prompt.to_ascii_lowercase()) { 1600 } else { 450 };
+            let content: String = turn.content.trim().chars().take(per_turn_limit).collect();
             if !content.is_empty() {
                 messages.push(serde_json::json!({
                     "role": role,
@@ -1905,6 +3201,39 @@ impl DeterministicOfflineSynthesisEngine {
             }
         }
 
+        // Synthesis-time relevance pruning: drop excerpts whose overlap with the question's content terms is weak
+        // relative to the best excerpt, so off-topic hits (e.g. 419-scam files for "which bank is the rent paid to")
+        // never reach the model. Always keeps at least the top excerpt.
+        let mut pruned_chunks: Vec<&ScoredChunk> =
+            Self::dedup_near_identical_excerpts(Self::prune_weak_excerpts(prompt, matched_chunks));
+        // For typed questions (where/when/how much/phone), excerpts holding the requested kind of fact go first
+        // (stable sort keeps relevance order among equals), so a small model sees the answer in excerpt [1].
+        if !Self::answer_type_cue_terms(prompt).is_empty() {
+            pruned_chunks.sort_by_key(|c| {
+                -Self::answer_type_cue_score(prompt, &Self::clean_chunk_text(&c.chunk.text_content).to_ascii_lowercase())
+            });
+        }
+        let prior_answer_text: String = if Self::is_continuation_query(&prompt.to_ascii_lowercase()) {
+            history
+                .iter()
+                .filter(|t| t.role.eq_ignore_ascii_case("assistant"))
+                .map(|t| t.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            String::new()
+        };
+        // Continuation: put the excerpts least covered by the previous answer first, so "continue" is written
+        // from new material instead of re-deriving the same paragraphs from the same excerpts.
+        if !prior_answer_text.is_empty() {
+            pruned_chunks.sort_by_key(|c| Self::coverage_by_prior_percent(&c.chunk.text_content, &prior_answer_text));
+        }
+        let matched_chunks: &[&ScoredChunk] = &pruned_chunks;
+
+        // ~6000 characters of evidence in total: a single stitched parent document gets a long window instead of
+        // its first 750 characters only.
+        let excerpt_count = matched_chunks.len().clamp(1, 8);
+        let per_excerpt_chars = (6000 / excerpt_count).clamp(750, 3000);
         let context_blocks = matched_chunks
             .iter()
             .take(8)
@@ -1915,7 +3244,11 @@ impl DeterministicOfflineSynthesisEngine {
                     .and_then(|n| n.to_str())
                     .unwrap_or(&c.chunk.file_path);
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
-                let compact_text: String = cleaned.chars().take(750).collect();
+                let compact_text: String = if !prior_answer_text.is_empty() {
+                    Self::least_covered_window(&cleaned, &prior_answer_text, per_excerpt_chars)
+                } else {
+                    Self::answer_focused_window(prompt, &cleaned, per_excerpt_chars)
+                };
                 format!(
                     "[{}] Source File: {}\n{}",
                     i + 1,
@@ -1925,6 +3258,13 @@ impl DeterministicOfflineSynthesisEngine {
             })
             .collect::<Vec<_>>()
             .join("\n\n");
+
+        let source_corpus: String = matched_chunks
+            .iter()
+            .take(8)
+            .map(|c| Self::clean_chunk_text(&c.chunk.text_content))
+            .collect::<Vec<_>>()
+            .join("\n");
 
         let _fact_sheets = if ui.map_reduce_fact_extraction {
             Self::extract_fact_sheets(&matched_chunks[..matched_chunks.len().min(8)], prompt)
@@ -1939,8 +3279,8 @@ impl DeterministicOfflineSynthesisEngine {
         };
 
         let user_content = format!(
-            "Source Documents:\n{}\n\nUser Question: {}\n\n\
-            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across ALL relevant source documents (`[1]`, `[2]`, `[3]`, etc.) above to answer ONLY the User Question. {} and cite multiple source documents inline using bracketed numbers (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Write natural, grammatical prose and never repeat any sentence or paragraph.",
+            "Reference Excerpts (numbered, for your use only; never repeat this label):\n{}\n\nUser Question: {}\n\n\
+            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across ALL relevant source documents (`[1]`, `[2]`, `[3]`, etc.) above to answer ONLY the User Question. {} and cite multiple source documents inline using bracketed numbers (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Write flowing prose paragraphs (not a bullet list of file names), start with a full sentence rather than a heading, and never repeat any sentence or paragraph.",
             context_blocks,
             prompt,
             opening_directive
@@ -1962,11 +3302,12 @@ impl DeterministicOfflineSynthesisEngine {
             // Unified real-time NDJSON streaming mode with 56-char lookahead repetition loop breaker
             while hop_count < max_hops && accumulated_tokens < max_output_tokens {
                 hop_count += 1;
-                let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(25)));
-                let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+                let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(800)).ok()?;
+                let read_timeout = Self::socket_read_timeout_for_model(target_model);
+                let _ = stream.set_read_timeout(Some(read_timeout));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
 
-                let payload = serde_json::json!({
+                let mut payload_val = serde_json::json!({
                     "model": target_model,
                     "messages": current_messages,
                     "stream": true,
@@ -1980,8 +3321,13 @@ impl DeterministicOfflineSynthesisEngine {
                         "repeat_last_n": 256,
                         "repeat_penalty": 1.12
                     }
-                })
-                .to_string();
+                });
+                if Self::model_uses_thinking_flag(target_model) {
+                    if let Some(obj) = payload_val.as_object_mut() {
+                        obj.insert("think".to_string(), serde_json::Value::Bool(false));
+                    }
+                }
+                let payload = payload_val.to_string();
 
                 let request = format!(
                     "POST /api/chat HTTP/1.0\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -2053,7 +3399,22 @@ impl DeterministicOfflineSynthesisEngine {
                                     break;
                                 }
 
-                                if pending_emit.len() >= 56 {
+                                if !prior_answer_text.is_empty() {
+                                    // Continuation turn: release only complete sentences, skipping ones that repeat
+                                    // the previous answer, so the user never sees the restatement stream by.
+                                    if let Some(cut) = Self::last_sentence_boundary(&pending_emit) {
+                                        let ready: String = pending_emit[..cut].to_string();
+                                        pending_emit = pending_emit[cut..].to_string();
+                                        let novel = Self::filter_repeating_segments(&ready, &prior_answer_text);
+                                        if !novel.is_empty() {
+                                            if let Some(tx) = telemetry_tx {
+                                                if !Self::send_telemetry(tx, AgenticTelemetryEvent::TokenDelta { delta: novel }) {
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if pending_emit.len() >= 56 {
                                     let flush_chunk = std::mem::take(&mut pending_emit);
                                     if let Some(tx) = telemetry_tx {
                                         if !Self::send_telemetry(
@@ -2081,7 +3442,12 @@ impl DeterministicOfflineSynthesisEngine {
                 }
 
                 if !pending_emit.is_empty() && !repetition_detected {
-                    let flush_chunk = std::mem::take(&mut pending_emit);
+                    let raw_tail = std::mem::take(&mut pending_emit);
+                    let flush_chunk = if prior_answer_text.is_empty() {
+                        raw_tail
+                    } else {
+                        Self::filter_repeating_segments(&raw_tail, &prior_answer_text)
+                    };
                     if let Some(tx) = telemetry_tx {
                         let _ = Self::send_telemetry(
                             tx,
@@ -2131,6 +3497,10 @@ impl DeterministicOfflineSynthesisEngine {
 
             let (deduped, _) = Self::deduplicate_repeated_paragraphs(&full_text);
             full_text = deduped;
+            full_text = Self::drop_ungrounded_sentences(&full_text, &source_corpus);
+            if !prior_answer_text.is_empty() {
+                full_text = Self::drop_sentences_repeating_prior(&full_text, &prior_answer_text);
+            }
 
             // Sentence-boundary completion guard
             Self::enforce_sentence_boundary_guard(
@@ -2154,7 +3524,32 @@ impl DeterministicOfflineSynthesisEngine {
                 }
             }
 
-            let trimmed_full = full_text.trim().to_string();
+            let pass1 = Self::strip_question_echo_and_meta_with_corpus(full_text.trim(), prompt, &source_corpus);
+            let pass2 = Self::strip_stub_heading_and_label_echo(&pass1);
+            let cleaned_final = Self::strip_question_echo_and_meta_with_corpus(&pass2, prompt, &source_corpus);
+            let cleaned_final = {
+                let mut out = String::with_capacity(cleaned_final.len());
+                let mut blank_run = 0usize;
+                for line in cleaned_final.lines() {
+                    if line.trim().is_empty() {
+                        blank_run += 1;
+                        if blank_run > 1 {
+                            continue;
+                        }
+                    } else {
+                        blank_run = 0;
+                    }
+                    out.push_str(line);
+                    out.push('\n');
+                }
+                out.trim().to_string()
+            };
+            let trimmed_full = if cleaned_final.trim().len() < 20 {
+                // Never let post-processing erase a real answer: fall back to the lightly-cleaned text
+                Self::strip_stub_heading_and_label_echo(full_text.trim())
+            } else {
+                cleaned_final
+            };
             if trimmed_full.is_empty() {
                 None
             } else {
@@ -2181,7 +3576,18 @@ impl DeterministicOfflineSynthesisEngine {
             }
         };
 
-        let synthesized = send_chat_request(model)?;
+        let attempt_started = std::time::Instant::now();
+        let synthesized = match send_chat_request(model) {
+            Some(text) => text,
+            None => {
+                // Retry once ONLY on fast transient connection/swap errors (<10s); never double-wait or pile onto a timed-out runner.
+                if attempt_started.elapsed() >= Duration::from_secs(10) {
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(600));
+                send_chat_request(model)?
+            }
+        };
 
         if let Ok(mut guard) = crate::dlp_mesh::global_mesh_dlp_controller().settings.write() {
             if guard.ui.restrl_daemon_running {
@@ -2538,7 +3944,20 @@ impl DeterministicOfflineSynthesisEngine {
         if use_llm {
             if let Some(llm_fixed) = Self::query_local_ollama_spellcheck(&det_corrected) {
                 if Self::validate_spellcheck_candidate(&det_corrected, &llm_fixed) {
-                    return (llm_fixed, "Ollama LLM (qwen2.5:1.5b)".to_string());
+                    // Take the LLM's word only where it actually fixed spelling; keep the user's own casing and
+                    // punctuation everywhere else (case-only edits like "phone number" -> "Phone Number" would
+                    // otherwise be mistaken downstream for proper-noun anchors).
+                    let base_words: Vec<&str> = det_corrected.split_whitespace().collect();
+                    let cand_words: Vec<&str> = llm_fixed.split_whitespace().collect();
+                    let norm = |w: &str| -> String {
+                        w.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_lowercase()
+                    };
+                    let merged: Vec<String> = base_words
+                        .iter()
+                        .zip(cand_words.iter())
+                        .map(|(b, c)| if norm(b) == norm(c) { (*b).to_string() } else { (*c).to_string() })
+                        .collect();
+                    return (merged.join(" "), "Ollama LLM (qwen2.5:1.5b)".to_string());
                 }
             }
         }
@@ -2606,6 +4025,21 @@ impl DeterministicOfflineSynthesisEngine {
         use std::time::Duration;
 
         let addr = SocketAddr::from(([127, 0, 0, 1], 11434));
+        // Never evict a larger warm synthesis model (such as gemma4:26b, glm4:9b, or qwen2.5:32b) just to spellcheck
+        // a keystroke: only invoke `qwen2.5:1.5b` via Ollama if `qwen2.5:1.5b` is ALREADY the warm loaded model in `/api/ps`.
+        {
+            let mut ps_stream = TcpStream::connect_timeout(&addr, Duration::from_millis(180)).ok()?;
+            let _ = ps_stream.set_read_timeout(Some(Duration::from_millis(200)));
+            let _ = ps_stream.set_write_timeout(Some(Duration::from_millis(180)));
+            ps_stream
+                .write_all(b"GET /api/ps HTTP/1.0\r\nHost: 127.0.0.1:11434\r\nConnection: close\r\n\r\n")
+                .ok()?;
+            let mut ps_resp = String::new();
+            ps_stream.read_to_string(&mut ps_resp).ok()?;
+            if !ps_resp.contains("qwen2.5:1.5b") {
+                return None;
+            }
+        }
         let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(400)).ok()?;
         let _ = stream.set_read_timeout(Some(Duration::from_millis(2200)));
         let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
@@ -2837,6 +4271,21 @@ mod tests {
             DeterministicOfflineSynthesisEngine::format_question_restated_prefix("explain VaultGemma"),
             "VaultGemma refers to "
         );
+        // Arbitrary natural-language question shapes must not be title-cased into a fake opening phrase
+        for q in [
+            "how much rent does Casey Ringgold pay?",
+            "which bank is the rent paid to?",
+            "why is sacred math important?",
+            "list every tenant",
+            "compare RedactX and Presidio",
+            "does Femi have a CISSP?",
+        ] {
+            assert_eq!(
+                DeterministicOfflineSynthesisEngine::format_question_restated_prefix(q),
+                "",
+                "query: {q}"
+            );
+        }
     }
 
     #[test]
@@ -3134,6 +4583,345 @@ mod tests {
         assert!(!citations.is_empty(), "Continuation query must retrieve citations from history context");
         assert!(!resp.contains("No matching documents were found"), "Must not fail on continuation query: {}", resp);
         assert!(resp.contains("Sacred Mathematics.docx"), "Must ground answer in Sacred Mathematics document");
+    }
+
+    #[test]
+    fn test_strip_stub_heading_and_label_echo() {
+        let raw = "### Angela Davis is\n\n**Source Documents:**\nAngela Davis is the landlord named in several lease agreements [1], [2].\n\nRent is due on the first of each month [3].";
+        let out = DeterministicOfflineSynthesisEngine::strip_stub_heading_and_label_echo(raw);
+        assert!(out.starts_with("Angela Davis is the landlord"), "got: {out}");
+        assert!(!out.contains("Source Documents"));
+        // A normal prose answer must be untouched
+        let ok = "Femi Oyesanya is a CISSP-certified professional [1].";
+        assert_eq!(DeterministicOfflineSynthesisEngine::strip_stub_heading_and_label_echo(ok), ok);
+        // A single-line heading-only answer is preserved rather than emptied
+        let only = "### Sacred Maths";
+        assert_eq!(DeterministicOfflineSynthesisEngine::strip_stub_heading_and_label_echo(only), only);
+    }
+
+    #[test]
+    fn test_drop_ungrounded_sentences_removes_generic_padding_but_keeps_grounded_facts() {
+        let corpus = "Femi Oyesanya CISSP-certified Application Security professional with over 20 years of experience in secure software development, healthcare, and financial systems. Rust development for decentralized security architectures. Eastern University Research Manuscript.";
+        let answer = "Femi Oyesanya is a CISSP-certified Application Security professional with over 20 years of experience in healthcare and financial systems [1].\nHe builds Rust development for decentralized security architectures [2].\nOyesanya's LinkedIn profile provides additional insights highlighting collaborations that underscore transformative contributions throughout the cybersecurity landscape.\nOverall, he stands out as a seasoned visionary combining theoretical foundations with pragmatic real-world deployments across prestigious institutions.";
+        let out = DeterministicOfflineSynthesisEngine::drop_ungrounded_sentences(answer, corpus);
+        assert!(out.contains("CISSP-certified Application Security"));
+        assert!(out.contains("Rust development for decentralized security architectures"));
+        assert!(!out.contains("LinkedIn"), "got: {out}");
+        assert!(!out.contains("prestigious"), "got: {out}");
+    }
+
+    #[test]
+    fn test_strip_normalizes_source_file_headings_and_sentence_hashes() {
+        let raw = "### Angela Davis is the landlord named in several lease agreements across New Orleans and she collects rent monthly.\n\n#### [1] Source File: Susan MONTH TO MONTH LEASE AGREEMENT.doc\nRent is $614 per month.";
+        let out = DeterministicOfflineSynthesisEngine::strip_stub_heading_and_label_echo(raw);
+        assert!(out.starts_with("Angela Davis is the landlord"), "got: {out}");
+        assert!(out.contains("**Susan MONTH TO MONTH LEASE AGREEMENT.doc** [1]"), "got: {out}");
+        assert!(!out.contains("####"));
+    }
+
+    #[test]
+    fn test_strip_question_echo_and_meta_for_arbitrary_questions() {
+        let raw = "How Much Rent Does Casey Ringgold Pay?\n\nThe user's query asks about the rent. Casey Ringgold pays $614 per month [1].";
+        let out = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(raw, "how much rent does Casey Ringgold pay?");
+        assert_eq!(out, "Casey Ringgold pays $614 per month [1].");
+
+        let titled = "The Late Fee On The Lease Is $50.00 Per Day After The Third Day. Rent is due on the 1st.";
+        let out2 = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(titled, "what is the late fee on the leases?");
+        assert!(out2.starts_with("The late fee on the lease is $50.00 per day after the third day."), "got: {out2}");
+
+        let plain = "RedactX-v3 is a clinical de-identification decision model [1].";
+        assert_eq!(DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(plain, "what is RedactX-v3?"), plain);
+    }
+
+    #[test]
+    fn test_detitle_keeps_names_and_meta_contains_filter() {
+        let raw = "Angela Davis's Tenants Are Grace Bridges, Casey Ringgold, And Jamie Williams. They rent units in New Orleans [1].";
+        let out = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(raw, "who are Angela Davis's tenants?");
+        assert!(out.contains("Grace Bridges"), "got: {out}");
+        assert!(out.contains("Casey Ringgold"), "got: {out}");
+        assert!(out.contains("tenants are"), "got: {out}");
+
+        let meta = "To directly address the user's question about which programming languages Femi knows, I'll synthesize information from the provided sources:\n\n1. **Python**: listed in the resume [1].\n2. **Rust**: listed in the CV [2].";
+        let out2 = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(meta, "what programming languages does femi know?");
+        assert!(!out2.contains("user's question"), "got: {out2}");
+        assert!(out2.contains("1. **Python**: listed in the resume [1]."), "got: {out2}");
+        assert!(DeterministicOfflineSynthesisEngine::is_numbered_list_item("2. **Rust**"));
+        assert!(!DeterministicOfflineSynthesisEngine::is_numbered_list_item("2019 was the year."));
+    }
+
+    #[test]
+    fn test_answer_type_cues_and_corpus_detitle_and_discourse_markers() {
+        let addr = "femi oyesanya, cissp 122 east avenue la grange, il 60525 phone: 708.359.1414";
+        let paper = "femi oyesanya independent researcher redactx-v3 clinical de-identification";
+        assert!(
+            DeterministicOfflineSynthesisEngine::answer_type_cue_score("where does Femi Oyesanya live?", addr)
+                > DeterministicOfflineSynthesisEngine::answer_type_cue_score("where does Femi Oyesanya live?", paper)
+        );
+        let lease = "rent is $614.00 per month due on the 1st";
+        assert!(DeterministicOfflineSynthesisEngine::answer_type_cue_score("how much rent does Casey pay?", lease) >= 200);
+        assert!(DeterministicOfflineSynthesisEngine::answer_type_cue_score("when did the lease start?", "starting november 1, 2019") >= 120);
+
+        let titled = "The Late Fee On The Lease Is $50.00 Plus $5 Per Day Afterwards Until The 5th.";
+        let out = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta_with_corpus(
+            titled,
+            "what is the late fee on the leases?",
+            "a late fee of $50.00 plus $5 per day afterwards until the 5th",
+        );
+        assert_eq!(out, "The late fee on the lease is $50.00 plus $5 per day afterwards until the 5th.");
+
+        let disc = "Femi Oyesanya is CISSP-certified [1]. Firstly, the resume states CISSP Certified professional [1].";
+        let out2 = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(disc, "does Femi have a CISSP?");
+        assert!(out2.contains("The resume states CISSP"), "got: {out2}");
+        assert!(!out2.contains("Firstly"));
+
+        let heads = "Sacred math matters because it reveals truth [1].\n#### Source Document [2]: Sacred math and disruption.docx\nMath does not lie [2].";
+        let out3 = DeterministicOfflineSynthesisEngine::strip_stub_heading_and_label_echo(heads);
+        assert!(out3.contains("**Sacred math and disruption.docx** [2]"), "got: {out3}");
+    }
+
+    #[test]
+    fn test_continuation_prefix_meta_clause_and_full_detitle() {
+        for q in ["continue", "tell me more", "go on", "continue the previous answer about paschal beverly randolph"] {
+            assert_eq!(DeterministicOfflineSynthesisEngine::format_question_restated_prefix(q), "", "query: {q}");
+        }
+        let a = "Based on the provided documents, the rent is paid by direct deposit to Chase Bank account #1569837451 [1].";
+        let out = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(a, "which bank is the rent paid to?");
+        assert_eq!(out, "The rent is paid by direct deposit to Chase Bank account #1569837451 [1].");
+
+        let b = "To compare RedactX and Microsoft Presidio, we need to examine their performance. RedactX Mode A reaches 99.28% recall versus 69.17% for Presidio [1].";
+        let out_b = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(b, "compare RedactX and Presidio");
+        assert_eq!(out_b, "RedactX Mode A reaches 99.28% recall versus 69.17% for Presidio [1].");
+
+        let c = "The late fee is $75.00 per day [1]. This Fee Must Be Included In Rent Due Amount If Rent Has Not Been Paid. Grace Bridges signed in 2018.";
+        let out_c = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(c, "what is the late fee on the leases?");
+        assert!(out_c.contains("This fee must be included in rent due amount if rent has not been paid."), "got: {out_c}");
+        assert!(out_c.contains("Grace Bridges signed in 2018."), "got: {out_c}");
+
+        assert!(DeterministicOfflineSynthesisEngine::answer_type_cue_terms("where does Femi Oyesanya live?").contains(&"address"));
+        assert!(DeterministicOfflineSynthesisEngine::answer_type_cue_terms("what is RedactX?").is_empty());
+    }
+
+    #[test]
+    fn test_continuation_drops_sentences_repeating_previous_answer() {
+        let prior = "Paschal Beverly Randolph is an American spiritual author who emerged as a prominent figure within New Thought during the late 19th century. He explicitly distinguished genuine love from counterfeit love.";
+        let cont = "Paschal Beverly Randolph was an American spiritual author who emerged as a prominent figure within New Thought during the late 19th century.\n\nHis book Human Love, in Health and in Disease; Or, The Grand Secret appears in French and German bibliographic records [1]. He treats suffering as a pathway to revelation rather than detached reflection [2].";
+        let out = DeterministicOfflineSynthesisEngine::drop_sentences_repeating_prior(cont, prior);
+        assert!(!out.contains("emerged as a prominent figure"), "got: {out}");
+        assert!(out.contains("The Grand Secret"));
+        assert!(out.contains("suffering as a pathway"));
+    }
+
+    #[test]
+    fn test_answer_focused_window_and_meta_rewrite_keeps_facts() {
+        let filler = "Professional summary of security engineering experience. ".repeat(20);
+        let text = format!("{}FEMI OYESANYA 122 East Avenue La Grange, IL 60525 Phone 708.359.1414", filler);
+        let w = DeterministicOfflineSynthesisEngine::answer_focused_window("where does Femi Oyesanya live?", &text, 300);
+        assert!(w.contains("60525"), "got: {w}");
+        let w2 = DeterministicOfflineSynthesisEngine::answer_focused_window("what is RedactX?", &text, 300);
+        assert!(w2.starts_with("Professional summary"));
+
+        let a = "Casey Ringgold pays $614.00 per month, as stated in the reference excerpts [1].";
+        let out = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(a, "how much rent does Casey Ringgold pay?");
+        assert_eq!(out, "Casey Ringgold pays $614.00 per month, as stated in the documents [1].");
+
+        let b = "To determine how much rent Casey Ringgold pays, we need to review the lease. Casey Ringgold pays $614.00 per month [1].";
+        let out_b = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(b, "how much rent does Casey Ringgold pay?");
+        assert_eq!(out_b, "Casey Ringgold pays $614.00 per month [1].");
+    }
+
+    #[test]
+    fn test_contact_lines_survive_cleaning_and_heading_echo_removed() {
+        let raw = "FEMI OYESANYA, CISSP\n122 East Avenue, La Grange, IL 60525 | 708.359.1414 | oyesanyf@gmail.com\nCISSP-certified Application Security professional with 20 years of experience.";
+        let cleaned = DeterministicOfflineSynthesisEngine::clean_chunk_text(raw);
+        assert!(cleaned.contains("60525"), "got: {cleaned}");
+        assert!(cleaned.contains("708.359.1414"), "got: {cleaned}");
+        assert!(!DeterministicOfflineSynthesisEngine::is_corrupt_or_binary_chunk(raw));
+        // real OLE garbage is still rejected
+        assert!(DeterministicOfflineSynthesisEngine::is_corrupt_or_binary_chunk("#0A9 VR&EDJo ~^{}<> %%*== @@ ||| \\\\ ~~ ^^ {{ }} << >> ## %% ** =="));
+
+        let ans = "Michael Lewis's lease started on November 1, 2019 [1].\n\n### When Did Michael Lewis's Lease Start?\nIt was signed on October 20, 2019 [1].";
+        let out = DeterministicOfflineSynthesisEngine::strip_question_echo_and_meta(ans, "when did Michael Lewis's lease start?");
+        assert!(!out.contains("###"), "got: {out}");
+        assert!(out.contains("October 20, 2019"));
+    }
+
+    #[test]
+    fn test_live_continuation_filter_and_tell_me_all_prefix() {
+        let prior = "Randolph's writing style is characterized by its confessional nature, dramatic elements, and psychological acuity.";
+        let seg = "Randolph's writing style is characterized by its confessional nature, dramatic elements, and psychological acuity.\n\nHis book The Grand Secret appeared in 1860 [1]. ";
+        let out = DeterministicOfflineSynthesisEngine::filter_repeating_segments(seg, prior);
+        assert!(!out.contains("confessional nature"), "got: {out}");
+        assert!(out.contains("The Grand Secret appeared in 1860"), "got: {out}");
+        assert_eq!(DeterministicOfflineSynthesisEngine::last_sentence_boundary("One. Two"), Some(5));
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::format_question_restated_prefix("tell me all you know about Paschal Beverly Randolph"),
+            "Paschal Beverly Randolph — "
+        );
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::format_question_restated_prefix("what can you tell me about RedactX?"),
+            "RedactX — "
+        );
+    }
+
+    #[test]
+    fn test_coverage_by_prior_prefers_new_material() {
+        let prior = "Randolph presents love as a destabilizing force that exposes illusion and reorganizes perception.";
+        let seen = "Love is a destabilizing force that exposes illusion and reorganizes perception.";
+        let fresh = "The Grand Secret was published in 1860 and catalogued in German and WorldCat bibliographies.";
+        assert!(
+            DeterministicOfflineSynthesisEngine::coverage_by_prior_percent(fresh, prior)
+                < DeterministicOfflineSynthesisEngine::coverage_by_prior_percent(seen, prior)
+        );
+    }
+
+    #[test]
+    fn test_least_covered_window_moves_past_already_used_text() {
+        let used = "Randolph presents love as a destabilizing force exposing illusion. ".repeat(8);
+        let fresh = "The Grand Secret was published in 1860 and catalogued by German and WorldCat bibliographers. ".repeat(6);
+        let text = format!("{}{}", used, fresh);
+        let w = DeterministicOfflineSynthesisEngine::least_covered_window(&text, &used, 300);
+        assert!(w.contains("Grand Secret"), "got: {w}");
+    }
+
+    #[test]
+    fn test_where_lives_pruning_and_duplicate_excerpt_dedup_and_street_abbrev() {
+        let terms = DeterministicOfflineSynthesisEngine::question_content_terms("where does Femi Oyesanya live?");
+        assert_eq!(terms, vec!["femi".to_string(), "oyesanya".to_string()]);
+
+        let mk = |id: &str, path: &str, text: &str| {
+            ScoredChunk::new(
+                DocumentChunk::new(id, id, path, 1, 10, 0, vec![0.1; 768], text, None).unwrap(),
+                0.8,
+                "local",
+                false,
+            )
+        };
+        let c_paper1 = mk(
+            "p1",
+            "RedactX_v1.pdf",
+            "Femi Oyesanya is an independent researcher evaluating live clinical redaction pipelines across hospital notes.",
+        );
+        let c_paper2 = mk(
+            "p2",
+            "RedactX_copy.pdf",
+            "Femi Oyesanya is an independent researcher evaluating live clinical redaction pipelines across hospital notes.",
+        );
+        let c_resume = mk(
+            "r1",
+            "Femi_Oyesanya_Resume.docx",
+            "Femi Oyesanya\n122 East Avenue, La Grange, IL 60525 | 708.359.1414 | oyesanyf@gmail.com",
+        );
+        let refs = vec![&c_paper1, &c_paper2, &c_resume];
+        let pruned = DeterministicOfflineSynthesisEngine::dedup_near_identical_excerpts(
+            DeterministicOfflineSynthesisEngine::prune_weak_excerpts("where does Femi Oyesanya live?", &refs),
+        );
+        assert_eq!(pruned.len(), 2, "duplicate paper copy collapsed while resume header survives");
+        assert!(pruned.iter().any(|c| c.chunk.text_content.contains("La Grange, IL 60525")));
+
+        let corpus = "Angela Davis manages residential lease properties at 4023 D'Hemecourt St. and 2913 Castiglione St. in New Orleans.";
+        let prose = "Angela Davis is a landlord in New Orleans [1].\nShe manages leases at 4023 D'Hemecourt St. [1] and 2913 Castiglione St. [2].";
+        let grounded = DeterministicOfflineSynthesisEngine::drop_ungrounded_sentences(prose, corpus);
+        assert!(grounded.contains("She manages leases at 4023 D'Hemecourt St."), "got: {grounded}");
+    }
+
+    #[test]
+    fn test_gemma4_26b_memory_gate_and_model_resolution() {
+        let high_ram_hw = crate::hardware::HardwareTelemetry {
+            total_ram_gb: 224.0,
+            free_ram_gb: 168.0,
+            cpu_cores: 36,
+            gpu_name: Some("Quadro RTX 4000".to_string()),
+            free_vram_mb: 6_500,
+        };
+        let low_free_ram_hw = crate::hardware::HardwareTelemetry {
+            // Even on a 224 GB machine, if FREE RAM is only 9 GB and FREE VRAM is 3 GB, gemma4:26b must NOT run (Anti-OOM Law)
+            total_ram_gb: 224.0,
+            free_ram_gb: 9.0,
+            cpu_cores: 36,
+            gpu_name: Some("Quadro RTX 4000".to_string()),
+            free_vram_mb: 3_000,
+        };
+        let installed = vec![
+            "gemma4:26b".to_string(),
+            "glm4:9b".to_string(),
+            "qwen2.5:7b".to_string(),
+            "gemma2:2b".to_string(),
+            "qwen2.5:1.5b".to_string(),
+        ];
+
+        assert!(DeterministicOfflineSynthesisEngine::model_fits_free_memory("gemma4:26b", &high_ram_hw));
+        assert!(!DeterministicOfflineSynthesisEngine::model_fits_free_memory("gemma4:26b", &low_free_ram_hw));
+
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::resolve_ollama_model_tag("gemma4:26b", &high_ram_hw, &installed),
+            "gemma4:26b"
+        );
+        // Low free RAM gates gemma4:26b down to an installed model that fits in 9 GB free RAM (`gemma2:2b`)
+        let gated = DeterministicOfflineSynthesisEngine::resolve_ollama_model_tag("gemma4:26b", &low_free_ram_hw, &installed);
+        assert_eq!(gated, "gemma2:2b");
+
+        // When gemma4:26b is not yet installed, falls back cleanly to strongest installed model (`glm4:9b`) instead of `1.5b`
+        let without_gemma4 = vec!["glm4:9b".to_string(), "qwen2.5:7b".to_string(), "qwen2.5:1.5b".to_string()];
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::resolve_ollama_model_tag("gemma4:26b", &high_ram_hw, &without_gemma4),
+            "glm4:9b"
+        );
+    }
+
+    #[test]
+    fn test_adaptive_socket_timeouts_and_coder_stripping() {
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::socket_read_timeout_for_model("gemma4:26b").as_secs(),
+            150
+        );
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::socket_read_timeout_for_model("qwen2.5:32b").as_secs(),
+            150
+        );
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::socket_read_timeout_for_model("qwen2.5:7b").as_secs(),
+            60
+        );
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::socket_read_timeout_for_model("qwen2.5:1.5b").as_secs(),
+            30
+        );
+        assert!(DeterministicOfflineSynthesisEngine::model_uses_thinking_flag("gemma4:26b"));
+        assert!(!DeterministicOfflineSynthesisEngine::model_uses_thinking_flag("qwen2.5:7b"));
+        assert_eq!(
+            DeterministicOfflineSynthesisEngine::normalize_requested_model_tag("qwen2.5-coder:7b"),
+            "qwen2.5:7b"
+        );
+    }
+
+    #[test]
+    fn test_initials_and_fragments_in_continuation_filter() {
+        let prior = "Randolph's teachings were rooted in metaphysical reflection.";
+        let seg = "It was published by P. B. Randolph. Randolph founded secret societies based on Rosicrucianism [1]. ";
+        let out = DeterministicOfflineSynthesisEngine::filter_repeating_segments(seg, prior);
+        assert!(out.contains("P. B. Randolph."), "got: {out}");
+        assert!(out.contains("Rosicrucianism"), "got: {out}");
+        let frag = DeterministicOfflineSynthesisEngine::filter_repeating_segments("Randolph. He founded secret societies in Boston [1]. ", prior);
+        assert!(!frag.starts_with("Randolph."), "got: {frag}");
+        assert_eq!(DeterministicOfflineSynthesisEngine::last_sentence_boundary("By P. B. Randolph"), None);
+    }
+
+    #[test]
+    fn test_prune_weak_excerpts_drops_off_topic_hits() {
+        let mk = |id: &str, path: &str, text: &str| {
+            ScoredChunk::new(
+                DocumentChunk::new(id, id, path, 1, 10, 0, vec![0.1; 768], text, None).unwrap(),
+                0.8,
+                "local",
+                false,
+            )
+        };
+        let lease = mk("a", "C:/Leases/Jamie Williams LEASE AGREEMENT.doc", "Rent is $750 per month paid by direct deposit to account #1569837451 Chase Bank.");
+        let scam = mk("b", "D:/419/Exposing_419_1.pdf", "Remit the funds to any foreign bank account via the Ministry of Justice.");
+        let refs = vec![&lease, &scam];
+        let kept = DeterministicOfflineSynthesisEngine::prune_weak_excerpts("which bank is the rent paid to?", &refs);
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].chunk.file_path.contains("Jamie Williams"));
     }
 
     #[test]

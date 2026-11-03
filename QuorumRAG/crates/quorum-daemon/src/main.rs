@@ -214,6 +214,7 @@ pub async fn run_daemon_and_ui(cli: Cli) -> anyhow::Result<()> {
         "Glm4Agentic" => quorum_coordinator::SynthesisModelFamily::Glm4Agentic,
         "Qwen25Code" => quorum_coordinator::SynthesisModelFamily::Qwen25Code,
         "GemmaProse" => quorum_coordinator::SynthesisModelFamily::GemmaProse,
+        "Gemma4_26b" | "gemma4:26b" | "gemma4" => quorum_coordinator::SynthesisModelFamily::Gemma4_26b,
         _ => quorum_coordinator::SynthesisModelFamily::AutoFusion,
     };
 
