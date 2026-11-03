@@ -101,7 +101,7 @@ fn rules() -> &'static Rules {
         date_day_of: Regex::new(r"(?i)\b[0-9]{1,2}(?:st|nd|rd|th)\s+day\s+of\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s*,?\s*[0-9]{4}\b").unwrap(),
         date_month: Regex::new(r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+[0-9]{1,2},?\s+[0-9]{4}\b").unwrap(),
         address: Regex::new(r"\b[0-9]{2,6}(?:\s+\x{00BD})?\s+(?:[A-Z][A-Za-z]+\s+){1,3}(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Ct|Court|Way|Pl|Place|Pkwy)\b\.?(?:,?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,?\s+[A-Z]{2}\s+[0-9]{5})?").unwrap(),
-        counterpart: Regex::new(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z']+){1,2})\s*\((tenant|tenants|landlord|owner|lessee|lessor|buyer|seller|employee|employer|client|patient|borrower|lender|contractor)\)").unwrap(),
+        counterpart: Regex::new(r"\b([A-Z][a-z]+\s+[A-Z][a-z']+)\s*\((tenant|tenants|landlord|owner|lessee|lessor|buyer|seller|employee|employer|client|patient|borrower|lender|contractor)\)").unwrap(),
     })
 }
 
@@ -109,11 +109,17 @@ fn rules() -> &'static Rules {
 /// clause in different documents merges into one fact.
 fn money_label(text: &str, start: usize) -> String {
     let before = &text[..start];
-    // Only the clause the amount belongs to (after the last sentence break).
-    let clause = before
-        .rsplit(|c: char| c == '.' || c == ';' || c == ':' || c == '\n')
-        .next()
-        .unwrap_or("");
+    // Only the clause the amount belongs to: cut at the last sentence/clause break that is followed by
+    // whitespace, so decimal points inside earlier amounts ("$50.00 and $5.00") are not treated as breaks.
+    let bytes = before.as_bytes();
+    let mut cut = 0;
+    for i in 0..bytes.len() {
+        let next_ws = bytes.get(i + 1).map_or(false, |n| n.is_ascii_whitespace());
+        if (matches!(bytes[i], b'.' | b';' | b':') && next_ws) || bytes[i] == b'\n' {
+            cut = i + 1;
+        }
+    }
+    let clause = &before[cut..];
     let mut words: Vec<&str> = clause.split_whitespace().collect();
     if words.len() > 3 {
         words = words[words.len() - 3..].to_vec();
@@ -158,11 +164,13 @@ fn strip_leading_title(s: &str) -> String {
 
 fn sentences(text: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let flat = text.replace(['\r', '\n'], " ");
+    let flat: Vec<char> = text.replace(['\r', '\n'], " ").chars().collect();
     let mut cur = String::new();
-    for ch in flat.chars() {
+    for (i, &ch) in flat.iter().enumerate() {
         cur.push(ch);
-        if matches!(ch, '.' | '!' | '?') && cur.trim().len() > 30 {
+        // A sentence ends at . ! ? followed by whitespace or end of text, never inside "$50.00".
+        let ends = matches!(ch, '.' | '!' | '?') && flat.get(i + 1).map_or(true, |n| n.is_whitespace());
+        if ends && cur.trim().len() > 30 {
             out.push(strip_leading_title(&cur.split_whitespace().collect::<Vec<_>>().join(" ")));
             cur.clear();
         }
@@ -403,6 +411,20 @@ mod tests {
         assert!(md.contains("- **Role:** landlord [1], [2]"), "{md}");
         assert!(md.contains("### Relevant passages"), "{md}");
         assert!(!md.contains("SIMPLE LEASE AGREEMENT This agreement"), "raw title dump leaked: {md}");
+    }
+
+    #[test]
+    fn live_defects_amount_labels_names_and_sentences() {
+        let texts = vec![(
+            "c".to_string(),
+            "x.doc".to_string(),
+            "Firldeal Breure Michael Lewis (tenant) signed. A late fee of $50.00 and $5.00 per day applies. Rent may be paid to Angela Davis after the third day if a late fee of $50.00 is included.".to_string(),
+        )];
+        let facts = extract_grounded_facts(Some("Angela Davis"), &texts);
+        assert!(facts.iter().any(|f| f.class == "Other parties" && f.value == "Michael Lewis (tenant)"), "{facts:?}");
+        assert!(!facts.iter().any(|f| f.value.starts_with("00 ")), "decimal split leaked: {facts:?}");
+        let s = sentences(&texts[0].2);
+        assert!(s.iter().any(|x| x.ends_with("late fee of $50.00 is included.")), "{s:?}");
     }
 
     #[test]
