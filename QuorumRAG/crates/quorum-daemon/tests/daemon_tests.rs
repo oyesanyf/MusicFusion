@@ -100,6 +100,7 @@ async fn test_daemon_server_routes_and_health() {
         data_dir,
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
         in_flight_queries: Arc::new(quorum_daemon::InFlightQueryRegistry::new()),
+        sessions: quorum_daemon::ChatSessionRegistry::new(),
     });
 
     let app = build_router(state);

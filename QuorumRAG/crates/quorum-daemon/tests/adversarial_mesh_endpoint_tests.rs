@@ -99,6 +99,7 @@ async fn setup_test_app_with_state() -> (axum::Router, Arc<DaemonState>) {
         data_dir,
         shutdown_notify,
         in_flight_queries: Arc::new(quorum_daemon::InFlightQueryRegistry::new()),
+        sessions: quorum_daemon::ChatSessionRegistry::new(),
     });
 
     let router = build_router(Arc::clone(&state));

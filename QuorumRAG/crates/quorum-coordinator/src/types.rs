@@ -91,6 +91,7 @@ pub struct AgenticGraphState {
     pub langextract_result: Option<crate::langextract::ConsensusExtractionResult>,
     pub extracted_questions: Vec<String>,
     pub extracted_entities: Vec<crate::langextract::Extraction>,
+    pub seen_chunk_ids: std::collections::HashSet<String>,
 }
 
 impl AgenticGraphState {
@@ -120,7 +121,14 @@ impl AgenticGraphState {
             langextract_result: None,
             extracted_questions: Vec::new(),
             extracted_entities: Vec::new(),
+            seen_chunk_ids: std::collections::HashSet::new(),
         }
+    }
+
+    /// Attaches previously seen chunk IDs from prior conversation turns to filter out redundant passages.
+    pub fn with_seen_chunks(mut self, seen: std::collections::HashSet<String>) -> Self {
+        self.seen_chunk_ids = seen;
+        self
     }
 
     /// Attaches prior multi-turn conversation messages and expands `current_query` for follow-up coreference resolution.

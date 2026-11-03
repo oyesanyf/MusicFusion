@@ -1,5 +1,7 @@
+use crate::agentic::retrieve::STOPWORDS;
 use crate::telemetry::AgenticTelemetryEvent;
 use crate::types::ChatTurnMessage;
+use quorum_contract::EmbeddingGenerator;
 use quorum_types::{Citation, ScoredChunk};
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
@@ -339,14 +341,22 @@ impl DeterministicOfflineSynthesisEngine {
         let is_continuation = Self::is_continuation_query(&prompt_lower);
 
         let mut previous_snippets = std::collections::HashSet::new();
+        let prior_text: String = if is_continuation {
+            history
+                .iter()
+                .filter(|t| t.role.eq_ignore_ascii_case("assistant"))
+                .map(|t| Self::strip_sources_footer(&t.content))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            String::new()
+        };
         if is_continuation {
-            for msg in history.iter().filter(|t| t.role.eq_ignore_ascii_case("assistant")) {
-                for line in msg.content.lines() {
-                    let trim = line.trim();
-                    if trim.len() >= 20 {
-                        let key: String = trim.chars().take(80).collect();
-                        previous_snippets.insert(key);
-                    }
+            for line in prior_text.lines() {
+                let trim = line.trim();
+                if trim.len() >= 20 {
+                    let key: String = trim.chars().take(80).collect();
+                    previous_snippets.insert(key);
                 }
             }
         }
@@ -884,6 +894,10 @@ impl DeterministicOfflineSynthesisEngine {
             candidate_chunks = Self::stitch_parent_document_chunks(candidate_chunks);
         }
 
+        if is_continuation && !prior_text.is_empty() {
+            candidate_chunks = Self::deduplicate_chunk_segments_against_prior(candidate_chunks, &prior_text, 0.88);
+        }
+
         let matched_chunks = candidate_chunks;
         let matched_chunk_refs: Vec<&ScoredChunk> = matched_chunks.iter().collect();
 
@@ -1030,8 +1044,10 @@ impl DeterministicOfflineSynthesisEngine {
             answer_parts.extend(body_paragraphs);
 
             // Add end-of-response sources block with accuracy scores (zero line numbers!)
+            let raw_answer = answer_parts.join("\n\n");
+            let clean_answer = Self::consolidate_duplicate_entity_statements(&raw_answer);
             let sources_block = Self::format_sources_block(&matched_chunk_refs);
-            let synthesized_rag = format!("{}{}", answer_parts.join("\n\n"), sources_block);
+            let synthesized_rag = format!("{}{}", clean_answer, sources_block);
 
             if let Some(tx) = telemetry_tx {
                 for word in synthesized_rag.split_inclusive(' ') {
@@ -1781,6 +1797,444 @@ impl DeterministicOfflineSynthesisEngine {
         (out_lines.join("\n"), had_repeat)
     }
 
+    /// Deduplicates chunk text segments against prior assistant turns using pairwise semantic similarity
+    /// and normalized sentence matching. Drops chunk segments whose cosine similarity against any prior sentence
+    /// meets or exceeds `similarity_threshold` (e.g. 0.88).
+    pub fn deduplicate_chunk_segments_against_prior(
+        chunks: Vec<ScoredChunk>,
+        prior_text: &str,
+        similarity_threshold: f32,
+    ) -> Vec<ScoredChunk> {
+        if prior_text.trim().is_empty() || chunks.is_empty() {
+            return chunks;
+        }
+
+        let split_sentences = |text: &str| -> Vec<String> {
+            let mut sents = Vec::new();
+            let mut cur = String::new();
+            let chars: Vec<char> = text.chars().collect();
+            let len = chars.len();
+            let mut i = 0;
+            while i < len {
+                cur.push(chars[i]);
+                if (chars[i] == '.' || chars[i] == '!' || chars[i] == '?' || chars[i] == '\n')
+                    && (i + 1 == len || chars[i + 1].is_whitespace())
+                {
+                    let trimmed = cur.trim();
+                    if trimmed.len() >= 15 {
+                        sents.push(trimmed.to_string());
+                    }
+                    cur.clear();
+                }
+                i += 1;
+            }
+            let trimmed = cur.trim();
+            if trimmed.len() >= 15 {
+                sents.push(trimmed.to_string());
+            }
+            sents
+        };
+
+        let prior_sentences = split_sentences(prior_text);
+        if prior_sentences.is_empty() {
+            return chunks;
+        }
+
+        let embedder = quorum_contract::DeterministicOfflineEngine::new();
+        let mut prior_vectors: Vec<Vec<f32>> = Vec::with_capacity(prior_sentences.len());
+        for s in &prior_sentences {
+            if let Ok(vec) = embedder.embed_text(s) {
+                prior_vectors.push(vec);
+            }
+        }
+
+        let cosine_sim = |a: &[f32], b: &[f32]| -> f32 {
+            let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+            let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+            let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm_a > 1e-6 && norm_b > 1e-6 {
+                dot / (norm_a * norm_b)
+            } else {
+                0.0
+            }
+        };
+
+        let mut out_chunks = Vec::new();
+
+        for mut sc in chunks {
+            let raw_text = sc.chunk.text_content.clone();
+            let mut kept_paragraphs = Vec::new();
+
+            for para in raw_text.split("\n\n") {
+                let trimmed_para = para.trim();
+                if trimmed_para.is_empty() {
+                    continue;
+                }
+                if trimmed_para.starts_with('#') || trimmed_para.starts_with("```") || trimmed_para.len() < 25 {
+                    kept_paragraphs.push(trimmed_para.to_string());
+                    continue;
+                }
+
+                let para_sents = split_sentences(trimmed_para);
+                if para_sents.is_empty() {
+                    kept_paragraphs.push(trimmed_para.to_string());
+                    continue;
+                }
+
+                let mut kept_sents = Vec::new();
+                for sent in para_sents {
+                    let mut is_dup = false;
+
+                    // 1. Semantic embedding similarity check
+                    if !prior_vectors.is_empty() {
+                        if let Ok(s_vec) = embedder.embed_text(&sent) {
+                            for pv in &prior_vectors {
+                                let sim = cosine_sim(&s_vec, pv);
+                                if sim >= similarity_threshold {
+                                    is_dup = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Normalized alphanumeric string equality check
+                    if !is_dup {
+                        let norm_s: String = sent.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_lowercase();
+                        for ps in &prior_sentences {
+                            let norm_ps: String = ps.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_lowercase();
+                            if norm_s == norm_ps && norm_s.len() >= 15 {
+                                is_dup = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if !is_dup {
+                        kept_sents.push(sent);
+                    }
+                }
+
+                if !kept_sents.is_empty() {
+                    kept_paragraphs.push(kept_sents.join(" "));
+                }
+            }
+
+            let filtered_content = kept_paragraphs.join("\n\n").trim().to_string();
+            if !filtered_content.is_empty() {
+                sc.chunk.text_content = filtered_content;
+                out_chunks.push(sc);
+            }
+        }
+
+        out_chunks
+    }
+
+    /// Extracts a concise summary of concrete facts, fees, phone numbers, emails, and legal clauses from prior assistant turns.
+    pub fn extract_key_facts_summary(prior_text: &str) -> String {
+        if prior_text.trim().is_empty() {
+            return String::new();
+        }
+
+        let mut facts: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        let dollar_re = regex::Regex::new(r"(?i)\$\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]{2})?|\b[0-9]+\s+dollars\b").unwrap();
+        let phone_re = regex::Regex::new(r"\b(?:\+?1[-.]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b").unwrap();
+        let email_re = regex::Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b").unwrap();
+        let account_re = regex::Regex::new(r"#?\b[0-9]{7,16}\b").unwrap();
+
+        for line in prior_text.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("---") {
+                continue;
+            }
+
+            for sent in trimmed.split(|c: char| c == '.' || c == ';' || c == '!' || c == '?') {
+                let s_trim = sent.trim();
+                if s_trim.len() < 10 {
+                    continue;
+                }
+
+                let has_dollar = dollar_re.is_match(s_trim);
+                let has_phone = phone_re.is_match(s_trim);
+                let has_email = email_re.is_match(s_trim) || account_re.is_match(s_trim);
+                let s_lower = s_trim.to_ascii_lowercase();
+                let has_legal_clause = s_lower.contains("fee")
+                    || s_lower.contains("deposit")
+                    || s_lower.contains("rent")
+                    || s_lower.contains("eviction")
+                    || s_lower.contains("sublet")
+                    || s_lower.contains("notice")
+                    || s_lower.contains("lease")
+                    || s_lower.contains("tenant")
+                    || s_lower.contains("landlord")
+                    || s_lower.contains("born")
+                    || s_lower.contains("graduated")
+                    || s_lower.contains("degree");
+
+                if has_dollar || has_phone || has_email || has_legal_clause {
+                    let norm: String = s_trim.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_lowercase();
+                    if !norm.is_empty() && seen.insert(norm) {
+                        facts.push(format!("- {}", s_trim));
+                        if facts.len() >= 15 {
+                            break;
+                        }
+                    }
+                }
+            }
+            if facts.len() >= 15 {
+                break;
+            }
+        }
+
+        facts.join("\n")
+    }
+
+    /// Post-synthesis pass that merges duplicate or identical entity statements across sentences or paragraphs,
+    /// consolidating their citation numbers (e.g. `[1], [2]`) into a single coherent sentence.
+    pub fn consolidate_duplicate_entity_statements(text: &str) -> String {
+        if text.trim().is_empty() {
+            return text.to_string();
+        }
+
+        let bold_re = regex::Regex::new(r"\*\*\[(\d+)\]\*\*").unwrap();
+        let normal_re = regex::Regex::new(r"\[(\d+)\]").unwrap();
+        let dollar_re = regex::Regex::new(r"(?i)\$\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]{2})?|\b[0-9]+\s+dollars\b").unwrap();
+        let phone_re = regex::Regex::new(r"\b(?:\+?1[-.]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b").unwrap();
+        let percent_re = regex::Regex::new(r"\b[0-9]+(?:\.[0-9]+)?%").unwrap();
+        let account_re = regex::Regex::new(r"#?\b[0-9]{7,16}\b").unwrap();
+
+        let normalize_dollar = |s: &str| -> String {
+            let digits_and_dot: String = s.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+            let trimmed = digits_and_dot.strip_suffix(".00").unwrap_or(&digits_and_dot);
+            format!("${}", trimmed)
+        };
+
+        #[derive(Clone)]
+        struct SentenceEntry {
+            clean_text: String,
+            citations: Vec<usize>,
+            bold: bool,
+            entity_keys: Vec<String>,
+            norm_words: Vec<String>,
+        }
+
+        let extract_entry = |raw: &str| -> SentenceEntry {
+            let mut cits = Vec::new();
+            let mut is_bold = false;
+            for cap in bold_re.captures_iter(raw) {
+                if let Ok(num) = cap[1].parse::<usize>() {
+                    if !cits.contains(&num) {
+                        cits.push(num);
+                    }
+                    is_bold = true;
+                }
+            }
+            for cap in normal_re.captures_iter(raw) {
+                if let Ok(num) = cap[1].parse::<usize>() {
+                    if !cits.contains(&num) {
+                        cits.push(num);
+                    }
+                }
+            }
+            cits.sort_unstable();
+
+            let cit_group_re = regex::Regex::new(r"(?:\*\*\[\d+\]\*\*|\[\d+\])(?:\s*,\s*(?:\*\*\[\d+\]\*\*|\[\d+\]))*").unwrap();
+            let multi_comma_re = regex::Regex::new(r"(?:\s*,\s*){2,}").unwrap();
+            let space_punct_re = regex::Regex::new(r"\s*,?\s+([.!?;:])").unwrap();
+            let stripped_groups = cit_group_re.replace_all(raw, "");
+            let stripped_bold = bold_re.replace_all(&stripped_groups, "");
+            let stripped_all = normal_re.replace_all(&stripped_bold, "");
+            let collapsed_commas = multi_comma_re.replace_all(&stripped_all, ", ");
+            let collapsed_punct = space_punct_re.replace_all(&collapsed_commas, "$1");
+            let clean = collapsed_punct.trim().trim_end_matches(',').trim().to_string();
+
+            let mut entity_keys = Vec::new();
+            for cap in dollar_re.find_iter(&clean) {
+                entity_keys.push(normalize_dollar(cap.as_str()));
+            }
+            for cap in phone_re.find_iter(&clean) {
+                let digits: String = cap.as_str().chars().filter(|c| c.is_ascii_digit()).collect();
+                entity_keys.push(format!("tel:{}", digits));
+            }
+            for cap in percent_re.find_iter(&clean) {
+                entity_keys.push(cap.as_str().to_ascii_lowercase());
+            }
+            for cap in account_re.find_iter(&clean) {
+                let digits: String = cap.as_str().chars().filter(|c| c.is_ascii_digit()).collect();
+                if digits.len() >= 7 {
+                    entity_keys.push(format!("acct:{}", digits));
+                }
+            }
+
+            let norm_words: Vec<String> = clean
+                .split(|c: char| !c.is_alphanumeric())
+                .map(|w| w.trim().to_ascii_lowercase())
+                .filter(|w| w.len() >= 3 && !STOPWORDS.contains(&w.as_str()))
+                .collect();
+
+            SentenceEntry {
+                clean_text: clean,
+                citations: cits,
+                bold: is_bold,
+                entity_keys,
+                norm_words,
+            }
+        };
+
+        let is_duplicate = |a: &SentenceEntry, b: &SentenceEntry| -> bool {
+            if a.clean_text.is_empty() || b.clean_text.is_empty() {
+                return false;
+            }
+            // 1. Exact normalized sentence match
+            let norm_a: String = a.clean_text.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_lowercase();
+            let norm_b: String = b.clean_text.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_ascii_lowercase();
+            if norm_a == norm_b && norm_a.len() >= 15 {
+                return true;
+            }
+
+            // 2. Matching monetary fee, phone number, or percentage + shared key topic words
+            if !a.entity_keys.is_empty() && !b.entity_keys.is_empty() {
+                let shared_entities: Vec<&String> = a.entity_keys.iter().filter(|k| b.entity_keys.contains(k)).collect();
+                if !shared_entities.is_empty() {
+                    let shared_words = a.norm_words.iter().filter(|w| b.norm_words.contains(w)).count();
+                    if shared_words >= 2 || (shared_words >= 1 && a.norm_words.len().min(b.norm_words.len()) <= 3) {
+                        return true;
+                    }
+                }
+            }
+
+            // 3. Jaccard similarity across content words >= 0.55
+            if !a.norm_words.is_empty() && !b.norm_words.is_empty() {
+                let set_a: std::collections::HashSet<&String> = a.norm_words.iter().collect();
+                let set_b: std::collections::HashSet<&String> = b.norm_words.iter().collect();
+                let intersection = set_a.intersection(&set_b).count();
+                let union = set_a.union(&set_b).count();
+                if union > 0 && (intersection as f32 / union as f32) >= 0.55 {
+                    return true;
+                }
+            }
+
+            false
+        };
+
+        let format_entry = |rec: &SentenceEntry| -> String {
+            if rec.citations.is_empty() {
+                return rec.clean_text.clone();
+            }
+            let mut unique_cits = rec.citations.clone();
+            unique_cits.sort_unstable();
+            unique_cits.dedup();
+            let cit_str = if rec.bold {
+                unique_cits.iter().map(|n| format!("**[{}]**", n)).collect::<Vec<_>>().join(", ")
+            } else {
+                unique_cits.iter().map(|n| format!("[{}]", n)).collect::<Vec<_>>().join(", ")
+            };
+
+            let base = rec.clean_text.trim_end_matches('.');
+            format!("{} {}.", base, cit_str)
+        };
+
+        enum ParaItem {
+            Verbatim(String),
+            SentenceIndices(Vec<usize>),
+        }
+
+        // Split text into paragraphs
+        let paragraphs: Vec<&str> = text.split("\n\n").collect();
+        let mut para_items: Vec<ParaItem> = Vec::new();
+        let mut all_accepted_entries: Vec<SentenceEntry> = Vec::new();
+
+        for para in paragraphs {
+            let p_trim = para.trim();
+            if p_trim.is_empty() {
+                continue;
+            }
+            if p_trim.starts_with('#') || p_trim.starts_with("---") || p_trim.starts_with("```") {
+                para_items.push(ParaItem::Verbatim(p_trim.to_string()));
+                continue;
+            }
+
+            // Split paragraph into sentences
+            let mut sents = Vec::new();
+            let mut cur = String::new();
+            let chars: Vec<char> = p_trim.chars().collect();
+            let len = chars.len();
+            let mut i = 0;
+            while i < len {
+                cur.push(chars[i]);
+                if (chars[i] == '.' || chars[i] == '!' || chars[i] == '?')
+                    && (i + 1 == len || chars[i + 1].is_whitespace())
+                {
+                    let trimmed = cur.trim();
+                    if !trimmed.is_empty() {
+                        sents.push(trimmed.to_string());
+                    }
+                    cur.clear();
+                }
+                i += 1;
+            }
+            let trimmed = cur.trim();
+            if !trimmed.is_empty() {
+                sents.push(trimmed.to_string());
+            }
+
+            let mut para_accepted_indices = Vec::new();
+
+            for sent in sents {
+                let entry = extract_entry(&sent);
+                // Check if duplicate of any already accepted entry
+                let mut matched_existing_idx = None;
+                for (idx, existing) in all_accepted_entries.iter().enumerate() {
+                    if is_duplicate(existing, &entry) {
+                        matched_existing_idx = Some(idx);
+                        break;
+                    }
+                }
+
+                if let Some(existing_idx) = matched_existing_idx {
+                    // Merge citations into the existing entry
+                    for c in entry.citations {
+                        if !all_accepted_entries[existing_idx].citations.contains(&c) {
+                            all_accepted_entries[existing_idx].citations.push(c);
+                        }
+                    }
+                    if entry.bold {
+                        all_accepted_entries[existing_idx].bold = true;
+                    }
+                } else {
+                    let new_idx = all_accepted_entries.len();
+                    all_accepted_entries.push(entry);
+                    para_accepted_indices.push(new_idx);
+                }
+            }
+
+            if !para_accepted_indices.is_empty() {
+                para_items.push(ParaItem::SentenceIndices(para_accepted_indices));
+            }
+        }
+
+        let mut processed_paragraphs: Vec<String> = Vec::new();
+        for item in para_items {
+            match item {
+                ParaItem::Verbatim(s) => processed_paragraphs.push(s),
+                ParaItem::SentenceIndices(indices) => {
+                    let para_text = indices
+                        .iter()
+                        .map(|&idx| format_entry(&all_accepted_entries[idx]))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !para_text.trim().is_empty() {
+                        processed_paragraphs.push(para_text);
+                    }
+                }
+            }
+        }
+
+        processed_paragraphs.join("\n\n")
+    }
+
     /// Removes a leading stub heading that only restates the topic without a sentence (e.g. `### Angela Davis is`)
     /// and any echoed `Source Documents:` / `Reference Excerpts` label line produced by small local models.
     pub fn strip_stub_heading_and_label_echo(text: &str) -> String {
@@ -2213,6 +2667,46 @@ impl DeterministicOfflineSynthesisEngine {
         if prior_sets.is_empty() {
             return text.to_string();
         }
+        let dollar_prior_re = regex::Regex::new(r"\$\s*([0-9][0-9,]*(?:\.[0-9]{2})?)").unwrap();
+        let acct_prior_re = regex::Regex::new(r"#?\b([0-9]{7,16})\b").unwrap();
+        let norm_dollar_num = |raw: &str| -> String {
+            let clean: String = raw.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+            clean.strip_suffix(".00").unwrap_or(&clean).to_string()
+        };
+        let mut prior_fee_contexts: Vec<(String, HashSet<String>)> = Vec::new();
+        let mut prior_accts: HashSet<String> = HashSet::new();
+        for cap in acct_prior_re.captures_iter(clean_prior) {
+            prior_accts.insert(cap[1].to_string());
+        }
+        for pline in clean_prior.lines() {
+            for psent in Self::split_prose_line_sentences(pline.trim()) {
+                let pstems = Self::continuation_content_stems(&psent);
+                for cap in dollar_prior_re.captures_iter(&psent) {
+                    let amt = norm_dollar_num(&cap[1]);
+                    if !amt.is_empty() {
+                        prior_fee_contexts.push((amt, pstems.clone()));
+                    }
+                }
+            }
+        }
+        let repeats_prior_specific_entity = |sent: &str, ws: &HashSet<String>| -> bool {
+            for cap in acct_prior_re.captures_iter(sent) {
+                if prior_accts.contains(&cap[1]) {
+                    return true;
+                }
+            }
+            for cap in dollar_prior_re.captures_iter(sent) {
+                let amt = norm_dollar_num(&cap[1]);
+                if amt.len() >= 3 {
+                    for (p_amt, p_stems) in &prior_fee_contexts {
+                        if &amt == p_amt && ws.intersection(p_stems).count() >= 2 {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        };
         let is_repeated = |ws: &HashSet<String>| -> bool {
             if ws.len() < 4 {
                 return false;
@@ -2265,7 +2759,10 @@ impl DeterministicOfflineSynthesisEngine {
             let kept: Vec<String> = Self::split_prose_line_sentences(t)
                 .into_iter()
                 .map(|x| x.trim().to_string())
-                .filter(|x| !is_repeated(&Self::continuation_content_stems(x)) && !is_thematic_echo(x))
+                .filter(|x| {
+                    let stems = Self::continuation_content_stems(x);
+                    !is_repeated(&stems) && !repeats_prior_specific_entity(x, &stems) && !is_thematic_echo(x)
+                })
                 .collect();
             kept_sentences += kept.len();
             if !kept.is_empty() {
@@ -3521,7 +4018,8 @@ impl DeterministicOfflineSynthesisEngine {
             3a. ANSWER FIRST: The first sentence must contain the actual answer (a name, number, date, amount, place, or definition) when the excerpts contain it. Never restate the question as a title, never write \"The user's question asks...\", \"Firstly, let us consider...\", or analyse excerpts one by one. Silently ignore excerpts that are unrelated to the question. If the excerpts do not contain the answer, say so in one sentence and summarise only what they do say about the subject.\n\
             3b. STRICT GROUNDING (NO INVENTION, NO CROSS-SUBJECT BLEED): State ONLY facts that literally appear in the numbered source documents of THIS request. Never carry over facts about a different person or subject from earlier chat turns, and never invent profiles, platforms (LinkedIn, GitHub), courses, or credentials that the documents do not state. If the sources are a different kind of document (for example leases naming the subject as landlord), describe exactly what those documents say about the subject (role, dates, tenants, rent, addresses) and nothing else.\n\
             4. MULTI-FILE SYNTHESIS & INLINE CITATIONS: You are given excerpts from MULTIPLE distinct files (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Look across ALL provided documents and cite multiple document numbers inline using simple bracketed numbers (`[1]`, `[2]`, `[3]`, `[4]`, etc.) throughout your response. Never write XML tags like `<document>` or `<Document Index=...>`.\n\
-            5. CLEAN STRUCTURE: Organize your response into thorough, flowing paragraphs and `###` section headings where helpful (after the opening paragraph). Never include line numbers `(Lines X-Y)`.";
+            5. CLEAN STRUCTURE: Organize your response into thorough, flowing paragraphs and `###` section headings where helpful (after the opening paragraph). Never include line numbers `(Lines X-Y)`.\n\
+            6. CROSS-CITATION ENTITY & ACCOUNT CONSOLIDATION: When multiple source documents mention the exact same bank account number (even with minor formatting or payee variations such as `#1569837451` vs `1569837451 F A Breure`), monetary fee (`$195` vs `$195.00`), street address, phone number, email, or legal rule, state that shared account number, fee, or rule ONCE in a single unified clause noting any payee or tenant qualifiers and citing all relevant documents together (e.g. `Chase Bank account #1569837451 (also listed under F A Breure) [3], [5]`). Never write the same account number, fee amount, or rule twice in a compound sentence or across paragraphs.";
 
         let system_prompt = format!("{}{}", base_system, voice_directive);
 
@@ -3620,13 +4118,13 @@ impl DeterministicOfflineSynthesisEngine {
         // Assign 1-based citation numbers strictly by DISTINCT source filename across `active_excerpts`,
         // so multiple chunks from the same file share one `[doc_num]` and `[8]` can NEVER be emitted when 7 files exist.
         let mut unique_file_chunks: Vec<&ScoredChunk> = Vec::new();
-        let mut file_to_doc_num: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut file_to_doc_num: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
         for &c in active_excerpts {
             let file_name = std::path::Path::new(&c.chunk.file_path)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(&c.chunk.file_path);
-            let key = file_name.to_ascii_lowercase();
+            let key = (c.source_peer.to_ascii_lowercase(), file_name.to_ascii_lowercase());
             if !file_to_doc_num.contains_key(&key) {
                 let next_num = unique_file_chunks.len() + 1;
                 file_to_doc_num.insert(key, next_num);
@@ -3641,14 +4139,21 @@ impl DeterministicOfflineSynthesisEngine {
         let context_blocks = active_excerpts
             .iter()
             .map(|c| {
-                let file_name = std::path::Path::new(&c.chunk.file_path)
+                let file_name_base = std::path::Path::new(&c.chunk.file_path)
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or(&c.chunk.file_path);
+                let lookup_key = (c.source_peer.to_ascii_lowercase(), file_name_base.to_ascii_lowercase());
                 let doc_num = file_to_doc_num
-                    .get(&file_name.to_ascii_lowercase())
+                    .get(&lookup_key)
                     .copied()
                     .unwrap_or(1);
+                let file_name = if !c.source_peer.is_empty() && !c.source_peer.eq_ignore_ascii_case("local") {
+                    let short_peer = if c.source_peer.len() > 8 { &c.source_peer[..8] } else { &c.source_peer };
+                    format!("{} (Peer: {})", file_name_base, short_peer)
+                } else {
+                    file_name_base.to_string()
+                };
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
                 let compact_text: String = if !prior_answer_text.is_empty() {
                     let win = Self::least_covered_window(&cleaned, &prior_answer_text, per_excerpt_chars);
@@ -3692,16 +4197,33 @@ impl DeterministicOfflineSynthesisEngine {
             ""
         };
 
+        let exclusion_constraints = if !prior_answer_text.is_empty() {
+            let key_facts = Self::extract_key_facts_summary(&prior_answer_text);
+            if !key_facts.is_empty() {
+                format!(
+                    "\n\n### STRICT EXCLUSION CONSTRAINTS (DO NOT REPEAT):\n\
+                    The following facts, fees, numbers, and clauses have ALREADY been stated in prior turns. \
+                    DO NOT repeat, re-state, or paraphrase any of these in your response:\n{}\n",
+                    key_facts
+                )
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
         let max_doc_num = unique_file_chunks.len().max(1);
         let user_content = format!(
             "Reference Excerpts (numbered [1] through [{}], for your use only; never repeat this label):\n{}\n\nUser Question: {}\n\n\
-            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across the relevant source documents above to answer ONLY the User Question. {} and cite source documents inline using ONLY valid bracketed numbers `[1]` through `[{}]`. Write flowing prose paragraphs (not a bullet list of file names), start with a full sentence rather than a heading, and never repeat any sentence or paragraph.{}",
+            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across the relevant source documents above to answer ONLY the User Question. {} and cite source documents inline using ONLY valid bracketed numbers `[1]` through `[{}]`. Write flowing prose paragraphs (not a bullet list of file names), start with a full sentence rather than a heading, and never repeat any sentence or paragraph.{}{}",
             max_doc_num,
             context_blocks,
             prompt,
             opening_directive,
             max_doc_num,
-            continuation_guard_note
+            continuation_guard_note,
+            exclusion_constraints
         );
 
         messages.push(serde_json::json!({
@@ -3986,10 +4508,11 @@ impl DeterministicOfflineSynthesisEngine {
                     trimmed_full
                 };
 
+                let consolidated_prose = Self::consolidate_duplicate_entity_statements(&prose_with_prefix);
                 // Compact & renumber inline [k] citations so every [1]..[M] in prose maps 1-to-1 to the M emitted sources
                 // (eliminating dangling [8] when 7 unique files exist, and omitting uncited Turn-1 files on `continue`).
                 let (compacted_prose, compacted_chunks) =
-                    Self::remap_and_compact_citations(&prose_with_prefix, &unique_file_chunks, true);
+                    Self::remap_and_compact_citations(&consolidated_prose, &unique_file_chunks, true);
                 let sources_block = Self::format_sources_block(&compacted_chunks);
                 let final_with_sources = format!("{}{}", compacted_prose.trim(), sources_block);
                 let turn_citations = Self::build_deduplicated_citations(&compacted_chunks);

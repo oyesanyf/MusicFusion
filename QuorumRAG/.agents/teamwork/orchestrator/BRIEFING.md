@@ -1,37 +1,41 @@
-# BRIEFING — 2026-11-02T15:28:00Z
+# BRIEFING — 2026-11-03T13:10:00Z
 
 ## Mission
-Adapt QuorumRAG with Google LangExtract, LLM answer orchestration over RAG chunks, chat box dynamic spellcheck, action buttons, and Mesh UI & TPM hardware identity adaptation from OshoosiClaw, maintaining live daemon on port 3031.
+Fix the four real cross-peer P2P gaps in QuorumRAG (persistent Ed25519 identity, federated entity & cue-term supplements, engine-mode contract differentiation, peer/filename disambiguation, and configurable max_peer_responses), eliminate multi-turn continuation repetition in the agentic state graph (session-level seen chunk tracking, query rewriting, MMR & semantic deduplication, state-aware generator prompt with entity consolidation), verify end-to-end (cargo test, live 2-daemon P2P test, live 3-turn continuation SSE test against port 3031 with gemma4:26b), rebuild live daemon on port 3031, and ship via solo PR.
 
 ## 🔒 My Identity
 - Archetype: teamwork_orchestrator
 - Roles: orchestrator, user_liaison, human_reporter, successor
 - Working directory: d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\
 - Original parent: parent
-- Original parent conversation ID: 101ef7c9-61ac-41fd-9da5-cd78a4c078fc
+- Original parent conversation ID: 997d69e1-7a0a-4ce5-9141-49b9f3d09432
 
 ## 🔒 My Workflow
 - **Pattern**: Project Pattern
 - **Scope document**: d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md
 1. **Decompose**:
-   - Survey complete. SCOPE.md defined with Milestones M11, M12, M13, M14.
+   - Survey complete for M11-M14.
+   - Survey launched for P2P Mesh Gaps & Multi-Turn Continuation Deduplication.
 2. **Dispatch & Execute**:
    - Milestone M11: GATED PASS (commit `53af83a`).
-   - Milestone M12 (In Progress): Worker implementing clean UI (prompt chips removed, top logo preserved), dynamic LLM spellcheck, response action buttons (Copy, Regenerate, Read Aloud, Thumbs Up/Down), zero line numbers on citation badges, and `server.rs:115` `bypass_cache: false` fix.
-   - Milestone M13: OshoosiClaw Mesh UI & TPM Hardware Identity
-   - Milestone M14: Final Full Workspace Verification, Port 3031 Live Daemon & Solo PR Ship
+   - Milestone M12: GATED PASS.
+   - Milestone M13: GATED PASS.
+   - Milestone M13.5: GATED PASS.
+   - Milestone M14: GATED PASS.
+   - Phase 0: Survey for P2P Gaps & Multi-Turn Continuation (Explorers 1, 2, 3) [IN PROGRESS].
+   - Milestone M15: P2P Mesh Gaps & Configurable Max Peer Responses.
+   - Milestone M16: Multi-Turn Continuation Deduplication & State Graph Pipeline.
+   - Milestone M17: Verification, Service Rebuild & Solo PR Ship.
 3. **On failure**: Retry -> Replace -> Skip -> Redistribute -> Redesign
 4. **Succession**: at 16 spawns, write handoff.md, spawn successor
 - **Work items**:
-  1. Survey & Technical Exploration [done]
-  2. SCOPE.md Decomposition [done]
-  3. Milestone M11: Google LangExtract & Question-Restating LLM Orchestration [DONE & GATED PASS]
-  4. Milestone M12: WebUI Clean Interface, Spellcheck, Action Buttons & server.rs Fix [DONE & GATED PASS]
-  5. Milestone M13: OshoosiClaw Mesh UI & TPM Hardware Identity [DONE & GATED PASS]
-  6. Milestone M13.5: Action Buttons (Continue, Save File, Clear) & Q&A Grounding Calibration [DONE & GATED PASS]
-  7. Milestone M14: Final Full Workspace Verification, Port 3031 Live Daemon & Solo PR Ship [DONE & GATED PASS]
-- **Current phase**: Complete (All milestones M11–M14 passed & PR #5 merged)
-- **Current focus**: Final verification, handoff documentation, and reporting to parent
+  1. Survey & Technical Exploration for P2P & Continuation [done]
+  2. SCOPE.md Decomposition Update [done]
+  3. Milestone M15: P2P Mesh Gaps & Configurable Max Peer Responses [done]
+  4. Milestone M16: Multi-Turn Continuation Deduplication & State Graph Pipeline [in-progress]
+  5. Milestone M17: Verification, Service Rebuild & Solo PR Ship [pending]
+- **Current phase**: Milestone M16 Implementation Loop
+- **Current focus**: worker_m16_continuation implementation of multi-turn continuation deduplication & state graph pipeline
 
 ## 🔒 Key Constraints
 - NEVER write, modify, or create source code files directly.
@@ -43,81 +47,57 @@ Adapt QuorumRAG with Google LangExtract, LLM answer orchestration over RAG chunk
 - Zero-Wait Incremental Commits (`NO COMMIT SHOULD WAIT`). Stage, commit, and push immediately.
 - No mocks or fake data (write actual working production code and verify with real tests).
 - Universal Zero-Touch PATH & Environment Protection.
-- In `crates/quorum-daemon/src/server.rs:115`, ensure `chat::ChatRequest` constructs with `bypass_cache: false` in tests.
 - Set `$env:CARGO_INCREMENTAL = "0"` (or `cargo clean -p quorum-daemon`) when building `quorum-daemon` to avoid rustc incremental ICE.
-- Ensure the QuorumRAG binary builds and keep `target\debug\quorumrag.exe --host 0.0.0.0 --port 3031 --data-dir "d:\harfile\QuorumRAG\.quorumrag-rag-index" --no-browser` running live, accessible on `http://10.0.0.3:3031` and `http://127.0.0.1:3031`.
+- Ensure the QuorumRAG binary builds and keep `target\debug\quorumrag.exe --host 0.0.0.0 --port 3031 --data-dir "d:\harfile\QuorumRAG\.quorumrag-rag-index" --no-browser` running live.
 - Ensure all tests pass.
 - NO LINE NUMBERS ANYWHERE in synthesized response body or bottom sources.
-- NO RAW FILE HEADERS in response body (e.g. `### 📄 filename (Lines X–Y)`).
-- SOURCE ONLY + ACCURACY PERCENTAGE at bottom of response, deduplicated by filename.
-- Filter out ChatGPT export artifacts (`fileciteturn0file0`, `sandbox:/mnt/data/`).
+- NO RAW FILE HEADERS in response body.
+- Disambiguate citations and deduplication by `(source_peer, file_name)`.
+- Configurable `max_peer_responses` must be implemented end-to-end across backend, CLI, UI, and tests.
 
 ## Current Parent
-- Conversation ID: 101ef7c9-61ac-41fd-9da5-cd78a4c078fc
-- Updated: 2026-11-02T14:36:03Z
+- Conversation ID: 997d69e1-7a0a-4ce5-9141-49b9f3d09432
+- Updated: 2026-11-03T13:06:41Z
 
 ## Key Decisions Made
-- Milestone M11 Gated PASS: All 5 verification agents approved / reported CLEAN.
-- Advanced to Milestone M13: Dispatched 3 parallel Explorers for OshoosiClaw TPM & Mesh UI adaptation.
+- Milestone M15 passed all gate checks (Worker, 2 Reviewers, 2 Challengers, Forensic Auditor CLEAN).
+- worker_m16_continuation completed implementation and 5 unit tests in m16_continuation_dedup_tests pass.
+- Dispatched 5 verification agents for Milestone M16 gate: reviewer_m16_1, reviewer_m16_2, challenger_m16_1, challenger_m16_2, auditor_m16_1.
 
 ## Team Roster
 | Agent | Type | Work Item | Status | Conv ID |
 |-------|------|-----------|--------|---------|
-| explorer_survey_adapt_1 | teamwork_explorer | LangExtract & Question-Restating LLM Survey | completed | 6bb298a9-1656-4e41-9f1d-725476d14040 |
-| explorer_survey_adapt_2 | teamwork_explorer | WebUI Chat Box & Clean Interface Survey | completed | 0d5a63e2-64cc-4f8f-8ba4-b6412bdfb99e |
-| explorer_survey_adapt_3 | teamwork_explorer | OshoosiClaw Mesh UI & TPM Survey | completed | bf454e13-9a2d-4a52-a29d-c296e6ad3002 |
-| explorer_m11_1 | teamwork_explorer | LangExtract Candidate Extraction Explorer | completed | a28b3a8b-7efd-4340-9ed0-ca54fc657e3e |
-| explorer_m11_2 | teamwork_explorer | State Graph Retrieval Explorer | completed | 0fad71eb-22c1-4e83-8c89-103f28b114a7 |
-| explorer_m11_3 | teamwork_explorer | Question Restating Synthesis Explorer | completed | 93a8ef70-b65a-4e4a-bc20-9ba86fa2ac21 |
-| worker_m11_1 | teamwork_worker | M11 Coordinator Implementation Worker | completed | dd83bedf-6f30-455d-94c4-788e93e73fd5 |
-| reviewer_m11_1 | teamwork_reviewer | LangExtract & Types Reviewer | completed | 20ff584e-c36e-4fe3-9c87-ea367693f02c |
-| reviewer_m11_2 | teamwork_reviewer | Question Synthesis & Retrieval Reviewer | completed | 6060632f-25a0-471a-9d06-818e6ae8fb3d |
-| challenger_m11_1 | teamwork_challenger | LangExtract Stress Challenger | completed | 9f02d2be-ff6e-4645-9ce3-1b42f1fdfc42 |
-| challenger_m11_2 | teamwork_challenger | Question Synthesis Challenger | completed | 9042af13-15a8-436c-8275-7b833e436b12 |
-| auditor_m11_1 | teamwork_auditor | Forensic Integrity Auditor | completed | ae236d7c-36ce-432b-888a-c5d2ad95c750 |
-| worker_m12_1 | teamwork_worker | M12 WebUI & Daemon Implementation Worker | completed | a5161e45-c2dd-43ed-89d6-62e6372ee850 |
-| reviewer_m12_1 | teamwork_reviewer | WebUI & Clean Interface Reviewer | completed | f34b2435-33b7-4e88-bcc4-94dfa40ec5c9 |
-| reviewer_m12_2 | teamwork_reviewer | Daemon server.rs & Endpoint Reviewer | completed | f2964d62-4d77-43f3-8c7a-b2357a27cab0 |
-| challenger_m12_1 | teamwork_challenger | UI Assets & Citation Adversarial Challenger | completed | 3bfbc3f2-aada-4b41-a959-cbd536d8c40a |
-| challenger_m12_2 | teamwork_challenger | Daemon ChatRequest & Endpoint Challenger | completed | dc3a5d7c-3e27-4749-8d6b-470f2fa236c4 |
-| auditor_m12_1 | teamwork_auditor | Forensic Integrity Auditor | completed | 0d80c15c-d200-4143-b7b7-696136aa2479 |
-| worker_m12_remediation_1 | teamwork_worker | Storage & WebUI Remediation Worker | completed | 03901575-41a5-4d88-aa7d-d9f3c4390fed |
-| challenger_m12_remediation_1 | teamwork_challenger | WebUI & Citation Challenger Remediation | completed | e3ea6eb6-1827-4f2e-b889-bd4290754c34 |
-| auditor_m12_remediation_1 | teamwork_auditor | Forensic Integrity Auditor Remediation | completed | fc424aea-02c9-4880-8f4f-ad76e377548b |
-| explorer_m13_1 | teamwork_explorer | OshoosiClaw TPM Adaptation Explorer | completed | 99f0792d-55b7-4fc0-bb65-523e1ad026bb |
-| explorer_m13_2 | teamwork_explorer | Daemon Mesh Endpoints Explorer | completed | 8524a9d5-69a8-441e-acd9-d05781322c6b |
-| explorer_m13_3 | teamwork_explorer | Mesh UI & Settings Explorer | completed | bfdd5723-e273-4a76-aa9b-d8e9867d7313 |
-| worker_m13_1 | teamwork_worker | Coordinator TPM & Mesh Worker | completed | 555236b8-7a4a-4137-a06b-2d8f3dedc77f |
-| reviewer_m13_1 | teamwork_reviewer | TPM Hardware Identity & ACL Reviewer | in-progress | 5f04b3d2-c6ac-4b40-b503-adf14521d29c |
-| reviewer_m13_2 | teamwork_reviewer | Daemon Mesh Endpoints & UI Reviewer | in-progress | 3498b1ca-cf1f-4064-9fd3-5c76d23de138 |
-| challenger_m13_1 | teamwork_challenger | TPM & Attestation Stress Challenger | in-progress | 469cc52a-843a-490d-b393-d910bf2823b2 |
-| challenger_m13_2 | teamwork_challenger | Daemon Mesh Endpoints Challenger | in-progress | d0f3dbad-b8ff-45b8-a078-396526a9aa54 |
-| auditor_m13_1 | teamwork_auditor | Forensic Integrity Auditor | completed | a55797f0-1751-4f7b-834a-9bccae3de6ad |
-| explorer_m13_remediation_1 | teamwork_explorer | TPM & Audit Remediation Explorer | failed | d381b7f3-12b2-46f6-b9fc-63a7df5ff733 |
-| explorer_m13_remediation_2 | teamwork_explorer | TPM & Audit Remediation Explorer 2 | completed | 454e3b22-ac4e-43e6-af8c-4f71cdde06a1 |
-| worker_m13_remediation_1 | teamwork_worker | Remediation Worker M13 | completed | 9b037bf2-b370-4f97-a767-41bec2cf9db0 |
-| reviewer_m13_rem_1 | teamwork_reviewer | TPM Concurrency & EK DER Reviewer | completed (APPROVE) | d483968e-de8a-4729-ab36-19916c536a12 |
-| reviewer_m13_rem_2 | teamwork_reviewer | Mesh Join Attestation & WebUI Reviewer | completed (APPROVE) | 30c40a91-2624-45e0-8b25-6e1fac54edce |
-| challenger_m13_rem_1 | teamwork_challenger | TPM & PCR Concurrency Challenger | completed (APPROVE) | 5e13d341-7387-4fe4-add7-59d71210e023 |
-| challenger_m13_rem_2 | teamwork_challenger | Mesh Daemon & UI Action Challenger | completed (APPROVE) | 4f5bdffa-62d7-4d66-a94b-056c3260c143 |
-| auditor_m13_rem_1 | teamwork_auditor | Forensic Integrity Auditor Remediation | completed (CLEAN) | 080ef602-cc5c-403d-9391-4e5b8d310819 |
-| worker_m14_1 | teamwork_worker | Final Verification & Live Daemon Solo Ship Worker | completed (DONE) | dd0251a5-7ba5-4b87-9939-9173a872dcbd |
+| explorer_survey_r1_p2p | teamwork_explorer | R1 P2P Mesh Gaps & Configurable Max Peer Responses Survey | completed | f3eaae8a-a3e4-48f3-8974-e931de20e3e6 |
+| explorer_survey_r2_continuation | teamwork_explorer | R2 Multi-Turn Continuation Deduplication & State Graph Pipeline Survey | completed | 9b98985a-c8e2-4e67-ac43-6d4cc2789340 |
+| explorer_survey_r3_verification | teamwork_explorer | R3 Verification, Live Daemon & Shipping Survey | completed | e13777e8-327f-4cd5-b073-197086ac2eb3 |
+| worker_m15_p2p | teamwork_worker | Milestone M15 Implementation: P2P Mesh Gaps & Configurable Max Peer Responses | completed | 48ee8969-7f70-4085-9aca-804c506e91e8 |
+| reviewer_m15_1 | teamwork_reviewer | Milestone M15 Review: Correctness & Interface Conformance | completed | 70405a13-8c09-4ecd-a5e2-407283ad7481 |
+| reviewer_m15_2 | teamwork_reviewer | Milestone M15 Review: Robustness, Error Handling & Regressions | completed | 6663f1c0-a438-468a-bcb0-fd927e342844 |
+| challenger_m15_1 | teamwork_challenger | Milestone M15 Challenge: Node Identity Persistence & Contract Differentiation | completed | 7ac07d07-48f7-49a3-aa38-d596bdd34931 |
+| challenger_m15_2 | teamwork_challenger | Milestone M15 Challenge: max_peer_responses & Peer Disambiguation | completed | fec07e09-01bc-456f-a349-1303237199ed |
+| auditor_m15_1 | teamwork_auditor | Milestone M15 Forensic Integrity Audit | completed | b0e7a677-2ec3-4ef8-8b97-f45aa53353e9 |
+| worker_m16_continuation | teamwork_worker | Milestone M16 Implementation: Multi-Turn Continuation Deduplication & State Graph Pipeline | completed | 156bed5c-bc34-46bb-8ca0-6d3471cd4c6b |
+| reviewer_m16_1 | teamwork_reviewer | Milestone M16 Review: Correctness & Interface Conformance | in-progress | f6e650e4-6ad8-406c-978a-3673f27570b1 |
+| reviewer_m16_2 | teamwork_reviewer | Milestone M16 Review: Robustness, Error Handling & Semantic Dedup | in-progress | d1243775-44de-40f7-b072-6bea39a3d063 |
+| challenger_m16_1 | teamwork_challenger | Milestone M16 Challenge: Session Seen Chunks, Negative Filtering & MMR | in-progress | 294bbd2d-a088-42fa-9247-360eed86e4d2 |
+| challenger_m16_2 | teamwork_challenger | Milestone M16 Challenge: Facet Rewriting, Cosine Dedup & Consolidation | in-progress | 46d734d6-ed4b-48d9-a7b6-f5e9becb0069 |
+| auditor_m16_1 | teamwork_auditor | Milestone M16 Forensic Integrity Audit | in-progress | e8896926-e6d1-4760-a7d3-ae6e64c3e0ed |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 39 / 128
-- Pending subagents: none
+- Spawn count: 57 / 128
+- Pending subagents: f6e650e4-6ad8-406c-978a-3673f27570b1, d1243775-44de-40f7-b072-6bea39a3d063, 294bbd2d-a088-42fa-9247-360eed86e4d2, 46d734d6-ed4b-48d9-a7b6-f5e9becb0069, e8896926-e6d1-4760-a7d3-ae6e64c3e0ed
 - Predecessor: none
 - Successor: none
 
 ## Active Timers
-- Heartbeat cron: none (all subagents completed, cron cancelled)
-- Safety timer: none
+- Heartbeat cron: a004ba72-59c1-4c2c-8399-d2a932e85b03/task-62
+- Safety timer: a004ba72-59c1-4c2c-8399-d2a932e85b03/task-701
 
 ## Artifact Index
 - d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md — Authoritative record of user requests
+- d:\harfile\QuorumRAG\PROJECT.md — Global architecture, feature inventory & milestones
 - d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md — Milestone decomposition & feature inventory
-- d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\GATE_STATUS.md — Gate verdicts (M11 PASS, M12 PASS)
+- d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\GATE_STATUS.md — Gate verdicts
 - d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\BRIEFING.md — Persistent working memory
 - d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\progress.md — Progress & liveness tracking
-- d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\handoff.md — M11 worker handoff report

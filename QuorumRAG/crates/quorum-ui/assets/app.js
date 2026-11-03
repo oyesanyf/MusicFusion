@@ -27,6 +27,8 @@
   let isGenerating = false;
   let reindexPollInterval = null;
   let conversationHistoryTurns = [];
+  let activeSessionId = 's-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+  const activeSessionSeenChunkIds = new Set();
 
   // DOM Elements
   const themeSelector = document.getElementById('theme-selector');
@@ -190,6 +192,8 @@
 
   // 5. NEW CHAT
   btnNewChat.addEventListener('click', () => {
+    activeSessionId = 's-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    activeSessionSeenChunkIds.clear();
     conversationHistoryTurns = [];
     chatStream.innerHTML = '';
     if (welcomeBanner) {
@@ -371,6 +375,8 @@
             },
             body: JSON.stringify({
               query_id: activeQueryId,
+              session_id: activeSessionId,
+              seen_chunk_ids: Array.from(activeSessionSeenChunkIds),
               prompt: text,
               search_mode: currentSearchMode,
               model_family: currentModel,
@@ -753,6 +759,9 @@
     } else if (type === 'CitationEmitted' || type === 'citation') {
       const cit = data.citation || event.citation;
       if (cit) {
+        if (cit.chunk_id) {
+          activeSessionSeenChunkIds.add(String(cit.chunk_id));
+        }
         if (!citationsEl._pendingCitations) {
           citationsEl._pendingCitations = [];
         }
@@ -1155,6 +1164,8 @@
         assistantMsg.remove();
       }
       if (chatStream && chatStream.children.length === 0) {
+        activeSessionId = 's-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+        activeSessionSeenChunkIds.clear();
         if (welcomeBanner) {
           welcomeBanner.classList.remove('hidden');
           welcomeBanner.style.display = '';

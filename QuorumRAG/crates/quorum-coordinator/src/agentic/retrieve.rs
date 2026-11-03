@@ -38,7 +38,7 @@ pub const GENERIC_ATTRIBUTE_TERMS: &[&str] = &[
     "important", "importance", "result", "results", "respond", "responds", "response",
 ];
 
-const STOPWORDS: &[&str] = &[
+pub const STOPWORDS: &[&str] = &[
     "what", "does", "do", "did", "where", "when", "who", "how", "why",
     "is", "are", "was", "were", "the", "and", "for", "with", "from",
     "into", "about", "using", "have", "has", "had", "will", "would",
@@ -57,7 +57,7 @@ const STOPWORDS: &[&str] = &[
     "uses", "used", "which", "whose", "whom", "its", "our", "your", "my", "me", "one", "ones",
     "not", "than", "then", "very", "just", "only", "each", "every", "both", "either", "other",
     "others", "own", "same", "such", "been", "being", "off", "out", "over", "under", "again",
-    "here", "now", "still", "yet", "ever", "even",
+    "here", "now", "still", "yet", "ever", "even", "continue", "continued", "elaborate",
 ];
 
 pub struct RetrieveMeshNode;
@@ -133,17 +133,19 @@ impl RetrieveMeshNode {
             vector
         };
 
-        tracing::info!(query = %search_query, "Calling execute_query_with_cached_vector");
+        let exclude_chunk_ids: Vec<String> = state.seen_chunk_ids.iter().cloned().collect();
+        tracing::info!(query = %search_query, exclude_count = exclude_chunk_ids.len(), "Calling execute_query_with_cached_vector_and_exclusion");
         let (mut chunks, volatile, _duration, new_vector_hits) = engine
-            .execute_query_with_cached_vector(
+            .execute_query_with_cached_vector_and_exclusion(
                 &search_query,
                 effective_vector,
                 cached_hits_opt,
                 access_tier,
                 candidate_k,
+                &exclude_chunk_ids,
             )
             .await;
-        tracing::info!(chunks = chunks.len(), volatile = volatile.len(), "Finished execute_query_with_cached_vector");
+        tracing::info!(chunks = chunks.len(), volatile = volatile.len(), "Finished execute_query_with_cached_vector_and_exclusion");
 
         if !new_vector_hits.is_empty() && state.cached_vector_hits.is_empty() {
             state.cached_vector_hits = new_vector_hits;
@@ -157,10 +159,31 @@ impl RetrieveMeshNode {
             .map(|p| p.is_some())
             .unwrap_or(false);
 
+        let orig_low = state.original_prompt.to_ascii_lowercase();
+        let is_continuation_turn =
+            crate::offline_engine::DeterministicOfflineSynthesisEngine::is_continuation_query(&orig_low);
+        let base_subject_prompt: String = if is_continuation_turn {
+            state
+                .conversation_history
+                .iter()
+                .rev()
+                .find(|t| {
+                    t.role.eq_ignore_ascii_case("user")
+                        && !crate::offline_engine::DeterministicOfflineSynthesisEngine::is_continuation_query(
+                            &t.content.to_ascii_lowercase(),
+                        )
+                })
+                .map(|t| t.content.clone())
+                .unwrap_or_else(|| state.current_query.clone())
+        } else {
+            state.current_query.clone()
+        };
+        let subject_low = base_subject_prompt.to_ascii_lowercase();
+
         // Supplement candidate pool with direct entity-term keyword hits so large corpora
         // never drown out specific entity documents (e.g. "Femi_Oyesanya_CV_2026.pdf") when generic
         // education/profile expansion terms ("school", "university", "experience") are present.
-        let mut prelim_entities: Vec<String> = q_low
+        let mut prelim_entities: Vec<String> = subject_low
             .split(|c: char| !c.is_alphanumeric() && c != '_')
             .filter(|w| {
                 w.len() >= 3
@@ -178,26 +201,33 @@ impl RetrieveMeshNode {
             }
         }
 
-        let orig_low = state.original_prompt.to_ascii_lowercase();
-        let prompt_only_entities: Vec<String> = orig_low
-            .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .filter(|w| {
-                w.len() >= 3
-                    && !STOPWORDS.contains(w)
-                    && !GENERIC_ATTRIBUTE_TERMS.contains(w)
-            })
-            .fold(Vec::new(), |mut acc, w| {
-                let s = w.to_string();
-                if !acc.contains(&s) {
-                    acc.push(s);
-                }
-                acc
-            });
+        let prompt_only_entities: Vec<String> = if is_continuation_turn {
+            Vec::new()
+        } else {
+            orig_low
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .filter(|w| {
+                    w.len() >= 3
+                        && !STOPWORDS.contains(w)
+                        && !GENERIC_ATTRIBUTE_TERMS.contains(w)
+                })
+                .fold(Vec::new(), |mut acc, w| {
+                    let s = w.to_string();
+                    if !acc.contains(&s) {
+                        acc.push(s);
+                    }
+                    acc
+                })
+        };
 
         // Proper-noun anchors: words the user capitalised mid-sentence ("how much rent does Casey Ringgold pay").
         // When present, a chunk must contain them, so generic words ("rent", "pay") can never outvote the named subject.
-        let proper_terms: Vec<String> = state
-            .original_prompt
+        let proper_source = if is_continuation_turn {
+            base_subject_prompt.as_str()
+        } else {
+            state.original_prompt.as_str()
+        };
+        let proper_terms: Vec<String> = proper_source
             .split_whitespace()
             .enumerate()
             .filter_map(|(i, raw)| {
@@ -360,11 +390,28 @@ impl RetrieveMeshNode {
                 acc
             });
 
-        let mut entity_terms: Vec<String> = query_terms
-            .iter()
-            .filter(|t| !GENERIC_ATTRIBUTE_TERMS.contains(&t.as_str()))
-            .cloned()
-            .collect();
+        let mut entity_terms: Vec<String> = if is_continuation_turn {
+            subject_low
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .filter(|w| {
+                    w.len() >= 3
+                        && !STOPWORDS.contains(w)
+                        && !GENERIC_ATTRIBUTE_TERMS.contains(w)
+                })
+                .fold(Vec::new(), |mut acc, w| {
+                    let s = w.to_string();
+                    if !acc.contains(&s) {
+                        acc.push(s);
+                    }
+                    acc
+                })
+        } else {
+            query_terms
+                .iter()
+                .filter(|t| !GENERIC_ATTRIBUTE_TERMS.contains(&t.as_str()))
+                .cloned()
+                .collect()
+        };
 
         // Extract document targets from LangExtract verified entities
         let doc_targets: Vec<String> = state
@@ -625,7 +672,9 @@ impl RetrieveMeshNode {
                 } else {
                     0
                 };
-                let required_query_hits = if query_terms.len() >= 2 {
+                let required_query_hits = if is_continuation_turn {
+                    required_entity_hits.max(1)
+                } else if query_terms.len() >= 2 {
                     ((query_terms.len() + 1) / 2).max(2).min(query_terms.len())
                 } else {
                     1
@@ -709,6 +758,10 @@ impl RetrieveMeshNode {
             chunks = paired.into_iter().map(|(c, _)| c).collect();
         }
 
+        if !state.seen_chunk_ids.is_empty() {
+            chunks.retain(|c| !state.seen_chunk_ids.contains(&c.chunk.chunk_id));
+        }
+
         let ui = crate::dlp_mesh::global_mesh_dlp_controller()
             .settings
             .read()
@@ -719,8 +772,106 @@ impl RetrieveMeshNode {
             chunks = crate::offline_engine::DeterministicOfflineSynthesisEngine::stitch_parent_document_chunks(chunks);
         }
 
+        // Apply Maximal Marginal Relevance (MMR) candidate diversity selection (default lambda = 0.70)
+        chunks = apply_mmr_selection(chunks, effective_vector, top_k, 0.70);
+
         chunks.truncate(top_k);
         state.retrieved_chunks = chunks;
         state.volatile_chunks = volatile;
     }
+}
+
+/// Maximal Marginal Relevance (MMR) selection algorithm to penalize redundant candidate chunks
+/// and maximize topical coverage diversity across the candidate pool.
+pub fn apply_mmr_selection(
+    candidates: Vec<ScoredChunk>,
+    _query_vector: &[f32],
+    top_k: usize,
+    lambda: f32, // default 0.70
+) -> Vec<ScoredChunk> {
+    if candidates.len() <= top_k {
+        return candidates;
+    }
+
+    let cosine_sim = |a: &[f32], b: &[f32]| -> f32 {
+        if a.len() != b.len() || a.is_empty() {
+            return 0.0;
+        }
+        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm_a == 0.0 || norm_b == 0.0 {
+            0.0
+        } else {
+            (dot / (norm_a * norm_b)).clamp(-1.0, 1.0)
+        }
+    };
+
+    let embedder = quorum_contract::DeterministicOfflineEngine::new();
+    let candidate_vectors: Vec<Vec<f32>> = candidates
+        .iter()
+        .map(|c| {
+            if !c.chunk.vector.is_empty() {
+                c.chunk.vector.clone()
+            } else {
+                embedder.embed_text(&c.chunk.text_content).unwrap_or_default()
+            }
+        })
+        .collect();
+
+    let max_score = candidates.iter().map(|c| c.score).fold(0.001f32, f32::max);
+    let mut remaining_indices: Vec<usize> = (0..candidates.len()).collect();
+    let mut selected_indices: Vec<usize> = Vec::with_capacity(top_k);
+
+    // Seed selected with the highest relevance candidate
+    let first_pos = remaining_indices
+        .iter()
+        .enumerate()
+        .max_by(|(_, &a), (_, &b)| {
+            candidates[a]
+                .score
+                .partial_cmp(&candidates[b].score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(pos, _)| pos)
+        .unwrap_or(0);
+
+    selected_indices.push(remaining_indices.remove(first_pos));
+
+    while selected_indices.len() < top_k && !remaining_indices.is_empty() {
+        let mut best_pos = 0;
+        let mut best_mmr = f32::NEG_INFINITY;
+
+        for (pos, &cand_idx) in remaining_indices.iter().enumerate() {
+            let cand_score = candidates[cand_idx].score;
+            let norm_rel = cand_score / max_score;
+            let cand_vec = &candidate_vectors[cand_idx];
+
+            let max_sim_to_selected = selected_indices
+                .iter()
+                .map(|&sel_idx| {
+                    let sel_vec = &candidate_vectors[sel_idx];
+                    cosine_sim(cand_vec, sel_vec)
+                })
+                .fold(0.0f32, f32::max);
+
+            let mmr_score = lambda * norm_rel - (1.0 - lambda) * max_sim_to_selected;
+            if mmr_score > best_mmr {
+                best_mmr = mmr_score;
+                best_pos = pos;
+            }
+        }
+
+        selected_indices.push(remaining_indices.remove(best_pos));
+    }
+
+    let mut selected_chunks = Vec::with_capacity(selected_indices.len());
+    let mut cand_opt: Vec<Option<ScoredChunk>> = candidates.into_iter().map(Some).collect();
+    for idx in selected_indices {
+        if let Some(chunk) = cand_opt[idx].take() {
+            selected_chunks.push(chunk);
+        }
+    }
+
+    selected_chunks
 }

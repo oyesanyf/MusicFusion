@@ -39,6 +39,13 @@ pub struct ChatRequest {
     /// Optional client query ID for in-flight cancellation tracking.
     pub query_id: Option<String>,
 
+    /// Optional session identifier for multi-turn continuation deduplication state tracking.
+    pub session_id: Option<String>,
+
+    /// Previously served chunk IDs from this chat session (negative filter).
+    #[serde(default)]
+    pub seen_chunk_ids: Vec<String>,
+
     /// Optional flag to bypass query cache (e.g. when Regenerate is clicked).
     #[serde(default)]
     pub bypass_cache: bool,
@@ -116,6 +123,17 @@ pub async fn chat_sse_handler(
     let task_token = in_flight_entry.token.clone();
     let task_tx = tx.clone();
 
+    let session_id = payload
+        .session_id
+        .clone()
+        .unwrap_or_else(|| format!("s-{}", uuid::Uuid::new_v4()));
+    let mut session_seen = state.sessions.get_seen_chunks(&session_id);
+    for id in payload.seen_chunk_ids {
+        session_seen.insert(id);
+    }
+    let sessions_registry = state.sessions.clone();
+    let session_id_task = session_id.clone();
+
     let join_handle = tokio::spawn(async move {
         let _guard = in_flight_guard;
         if prompt.is_empty() {
@@ -134,10 +152,16 @@ pub async fn chat_sse_handler(
         }
 
         match coordinator
-            .query_agentic_with_history(&prompt, history, family, top_k, Some(task_tx.clone()))
+            .query_agentic_with_history_and_session(&prompt, history, family, top_k, session_seen, Some(task_tx.clone()))
             .await
         {
             Ok(_result) => {
+                let newly_seen: Vec<String> = _result
+                    .chunks
+                    .iter()
+                    .map(|c| c.chunk.chunk_id.clone())
+                    .collect();
+                sessions_registry.record_seen_chunks(&session_id_task, &newly_seen);
                 // TokenDelta events and trailing CitationEmitted + ExecutionFinished events
                 // have already been streamed in real time by AgenticStateGraphRunner.
             }
@@ -192,12 +216,29 @@ pub async fn query_handler(
         _ => state.default_model_family,
     };
 
+    let session_id = payload
+        .session_id
+        .clone()
+        .unwrap_or_else(|| format!("s-{}", uuid::Uuid::new_v4()));
+    let mut session_seen = state.sessions.get_seen_chunks(&session_id);
+    for id in payload.seen_chunk_ids {
+        session_seen.insert(id);
+    }
+
     match state
         .coordinator
-        .query_agentic_with_history(prompt, payload.history, family, top_k, None)
+        .query_agentic_with_history_and_session(prompt, payload.history, family, top_k, session_seen, None)
         .await
     {
-        Ok(result) => Json(result).into_response(),
+        Ok(result) => {
+            let newly_seen: Vec<String> = result
+                .chunks
+                .iter()
+                .map(|c| c.chunk.chunk_id.clone())
+                .collect();
+            state.sessions.record_seen_chunks(&session_id, &newly_seen);
+            Json(result).into_response()
+        }
         Err(e) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),

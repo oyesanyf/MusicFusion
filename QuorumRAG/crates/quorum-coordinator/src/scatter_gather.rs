@@ -23,6 +23,17 @@ pub trait StorageSearcher: Send + Sync {
         top_k: usize,
     ) -> Vec<ScoredChunk>;
 
+    async fn search_hybrid_with_exclusion(
+        &self,
+        query_text: &str,
+        query_vec: &[f32],
+        max_tier: u8,
+        top_k: usize,
+        _exclude_chunk_ids: &[String],
+    ) -> Vec<ScoredChunk> {
+        self.search_hybrid(query_text, query_vec, max_tier, top_k).await
+    }
+
     async fn search_vector(
         &self,
         _vector: &[f32],
@@ -56,6 +67,19 @@ impl StorageSearcher for quorum_storage::StorageEngine {
         top_k: usize,
     ) -> Vec<ScoredChunk> {
         self.search_hybrid(query_text, query_vec, max_tier, top_k)
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn search_hybrid_with_exclusion(
+        &self,
+        query_text: &str,
+        query_vec: &[f32],
+        max_tier: u8,
+        top_k: usize,
+        exclude_chunk_ids: &[String],
+    ) -> Vec<ScoredChunk> {
+        self.search_hybrid_with_exclusion(query_text, query_vec, max_tier, top_k, exclude_chunk_ids)
             .await
             .unwrap_or_default()
     }
@@ -98,6 +122,19 @@ impl<T: StorageSearcher + ?Sized> StorageSearcher for Arc<T> {
     ) -> Vec<ScoredChunk> {
         (**self)
             .search_hybrid(query_text, query_vec, max_tier, top_k)
+            .await
+    }
+
+    async fn search_hybrid_with_exclusion(
+        &self,
+        query_text: &str,
+        query_vec: &[f32],
+        max_tier: u8,
+        top_k: usize,
+        exclude_chunk_ids: &[String],
+    ) -> Vec<ScoredChunk> {
+        (**self)
+            .search_hybrid_with_exclusion(query_text, query_vec, max_tier, top_k, exclude_chunk_ids)
             .await
     }
 
@@ -163,8 +200,31 @@ impl ScatterGatherEngine {
         access_tier: u8,
         top_k: usize,
     ) -> (Vec<ScoredChunk>, Vec<VolatileRemoteChunk>, u64, Vec<ScoredChunk>) {
+        self.execute_query_with_cached_vector_and_exclusion(
+            query_text,
+            query_vec,
+            cached_vector,
+            access_tier,
+            top_k,
+            &[],
+        )
+        .await
+    }
+
+    /// Dispatches parallel queries across local storage and remote peers with negative chunk exclusion filtering.
+    pub async fn execute_query_with_cached_vector_and_exclusion(
+        &self,
+        query_text: &str,
+        query_vec: &[f32],
+        cached_vector: Option<&[ScoredChunk]>,
+        access_tier: u8,
+        top_k: usize,
+        exclude_chunk_ids: &[String],
+    ) -> (Vec<ScoredChunk>, Vec<VolatileRemoteChunk>, u64, Vec<ScoredChunk>) {
         let start = tokio::time::Instant::now();
         let candidate_limit = top_k * self.config.candidate_multiplier;
+        let exclude_set: std::collections::HashSet<&str> =
+            exclude_chunk_ids.iter().map(|s| s.as_str()).collect();
 
         // 1. Fast Local Search: Reuse cached vector hits if available, avoiding redundant LanceDB scans
         let (local_results, new_cached_vector) = if let Some(cached) = cached_vector {
@@ -178,6 +238,9 @@ impl ScatterGatherEngine {
                     std::collections::HashMap::new();
 
                 for (i, scored) in cached.iter().enumerate() {
+                    if exclude_set.contains(scored.chunk.chunk_id.as_str()) {
+                        continue;
+                    }
                     let rrf = 1.0 / (60.0 + (i + 1) as f32);
                     let entry = rrf_map
                         .entry(scored.chunk.chunk_id.clone())
@@ -186,6 +249,9 @@ impl ScatterGatherEngine {
                 }
 
                 for (i, scored) in text_hits.into_iter().enumerate() {
+                    if exclude_set.contains(scored.chunk.chunk_id.as_str()) {
+                        continue;
+                    }
                     let rrf = 1.0 / (60.0 + (i + 1) as f32);
                     let entry = rrf_map
                         .entry(scored.chunk.chunk_id.clone())
@@ -204,17 +270,39 @@ impl ScatterGatherEngine {
                 });
                 (fused_local, cached.to_vec())
             } else {
-                let results = self
-                    .local_storage
-                    .search_hybrid(query_text, query_vec, access_tier, candidate_limit)
-                    .await;
+                let results = if exclude_chunk_ids.is_empty() {
+                    self.local_storage
+                        .search_hybrid(query_text, query_vec, access_tier, candidate_limit)
+                        .await
+                } else {
+                    self.local_storage
+                        .search_hybrid_with_exclusion(
+                            query_text,
+                            query_vec,
+                            access_tier,
+                            candidate_limit,
+                            exclude_chunk_ids,
+                        )
+                        .await
+                };
                 (results.clone(), results)
             }
         } else {
-            let results = self
-                .local_storage
-                .search_hybrid(query_text, query_vec, access_tier, candidate_limit)
-                .await;
+            let results = if exclude_chunk_ids.is_empty() {
+                self.local_storage
+                    .search_hybrid(query_text, query_vec, access_tier, candidate_limit)
+                    .await
+            } else {
+                self.local_storage
+                    .search_hybrid_with_exclusion(
+                        query_text,
+                        query_vec,
+                        access_tier,
+                        candidate_limit,
+                        exclude_chunk_ids,
+                    )
+                    .await
+            };
             (results.clone(), results)
         };
 
@@ -275,6 +363,9 @@ impl ScatterGatherEngine {
             }
             let mut clean_peer_chunks = Vec::new();
             for mut chunk in resp.chunks {
+                if exclude_set.contains(chunk.chunk_id.as_str()) {
+                    continue;
+                }
                 // Byzantine consensus hardening: validate line numbers and clamp remote access tier
                 if chunk.line_start > chunk.line_end {
                     tracing::warn!(
@@ -307,12 +398,15 @@ impl ScatterGatherEngine {
         }
 
         // 4. Reciprocal Rank Fusion preserving responder_peer_id
-        let fused = RrfCombiner::fuse_rankings_with_peers(
+        let mut fused = RrfCombiner::fuse_rankings_with_peers(
             local_results,
             remote_lists,
             self.config.rrf_k,
             top_k,
         );
+        if !exclude_set.is_empty() {
+            fused.retain(|c| !exclude_set.contains(c.chunk.chunk_id.as_str()));
+        }
 
         let duration_ms = start.elapsed().as_millis() as u64;
         (fused, volatile_chunks, duration_ms, new_cached_vector)

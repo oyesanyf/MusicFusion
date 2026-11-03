@@ -42,6 +42,9 @@ pub struct StorageSearchQuery {
     pub max_tier: u8,
     /// Maximum number of top candidate chunks to return.
     pub top_k: usize,
+    /// Optional chunk IDs to exclude (negative filter) from retrieval candidates.
+    #[serde(default)]
+    pub exclude_chunk_ids: Vec<String>,
 }
 
 impl StorageSearchQuery {
@@ -53,6 +56,7 @@ impl StorageSearchQuery {
             vector: Some(vector),
             max_tier,
             top_k,
+            exclude_chunk_ids: Vec::new(),
         }
     }
 
@@ -64,6 +68,7 @@ impl StorageSearchQuery {
             vector: None,
             max_tier,
             top_k,
+            exclude_chunk_ids: Vec::new(),
         }
     }
 
@@ -75,7 +80,14 @@ impl StorageSearchQuery {
             vector: Some(vector),
             max_tier,
             top_k,
+            exclude_chunk_ids: Vec::new(),
         }
+    }
+
+    /// Attaches an exclusion list of chunk IDs to skip during search.
+    pub fn with_exclusion(mut self, exclude: Vec<String>) -> Self {
+        self.exclude_chunk_ids = exclude;
+        self
     }
 }
 
@@ -297,19 +309,22 @@ impl StorageEngine {
         self.fts_index.search(query, max_tier, top_k)
     }
 
-    /// Hybrid search combining vector search and BM25 full-text search via Reciprocal Rank Fusion (RRF).
-    pub async fn search_hybrid(
+    /// Hybrid search combining vector search and BM25 full-text search with negative chunk exclusion filtering.
+    /// Skips chunks in `exclude_chunk_ids` while allowing unseen chunks from the same document.
+    pub async fn search_hybrid_with_exclusion(
         &self,
         text: &str,
         vector: &[f32],
         max_tier: u8,
         top_k: usize,
+        exclude_chunk_ids: &[String],
     ) -> Result<Vec<ScoredChunk>, StorageError> {
         if top_k == 0 {
             return Ok(Vec::new());
         }
 
-        let candidate_limit = top_k.saturating_mul(2).clamp(10, 128);
+        let exclude_set: HashSet<&str> = exclude_chunk_ids.iter().map(|s| s.as_str()).collect();
+        let candidate_limit = (top_k + exclude_chunk_ids.len()).saturating_mul(2).clamp(16, 256);
         let text_hits = self.search_text(text, max_tier, candidate_limit).await?;
         let vector_hits = self
             .search_vector(vector, max_tier, candidate_limit)
@@ -318,10 +333,10 @@ impl StorageEngine {
 
         let mut rrf_map: HashMap<String, (f32, DocumentChunk)> = HashMap::new();
 
-        // Only include vector hits that have positive cosine similarity
+        // Only include vector hits that have positive cosine similarity and are not excluded
         let relevant_vector_hits: Vec<ScoredChunk> = vector_hits
             .into_iter()
-            .filter(|s| s.score > 0.0)
+            .filter(|s| s.score > 0.0 && !exclude_set.contains(s.chunk.chunk_id.as_str()))
             .collect();
 
         let mut current_rank = 1;
@@ -336,10 +351,10 @@ impl StorageEngine {
             entry.0 += rrf;
         }
 
-        // Only include text hits with positive scores
+        // Only include text hits with positive scores and not excluded
         let relevant_text_hits: Vec<ScoredChunk> = text_hits
             .into_iter()
-            .filter(|s| s.score > 0.0)
+            .filter(|s| s.score > 0.0 && !exclude_set.contains(s.chunk.chunk_id.as_str()))
             .collect();
 
         let mut current_rank = 1;
@@ -370,6 +385,17 @@ impl StorageEngine {
         Ok(combined)
     }
 
+    /// Hybrid search combining vector search and BM25 full-text search via Reciprocal Rank Fusion (RRF).
+    pub async fn search_hybrid(
+        &self,
+        text: &str,
+        vector: &[f32],
+        max_tier: u8,
+        top_k: usize,
+    ) -> Result<Vec<ScoredChunk>, StorageError> {
+        self.search_hybrid_with_exclusion(text, vector, max_tier, top_k, &[]).await
+    }
+
     /// Unified search dispatcher switching on `SearchMode`.
     pub async fn search(&self, query: &StorageSearchQuery) -> Result<Vec<ScoredChunk>, StorageError> {
         match query.mode {
@@ -377,19 +403,35 @@ impl StorageEngine {
                 let vec = query.vector.as_deref().ok_or_else(|| {
                     StorageError::InvalidQuery("Vector search mode requires query.vector".into())
                 })?;
-                self.search_vector(vec, query.max_tier, query.top_k).await
+                let mut hits = self.search_vector(vec, query.max_tier, query.top_k + query.exclude_chunk_ids.len()).await?;
+                if !query.exclude_chunk_ids.is_empty() {
+                    let exclude_set: HashSet<&str> = query.exclude_chunk_ids.iter().map(|s| s.as_str()).collect();
+                    hits.retain(|h| !exclude_set.contains(h.chunk.chunk_id.as_str()));
+                    hits.truncate(query.top_k);
+                }
+                Ok(hits)
             }
             SearchMode::Keyword => {
                 let text = query.text.as_deref().ok_or_else(|| {
                     StorageError::InvalidQuery("Keyword search mode requires query.text".into())
                 })?;
-                self.search_text(text, query.max_tier, query.top_k).await
+                let mut hits = self.search_text(text, query.max_tier, query.top_k + query.exclude_chunk_ids.len()).await?;
+                if !query.exclude_chunk_ids.is_empty() {
+                    let exclude_set: HashSet<&str> = query.exclude_chunk_ids.iter().map(|s| s.as_str()).collect();
+                    hits.retain(|h| !exclude_set.contains(h.chunk.chunk_id.as_str()));
+                    hits.truncate(query.top_k);
+                }
+                Ok(hits)
             }
             SearchMode::Hybrid => {
                 let text = query.text.as_deref().unwrap_or("");
                 let empty_vec = vec![0.0; self.config.vector_dimension];
                 let vec = query.vector.as_deref().unwrap_or(&empty_vec);
-                self.search_hybrid(text, vec, query.max_tier, query.top_k).await
+                if query.exclude_chunk_ids.is_empty() {
+                    self.search_hybrid(text, vec, query.max_tier, query.top_k).await
+                } else {
+                    self.search_hybrid_with_exclusion(text, vec, query.max_tier, query.top_k, &query.exclude_chunk_ids).await
+                }
             }
         }
     }
