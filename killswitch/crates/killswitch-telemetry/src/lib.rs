@@ -18,6 +18,7 @@ pub mod correlator;
 pub mod distributed_consensus;
 pub mod edr_behavioral;
 pub mod honeytokens;
+pub mod jcs;
 pub mod octopus;
 pub mod oso_aws_containment;
 pub mod otel_lineage;
@@ -51,6 +52,7 @@ pub use cage_governance::{
     CTRL_STPA_UCA2, CTRL_STPA_UCA3, CTRL_STPA_UCA4, CTRL_WARRANT_INVALID, CTRL_WARRANT_REQUIRED,
     FISCAL_CAP_EXCEEDED,
 };
+pub use jcs::{canonicalize_jcs, canonicalize_jcs_string, JcsError};
 pub use canary::{CanaryAuditReport, CanaryDecoyFile, CanaryManager};
 pub use causal::{CausalEdge, CausalEdgeKind, CausalNodeType, CausalSecurityGraph};
 pub use continuous_defense::{

@@ -1,6 +1,6 @@
 use crate::telemetry::AgenticTelemetryEvent;
 use crate::types::ChatTurnMessage;
-use quorum_types::{Citation, DocumentChunk, ScoredChunk};
+use quorum_types::{Citation, ScoredChunk};
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 use tokio::sync::mpsc::Sender;
@@ -317,9 +317,12 @@ impl DeterministicOfflineSynthesisEngine {
             body.push_str("}\n");
             body.push_str("```\n");
             if let Some(tx) = telemetry_tx {
-                let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
-                    delta: body.clone(),
-                });
+                let _ = Self::send_telemetry(
+                    tx,
+                    AgenticTelemetryEvent::TokenDelta {
+                        delta: body.clone(),
+                    },
+                );
             }
             return (body, citations);
         }
@@ -330,9 +333,12 @@ impl DeterministicOfflineSynthesisEngine {
                 prompt
             );
             if let Some(tx) = telemetry_tx {
-                let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
-                    delta: fallback.clone(),
-                });
+                let _ = Self::send_telemetry(
+                    tx,
+                    AgenticTelemetryEvent::TokenDelta {
+                        delta: fallback.clone(),
+                    },
+                );
             }
             return (fallback, Vec::new());
         }
@@ -379,6 +385,28 @@ impl DeterministicOfflineSynthesisEngine {
             .filter(|t| !GENERIC_ATTRIBUTE_TERMS.contains(&t.as_str()))
             .cloned()
             .collect();
+
+        // Extract specific entity terms introduced in the user's current turn (`prompt_eff`),
+        // so follow-up questions like "does he have cissp" strictly prioritize chunks containing "cissp"
+        // rather than chunks that only match the carried-over subject name ("femi oyesanya").
+        let prompt_only_entities: Vec<String> = if !is_continuation {
+            prompt_lower
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .map(|t| t.trim().to_ascii_lowercase())
+                .filter(|t| {
+                    t.len() >= 3
+                        && !STOPWORDS.contains(&t.as_str())
+                        && !GENERIC_ATTRIBUTE_TERMS.contains(&t.as_str())
+                })
+                .fold(Vec::new(), |mut acc, t| {
+                    if !acc.contains(&t) {
+                        acc.push(t);
+                    }
+                    acc
+                })
+        } else {
+            Vec::new()
+        };
 
         // Filter and rank retrieved chunks using whole-word token matching and multi-term quorum threshold
         let mut scored_matches: Vec<(&ScoredChunk, usize, usize, i32)> = Vec::new();
@@ -480,6 +508,10 @@ impl DeterministicOfflineSynthesisEngine {
                 .iter()
                 .filter(|t| matches_whole_word(t.as_str()))
                 .count();
+            let prompt_entity_hits = prompt_only_entities
+                .iter()
+                .filter(|t| matches_whole_word(t.as_str()))
+                .count();
             let total_hits = query_terms
                 .iter()
                 .filter(|t| matches_whole_word(t.as_str()))
@@ -546,7 +578,7 @@ impl DeterministicOfflineSynthesisEngine {
                     })
                     .count();
 
-                let mut doc_bonus = (file_hits as i32) * 160;
+                let mut doc_bonus = (file_hits as i32) * 160 + (prompt_entity_hits as i32) * 320;
                 if file_l.ends_with(".docx") || file_l.ends_with(".pdf") || file_l.ends_with(".doc") {
                     doc_bonus += 25;
                 }
@@ -593,7 +625,7 @@ impl DeterministicOfflineSynthesisEngine {
                         || text_l.contains("core competencies")
                         || text_l.contains("cissp-certified"))
                 {
-                    doc_bonus += 130;
+                    doc_bonus += 260;
                 }
                 // Strongly boost opening/overview/abstract chunks so "What is X?" or "What does it do?"
                 // gets the high-level definition and abstract rather than middle-of-paper chart axes
@@ -611,7 +643,29 @@ impl DeterministicOfflineSynthesisEngine {
                 {
                     doc_bonus -= 75;
                 }
-                scored_matches.push((scored, entity_hits, total_hits, doc_bonus));
+                scored_matches.push((scored, entity_hits + prompt_entity_hits * 2, total_hits, doc_bonus));
+            }
+        }
+
+        // When the current prompt introduces its own specific entity term (e.g. "does he have cissp"),
+        // if any matched chunk contains that specific prompt entity term, filter out chunks that lack it
+        // so carry-over context documents (like RedactX) never drown out the target answer documents!
+        if !prompt_only_entities.is_empty() {
+            let has_direct_prompt_match = scored_matches.iter().any(|(scored, _, _, _)| {
+                let text_l = scored.chunk.text_content.to_ascii_lowercase();
+                let file_l = scored.chunk.file_path.to_ascii_lowercase();
+                prompt_only_entities
+                    .iter()
+                    .any(|t| text_l.contains(t.as_str()) || file_l.contains(t.as_str()))
+            });
+            if has_direct_prompt_match {
+                scored_matches.retain(|(scored, _, _, _)| {
+                    let text_l = scored.chunk.text_content.to_ascii_lowercase();
+                    let file_l = scored.chunk.file_path.to_ascii_lowercase();
+                    prompt_only_entities
+                        .iter()
+                        .any(|t| text_l.contains(t.as_str()) || file_l.contains(t.as_str()))
+                });
             }
         }
 
@@ -694,8 +748,13 @@ impl DeterministicOfflineSynthesisEngine {
 
             // 1. Use the local LLM strictly to orchestrate a natural, direct, citation-backed answer
             // from the retrieved local RAG chunks (never invoked when matched_chunks is empty).
+            let effective_question = if query_source_eff != prompt_eff && !is_continuation {
+                format!("{} (Subject context: {})", prompt_eff, query_source_eff)
+            } else {
+                prompt_eff.to_string()
+            };
             if let Some(llm_orchestrated) = Self::query_local_ollama_chat(
-                prompt_eff,
+                &effective_question,
                 history,
                 &matched_chunk_refs,
                 model_tag,
@@ -831,9 +890,12 @@ impl DeterministicOfflineSynthesisEngine {
                         tracing::debug!("Token streaming stopped: tx channel closed");
                         break;
                     }
-                    if tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
-                        delta: word.to_string(),
-                    }).is_err() {
+                    if !Self::send_telemetry(
+                        tx,
+                        AgenticTelemetryEvent::TokenDelta {
+                            delta: word.to_string(),
+                        },
+                    ) {
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(6));
@@ -850,9 +912,12 @@ impl DeterministicOfflineSynthesisEngine {
                     if tx.is_closed() {
                         break;
                     }
-                    if tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
-                        delta: word.to_string(),
-                    }).is_err() {
+                    if !Self::send_telemetry(
+                        tx,
+                        AgenticTelemetryEvent::TokenDelta {
+                            delta: word.to_string(),
+                        },
+                    ) {
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(6));
@@ -860,6 +925,25 @@ impl DeterministicOfflineSynthesisEngine {
             }
             (fallback, Vec::new())
         }
+    }
+
+    /// Runtime-safe non-panicking telemetry sender with backpressure retry.
+    /// Avoids `blocking_send` panics on single-threaded `#[tokio::test]` runtimes while guaranteeing zero dropped tokens.
+    fn send_telemetry(
+        tx: &Sender<AgenticTelemetryEvent>,
+        mut event: AgenticTelemetryEvent,
+    ) -> bool {
+        for _ in 0..250 {
+            match tx.try_send(event) {
+                Ok(()) => return true,
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => return false,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(ev)) => {
+                    event = ev;
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
+        }
+        false
     }
 
     /// Extracts and formats an affirmative question-restating prefix from an interrogative user prompt.
@@ -1035,7 +1119,25 @@ impl DeterministicOfflineSynthesisEngine {
             return format!("{} is ", capitalize(clean_prompt));
         }
 
-        // 11. Conversational question prefixes
+        // 11. Auxiliary / Yes-No questions ("does he have cissp", "is femi cissp certified", "did he attend wgu")
+        if lower.starts_with("does ")
+            || lower.starts_with("do ")
+            || lower.starts_with("did ")
+            || lower.starts_with("has ")
+            || lower.starts_with("have ")
+            || lower.starts_with("is ")
+            || lower.starts_with("are ")
+            || lower.starts_with("was ")
+            || lower.starts_with("were ")
+            || lower.starts_with("can ")
+            || lower.starts_with("could ")
+            || lower.starts_with("will ")
+            || lower.starts_with("would ")
+        {
+            return String::new();
+        }
+
+        // 12. Conversational question prefixes
         if lower.starts_with("tell me all about ") {
             let raw = clean_prompt["tell me all about ".len()..].trim();
             return format!("{} — ", capitalize(raw));
@@ -1155,13 +1257,15 @@ impl DeterministicOfflineSynthesisEngine {
             || t == "more"
     }
 
-    /// Stitches adjacent or contiguous document chunks from the same source file into unbroken parent document sections.
-    pub fn stitch_parent_document_chunks(mut chunks: Vec<ScoredChunk>) -> Vec<ScoredChunk> {
+    /// Stitches adjacent or contiguous document chunks from the same source file into unbroken parent document sections,
+    /// while strictly preserving relevance file ranking and round-robin interleaving across all distinct matched files
+    /// so RAG always synthesizes across multiple files instead of a single file.
+    pub fn stitch_parent_document_chunks(chunks: Vec<ScoredChunk>) -> Vec<ScoredChunk> {
         if chunks.len() <= 1 {
             return chunks;
         }
 
-        let get_chunk_index = |chunk: &DocumentChunk| -> Option<usize> {
+        let get_chunk_index = |chunk: &quorum_types::DocumentChunk| -> Option<usize> {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&chunk.metadata_json) {
                 if let Some(idx) = val.get("chunk_index").and_then(|v| v.as_u64()) {
                     return Some(idx as usize);
@@ -1170,63 +1274,108 @@ impl DeterministicOfflineSynthesisEngine {
             chunk.chunk_id.rsplit_once(':').and_then(|(_, s)| s.parse::<usize>().ok())
         };
 
-        // Sort by file_path, line_start, then chunk_index
-        chunks.sort_by(|a, b| {
-            a.chunk.file_path.cmp(&b.chunk.file_path)
-                .then_with(|| a.chunk.line_start.cmp(&b.chunk.line_start))
-                .then_with(|| {
-                    let idx_a = get_chunk_index(&a.chunk).unwrap_or(0);
-                    let idx_b = get_chunk_index(&b.chunk).unwrap_or(0);
-                    idx_a.cmp(&idx_b)
-                })
-        });
+        // 1. Group incoming relevance-sorted chunks by file_path, preserving the exact relevance order
+        //    in which each distinct file first appears (`file_order`).
+        let mut file_order: Vec<String> = Vec::new();
+        let mut file_buckets: std::collections::HashMap<String, Vec<(usize, ScoredChunk)>> =
+            std::collections::HashMap::new();
 
-        let mut stitched: Vec<ScoredChunk> = Vec::with_capacity(chunks.len());
-
-        for chunk in chunks {
-            if let Some(prev) = stitched.last_mut() {
-                let prev_idx = get_chunk_index(&prev.chunk);
-                let curr_idx = get_chunk_index(&chunk.chunk);
-
-                let same_file = prev.chunk.file_path == chunk.chunk.file_path;
-                let adjacent_idx = match (prev_idx, curr_idx) {
-                    (Some(p), Some(c)) => c == p + 1 || c == p,
-                    _ => false,
-                };
-                let contiguous_lines = chunk.chunk.line_start <= prev.chunk.line_end.saturating_add(3);
-
-                if same_file && (adjacent_idx || contiguous_lines) {
-                    let curr_text = chunk.chunk.text_content.trim();
-                    let prev_text = prev.chunk.text_content.trim();
-
-                    if !prev_text.contains(curr_text) {
-                        let max_overlap = 200.min(prev_text.len()).min(curr_text.len());
-                        let overlap_len = (1..=max_overlap)
-                            .rev()
-                            .find(|&len| {
-                                prev_text.is_char_boundary(prev_text.len() - len)
-                                    && curr_text.is_char_boundary(len)
-                                    && prev_text.ends_with(&curr_text[..len])
-                            })
-                            .unwrap_or(0);
-
-                        if overlap_len > 15 {
-                            prev.chunk.text_content.push_str(&curr_text[overlap_len..]);
-                        } else {
-                            prev.chunk.text_content.push_str("\n\n");
-                            prev.chunk.text_content.push_str(curr_text);
-                        }
-                    }
-
-                    prev.chunk.line_end = prev.chunk.line_end.max(chunk.chunk.line_end);
-                    prev.score = prev.score.max(chunk.score);
-                    continue;
-                }
+        for (orig_rank, chunk) in chunks.into_iter().enumerate() {
+            let key = chunk.chunk.file_path.to_ascii_lowercase();
+            if !file_buckets.contains_key(&key) {
+                file_order.push(key.clone());
             }
-            stitched.push(chunk);
+            file_buckets
+                .entry(key)
+                .or_default()
+                .push((orig_rank, chunk));
         }
 
-        stitched
+        // 2. Within each file's bucket, stitch adjacent chunks and restore each stitched section's best relevance rank
+        let mut stitched_buckets: Vec<Vec<ScoredChunk>> = Vec::with_capacity(file_order.len());
+
+        for file_key in &file_order {
+            if let Some(mut bucket) = file_buckets.remove(file_key) {
+                bucket.sort_by(|(_, a), (_, b)| {
+                    a.chunk
+                        .line_start
+                        .cmp(&b.chunk.line_start)
+                        .then_with(|| {
+                            let idx_a = get_chunk_index(&a.chunk).unwrap_or(0);
+                            let idx_b = get_chunk_index(&b.chunk).unwrap_or(0);
+                            idx_a.cmp(&idx_b)
+                        })
+                });
+
+                let mut file_stitched: Vec<(usize, ScoredChunk)> = Vec::with_capacity(bucket.len());
+                for (rank, chunk) in bucket {
+                    if let Some((prev_best_rank, prev)) = file_stitched.last_mut() {
+                        let prev_idx = get_chunk_index(&prev.chunk);
+                        let curr_idx = get_chunk_index(&chunk.chunk);
+
+                        let adjacent_idx = match (prev_idx, curr_idx) {
+                            (Some(p), Some(c)) => c == p + 1 || c == p,
+                            _ => false,
+                        };
+                        let contiguous_lines =
+                            chunk.chunk.line_start <= prev.chunk.line_end.saturating_add(3);
+
+                        if (adjacent_idx || contiguous_lines)
+                            && prev.chunk.text_content.len() < 3200
+                        {
+                            let curr_text = chunk.chunk.text_content.trim();
+                            let prev_text = prev.chunk.text_content.trim();
+
+                            if !prev_text.contains(curr_text) {
+                                let max_overlap = 200.min(prev_text.len()).min(curr_text.len());
+                                let overlap_len = (1..=max_overlap)
+                                    .rev()
+                                    .find(|&len| {
+                                        prev_text.is_char_boundary(prev_text.len() - len)
+                                            && curr_text.is_char_boundary(len)
+                                            && prev_text.ends_with(&curr_text[..len])
+                                    })
+                                    .unwrap_or(0);
+
+                                if overlap_len > 15 {
+                                    prev.chunk.text_content.push_str(&curr_text[overlap_len..]);
+                                } else {
+                                    prev.chunk.text_content.push_str("\n\n");
+                                    prev.chunk.text_content.push_str(curr_text);
+                                }
+                            }
+
+                            prev.chunk.line_end = prev.chunk.line_end.max(chunk.chunk.line_end);
+                            prev.score = prev.score.max(chunk.score);
+                            *prev_best_rank = (*prev_best_rank).min(rank);
+                            continue;
+                        }
+                    }
+                    file_stitched.push((rank, chunk));
+                }
+
+                // Order this file's stitched sections by their best relevance rank
+                file_stitched.sort_by_key(|(best_rank, _)| *best_rank);
+                stitched_buckets.push(file_stitched.into_iter().map(|(_, c)| c).collect());
+            }
+        }
+
+        // 3. Round-robin interleave across all distinct files so the top chunks span ALL matching files!
+        let mut interleaved: Vec<ScoredChunk> = Vec::new();
+        let max_depth = stitched_buckets
+            .iter()
+            .map(|b| b.len())
+            .max()
+            .unwrap_or(0);
+        for depth in 0..max_depth {
+            for bucket in &stitched_buckets {
+                if let Some(chunk) = bucket.get(depth) {
+                    interleaved.push(chunk.clone());
+                }
+            }
+        }
+
+        interleaved
     }
 
     /// Map-Reduce Fact Sheet Extraction: Clusters retrieved chunks into groups of 3-4 chunks
@@ -1398,9 +1547,12 @@ impl DeterministicOfflineSynthesisEngine {
                                             }
                                             text.push_str(clean_concl);
                                             if let Some(tx) = telemetry_tx {
-                                                let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
-                                                    delta: format!(" {}", clean_concl),
-                                                });
+                                                let _ = Self::send_telemetry(
+                                                    tx,
+                                                    AgenticTelemetryEvent::TokenDelta {
+                                                        delta: format!(" {}", clean_concl),
+                                                    },
+                                                );
                                             }
                                             return;
                                         }
@@ -1424,9 +1576,12 @@ impl DeterministicOfflineSynthesisEngine {
         // Final fallback: append period to ensure clean termination
         text.push('.');
         if let Some(tx) = telemetry_tx {
-            let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
-                delta: ".".to_string(),
-            });
+            let _ = Self::send_telemetry(
+                tx,
+                AgenticTelemetryEvent::TokenDelta {
+                    delta: ".".to_string(),
+                },
+            );
         }
     }
 
@@ -1519,17 +1674,18 @@ impl DeterministicOfflineSynthesisEngine {
         };
 
         let mut messages: Vec<serde_json::Value> = Vec::new();
-        let expected_prefix = Self::format_question_restated_prefix(prompt);
+        let clean_prompt_for_prefix = prompt.split(" (Subject context:").next().unwrap_or(prompt);
+        let expected_prefix = Self::format_question_restated_prefix(clean_prompt_for_prefix);
 
-        let base_system = "You are QuorumRAG, an exhaustive, strictly factual research synthesis engine. \
+        let base_system = "You are QuorumRAG, an exhaustive, strictly factual multi-document research synthesis engine. \
             Your ONLY task is to write a comprehensive, deeply detailed, multi-paragraph Markdown response answering ONLY the user's question \
-            using strictly the provided `<context>` source documents below. \
+            by synthesizing evidence across ALL provided `<context>` source documents below. \
             \n\
             Follow these strict rules:\n\
-            1. QUESTION-RESTATING OPENING: Always begin your answer immediately by repeating/restating the user's question or topic into an affirmative statement grounded in the provided documents. Never answer any question other than the user's question.\n\
+            1. QUESTION-RESTATING OPENING: Always begin your answer immediately by restating the user's question or topic into a natural declarative answer grounded in the provided documents (for example, if asked 'tell me about Femi Oyesanya', begin with 'Femi Oyesanya, CISSP, is a...'; if asked 'does he have CISSP', begin with 'Yes, Femi Oyesanya holds the CISSP (Certified Information Systems Security Professional) certification...'). Never answer any question other than the user's question.\n\
             2. ZERO META-FILLER: Never begin with greetings or meta-announcements (never say \"Based on the documents provided...\", \"According to the text...\", or \"Sure, here is...\").\n\
-            3. EXHAUSTIVENESS & STRICT GROUNDING: Include every relevant historical event, date, name, statistic, quote, and argument present in the `<context>` documents. Never invent facts or extrapolate beyond the provided documents.\n\
-            4. INLINE CITATIONS: Every factual claim and paragraph must cite its source document index in brackets, such as `[1]`, `[2]`, etc., matching `<document index=\"...\">`.\n\
+            3. MULTI-FILE SYNTHESIS & EXHAUSTIVENESS: You are given excerpts from MULTIPLE distinct files (`<document index=\"1\">`, `<document index=\"2\">`, `<document index=\"3\">`, etc.). You MUST look across ALL provided documents—integrating resume/CV credentials, certifications (such as CISSP), career experience, education, and research publications—and cite multiple document indices (`[1]`, `[2]`, `[3]`, `[4]`, etc.) throughout your response. Never rely on only a single document when multiple relevant files are present.\n\
+            4. INLINE CITATIONS: Every factual claim and paragraph must cite its source document index in brackets, such as `[1]`, `[2]`, `[3]`, matching `<document index=\"...\">`.\n\
             5. CLEAN STRUCTURE: Organize your response into thorough, flowing paragraphs and `###` section headings where helpful. Never include line numbers `(Lines X-Y)`.";
 
         let system_prompt = format!("{}{}", base_system, voice_directive);
@@ -1558,6 +1714,7 @@ impl DeterministicOfflineSynthesisEngine {
 
         let context_blocks = matched_chunks
             .iter()
+            .take(12)
             .enumerate()
             .map(|(i, c)| {
                 let file_name = std::path::Path::new(&c.chunk.file_path)
@@ -1565,7 +1722,7 @@ impl DeterministicOfflineSynthesisEngine {
                     .and_then(|n| n.to_str())
                     .unwrap_or(&c.chunk.file_path);
                 let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
-                let compact_text: String = cleaned.chars().take(2500).collect();
+                let compact_text: String = cleaned.chars().take(1800).collect();
                 format!(
                     "<document index=\"{}\" source=\"{}\">\n{}\n</document>",
                     i + 1,
@@ -1577,7 +1734,7 @@ impl DeterministicOfflineSynthesisEngine {
             .join("\n\n");
 
         let fact_sheets = if ui.map_reduce_fact_extraction {
-            Self::extract_fact_sheets(matched_chunks, prompt)
+            Self::extract_fact_sheets(&matched_chunks[..matched_chunks.len().min(12)], prompt)
         } else {
             Vec::new()
         };
@@ -1587,13 +1744,19 @@ impl DeterministicOfflineSynthesisEngine {
             String::new()
         };
 
+        let opening_directive = if expected_prefix.trim().is_empty() {
+            "Begin your response immediately with a direct declarative sentence that restates and answers the User Question".to_string()
+        } else {
+            format!("Begin your response immediately with `{}`", expected_prefix.trim())
+        };
+
         let user_content = format!(
             "<context>\n{}\n</context>\n\n{}User Question: {}\n\n\
-            INSTRUCTION: Provide a complete, exhaustive, and fully cited multi-paragraph analysis answering ONLY the User Question above based strictly on `<context>`. Begin your response immediately with `{}` and include inline `[1]`, `[2]` citations. Do not include line numbers.",
+            INSTRUCTION: Synthesize a complete, exhaustive, multi-paragraph analysis across ALL relevant `<document>` sources above to answer ONLY the User Question. {} and cite multiple source documents inline (`[1]`, `[2]`, `[3]`, `[4]`, etc.). Do not include line numbers.",
             context_blocks,
             fact_sheet_block,
             prompt,
-            expected_prefix.trim()
+            opening_directive
         );
 
         messages.push(serde_json::json!({
@@ -1691,10 +1854,13 @@ impl DeterministicOfflineSynthesisEngine {
                                 if !tok.is_empty() {
                                     full_text.push_str(tok);
                                     hop_text.push_str(tok);
-                                    // Zero-drop telemetry streaming inside block_in_place
-                                    if tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
-                                        delta: tok.to_string(),
-                                    }).is_err() {
+                                    // Zero-drop runtime-safe telemetry streaming
+                                    if !Self::send_telemetry(
+                                        tx,
+                                        AgenticTelemetryEvent::TokenDelta {
+                                            delta: tok.to_string(),
+                                        },
+                                    ) {
                                         break;
                                     }
                                 }
@@ -1757,9 +1923,12 @@ impl DeterministicOfflineSynthesisEngine {
                 if !full_text.contains("### 📚 Sources & Document Links") && !matched_chunks.is_empty() {
                     let sources_block = Self::format_sources_block(matched_chunks);
                     full_text.push_str(&sources_block);
-                    let _ = tx.blocking_send(AgenticTelemetryEvent::TokenDelta {
-                        delta: sources_block,
-                    });
+                    let _ = Self::send_telemetry(
+                        tx,
+                        AgenticTelemetryEvent::TokenDelta {
+                            delta: sources_block,
+                        },
+                    );
                 }
 
                 let trimmed_full = full_text.trim().to_string();

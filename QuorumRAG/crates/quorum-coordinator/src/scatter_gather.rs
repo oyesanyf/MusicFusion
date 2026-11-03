@@ -243,7 +243,9 @@ impl ScatterGatherEngine {
                 let tier = AccessTier::from_u8(access_tier).unwrap_or(AccessTier::Tier0Public);
                 sign_request(&self.secret_seed, &mut req, tier);
 
-                let timeout_dur = Duration::from_millis(self.config.timeout_ms);
+                let timeout_dur = Duration::from_millis(self.config.timeout_ms)
+                    .saturating_sub(start.elapsed())
+                    .max(Duration::from_millis(50));
                 self.mesh_dispatcher
                     .query_peers(&req, timeout_dur)
                     .await
