@@ -551,6 +551,16 @@ impl RetrieveMeshNode {
             chunks = paired.into_iter().map(|(c, _)| c).collect();
         }
 
+        let ui = crate::dlp_mesh::global_mesh_dlp_controller()
+            .settings
+            .read()
+            .map(|g| g.ui.clone())
+            .unwrap_or_default();
+
+        if ui.parent_document_retrieval {
+            chunks = crate::offline_engine::DeterministicOfflineSynthesisEngine::stitch_parent_document_chunks(chunks);
+        }
+
         chunks.truncate(top_k);
         state.retrieved_chunks = chunks;
         state.volatile_chunks = volatile;

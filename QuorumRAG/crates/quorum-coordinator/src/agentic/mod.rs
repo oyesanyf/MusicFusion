@@ -87,11 +87,17 @@ impl AgenticStateGraphRunner {
     ) -> Result<AgenticGraphState, String> {
         let corrected_prompt =
             crate::offline_engine::DeterministicOfflineSynthesisEngine::correct_spelling(prompt);
+        let prompt_lower = corrected_prompt.trim().to_ascii_lowercase();
+        let is_continuation = prompt_lower == "continue"
+            || prompt_lower.starts_with("continue ")
+            || prompt_lower.contains("tell me more")
+            || prompt_lower.contains("go on")
+            || prompt_lower.contains("what else");
         let mut state_name = AgenticStateName::ClassifyIntent;
         let mut graph_state =
             AgenticGraphState::new(&corrected_prompt, requested_family, self.max_hops)
                 .with_conversation_history(history);
-        let cache_key_query = graph_state.current_query.clone();
+        let mut cache_key_query = graph_state.current_query.clone();
 
         let hw = HardwareTelemetry::probe();
         if let Some(ref tx) = telemetry_tx {
@@ -123,15 +129,20 @@ impl AgenticStateGraphRunner {
             match state_name {
                 AgenticStateName::ClassifyIntent => {
                     ClassifyIntentNode::execute(&mut graph_state, &hw);
+                    cache_key_query = graph_state.current_query.clone();
 
                     let epoch = engine.local_storage.index_epoch();
-                    let maybe_cached = self.cache_manager.query_cache.get(
-                        &cache_key_query,
-                        graph_state.search_mode,
-                        graph_state.model_family,
-                        access_tier,
-                        epoch,
-                    );
+                    let maybe_cached = if is_continuation {
+                        None
+                    } else {
+                        self.cache_manager.query_cache.get(
+                            &cache_key_query,
+                            graph_state.search_mode,
+                            graph_state.model_family,
+                            access_tier,
+                            epoch,
+                        )
+                    };
 
                     let cache_hit = maybe_cached.is_some();
                     let telem = self.cache_manager.telemetry(cache_hit);
@@ -380,49 +391,68 @@ impl AgenticStateGraphRunner {
                             .await;
                     }
 
-                    SynthesizeWithCitationsNode::execute(
-                        &mut graph_state,
-                        telemetry_tx.as_ref(),
-                    );
+                    let is_multi_thread = tokio::runtime::Handle::try_current()
+                        .map(|h| h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread)
+                        .unwrap_or(false);
 
-                    // Insert into QueryCache
-                    let epoch = engine.local_storage.index_epoch();
-                    self.cache_manager.query_cache.insert(
-                        &cache_key_query,
-                        graph_state.search_mode,
-                        graph_state.model_family,
-                        access_tier,
-                        epoch,
-                        graph_state.retrieved_chunks.clone(),
-                        crate::offline_engine::DeterministicOfflineSynthesisEngine::build_synthesis_prompt(
-                            &graph_state.original_prompt,
-                            &graph_state.retrieved_chunks,
-                        ),
-                        graph_state.synthesized_response.clone(),
-                        graph_state.citations.clone(),
-                        graph_state.langextract_result.clone(),
-                        graph_state.query_metadata_filters.clone(),
-                    );
+                    if is_multi_thread {
+                        tokio::task::block_in_place(|| {
+                            SynthesizeWithCitationsNode::execute(
+                                &mut graph_state,
+                                telemetry_tx.as_ref(),
+                            );
+                        });
+                    } else {
+                        SynthesizeWithCitationsNode::execute(
+                            &mut graph_state,
+                            telemetry_tx.as_ref(),
+                        );
+                    }
+
+                    // Insert into QueryCache (skip caching continuation turns so "tell me more" always generates fresh follow-ups)
+                    if !is_continuation {
+                        let epoch = engine.local_storage.index_epoch();
+                        self.cache_manager.query_cache.insert(
+                            &cache_key_query,
+                            graph_state.search_mode,
+                            graph_state.model_family,
+                            access_tier,
+                            epoch,
+                            graph_state.retrieved_chunks.clone(),
+                            crate::offline_engine::DeterministicOfflineSynthesisEngine::build_synthesis_prompt(
+                                &graph_state.original_prompt,
+                                &graph_state.retrieved_chunks,
+                            ),
+                            graph_state.synthesized_response.clone(),
+                            graph_state.citations.clone(),
+                            graph_state.langextract_result.clone(),
+                            graph_state.query_metadata_filters.clone(),
+                        );
+                    }
 
                     if let Some(ref tx) = telemetry_tx {
                         // Emit SOURCES citations strictly AFTER all TokenDelta events have completed
                         for cit in &graph_state.citations {
-                            let _ = tx.try_send(AgenticTelemetryEvent::CitationEmitted {
-                                citation: cit.clone(),
-                            });
+                            let _ = tx
+                                .send(AgenticTelemetryEvent::CitationEmitted {
+                                    citation: cit.clone(),
+                                })
+                                .await;
                         }
 
-                        let _ = tx.try_send(AgenticTelemetryEvent::ExecutionFinished {
-                            total_hops: graph_state.hop_count,
-                            total_duration_ms: graph_state.start_time.elapsed().as_millis() as u64,
-                            total_tokens: graph_state
-                                .synthesized_response
-                                .as_ref()
-                                .map(|s| s.len() / 4)
-                                .unwrap_or(0),
-                            final_state: AgenticStateName::Complete,
-                            model_name: graph_state.selected_model_tag.clone(),
-                        });
+                        let _ = tx
+                            .send(AgenticTelemetryEvent::ExecutionFinished {
+                                total_hops: graph_state.hop_count,
+                                total_duration_ms: graph_state.start_time.elapsed().as_millis() as u64,
+                                total_tokens: graph_state
+                                    .synthesized_response
+                                    .as_ref()
+                                    .map(|s| s.len() / 4)
+                                    .unwrap_or(0),
+                                final_state: AgenticStateName::Complete,
+                                model_name: graph_state.selected_model_tag.clone(),
+                            })
+                            .await;
                     }
 
                     return Ok(graph_state);

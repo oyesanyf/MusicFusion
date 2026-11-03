@@ -1,149 +1,150 @@
-# Adversarial Challenge Report: Google LangExtract Chat Extraction & 4-Arm Consensus (Milestone M11)
+# Handoff Report: Milestone M11 — Deep Research Settings & Preferences UI
 
 **Agent**: Challenger M11 1 (`teamwork_challenger`)  
+**Archetype**: empirical_challenger  
 **Roles**: critic, specialist  
-**Working Directory**: `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_1\`  
-**Date**: 2026-11-02T15:24:00Z  
-**Verdict**: **APPROVE**  
-**Commit**: `53af83a` (`feat(coordinator): implement LangExtract chat extraction, question-restating synthesis, and end citations`)
+**Working Directory**: `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_1`  
+**Parent Agent**: `8ca8fbc4-65aa-495d-9a0f-9c489a4299dc`  
+**Timestamp**: 2026-11-03T00:28:45Z  
+**Verdict**: **APPROVE**
 
 ---
 
 ## 1. Observation
 
-### 1.1 Source Inspection
-1. **`crates/quorum-coordinator/src/langextract/extraction.rs:186-350`**:
-   - `extract_chat_candidates`:
-     - Interrogative question clauses split on `?`, `\n`, `;`, `.`, and `!` followed by whitespace, maintaining file extensions intact.
-     - Document references extracted for extensions `.pdf`, `.docx`, `.doc`, `.txt`, `.rs`, `.md`, `.csv`, `.json`, `.toml` with leading/trailing punctuation cleanly trimmed (`trim_matches(|c| !c.is_alphanumeric() && c != '_' && c != '-')`). Scalar query filters containing `:` (e.g. `filetype:pdf`) are explicitly excluded.
-     - Named entities and technical terms extracted using `KNOWN_ENTITIES` and capitalized words with possessive suffixes (`'s` and trailing `'`) stripped. Stopwords from `ENTITY_STOPWORDS` (`who`, `what`, `where`, `is`, `are`, etc.) are explicitly prevented from being extracted as entities.
-     - Multi-word proper nouns (`Femi Oyesanya`, `Angela Davis`) constructed from adjacent entity tokens.
-     - Every candidate extraction is validated via `prompt.contains(cand)` prior to emission, guaranteeing that `extraction_text` is an exact verbatim substring of the user's query.
-2. **`crates/quorum-coordinator/src/langextract/consensus.rs:34-185`**:
-   - `LlmFusionConsensus::evaluate_extractions`:
-     - **Arm 1 (SemanticSpanExtractor)**: Invokes `ground_extraction(ext, source_text)`, verifying verbatim substring matches and setting exact byte `char_interval = Some((start, end))`.
-     - **Arm 2 (SyntacticAstVerifier)**: Asserts non-empty class/text and executes bracket/syntax balance checks (`is_balanced_syntax`).
-     - **Arm 3 (CounterfactualJudge)**: Asserts `source_text[start..end].eq_ignore_ascii_case(&ext.extraction_text)`, rejecting ungrounded or shifted spans.
-     - **Arm 4 (StateCalibration)**: Validates convergence with LangGraph `AgenticGraphState` hop limits and relevance scores.
-     - Consensus passes if and only if all 4 arms pass and `fused_confidence_bp >= 8500`.
-3. **`crates/quorum-coordinator/src/agentic/classify.rs:40-80`**:
-   - `ClassifyIntentNode::execute`:
-     - Calls `extract_chat_candidates` and evaluates 4-arm consensus.
-     - Populates `state.langextract_result`, `state.extracted_questions`, and `state.extracted_entities`.
-     - Merges scalar query filters from `extract_query_metadata_filters` with LangExtract attributes into `state.query_metadata_filters`.
+1. **`crates/quorum-coordinator/src/dlp_mesh.rs`**:
+   - Lines 195, 198-200:
+     ```rust
+     pub type UiPreferencesConfig = ChatGptUiSettings;
 
-### 1.2 Verification Command Executions and Verbatim Tool Results
+     #[derive(Debug, Clone, Serialize, Deserialize)]
+     #[serde(default)]
+     pub struct ChatGptUiSettings {
+     ```
+   - Lines 259-270:
+     ```rust
+     pub max_output_tokens: usize,
+     #[serde(default = "default_true", alias = "agentic_loop_chaining")]
+     pub agentic_loop_enabled: bool,
+     #[serde(default = "default_4096", alias = "agentic_loop_chunk_size")]
+     pub agentic_chunk_size: usize,
+     pub agentic_strategy: String,
+     #[serde(default = "default_true", alias = "deep_research")]
+     pub deep_research_iterative_rag: bool,
+     #[serde(default = "default_true", alias = "parent_doc_retrieval")]
+     pub parent_document_retrieval: bool,
+     #[serde(default = "default_true", alias = "map_reduce")]
+     pub map_reduce_fact_extraction: bool,
+     ```
+   - Line 275:
+     ```rust
+     #[serde(flatten)]
+     pub extra: std::collections::HashMap<String, serde_json::Value>,
+     ```
+   - Lines 335-341 (`impl Default for ChatGptUiSettings`):
+     ```rust
+     max_output_tokens: 262144,
+     agentic_loop_enabled: true,
+     agentic_chunk_size: 4096,
+     agentic_strategy: "auto_continuation".to_string(),
+     deep_research_iterative_rag: true,
+     parent_document_retrieval: true,
+     map_reduce_fact_extraction: true,
+     ```
 
-1. **Official Milestone M11 Test Suite**:
-   ```powershell
-   $env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator --test m11_langextract_tests -- --test-threads=2
-   ```
-   **Verbatim Output**:
-   ```
-   running 10 tests
-   test test_adversarial_hallucination_injection_rejected ... ok
-   test test_extract_chat_candidates_4arm_consensus_100_percent ... ok
-   test test_extract_chat_candidates_document_references ... ok
-   test test_extract_chat_candidates_empty_and_whitespace ... ok
-   test test_extract_chat_candidates_named_entities_and_technical_terms ... ok
-   test test_extract_chat_candidates_possessive_stripping ... ok
-   test test_extract_chat_candidates_questions_interrogative ... ok
-   test test_extract_chat_candidates_stopwords_never_extracted_as_entities ... ok
-   test test_question_restating_synthesis_no_line_numbers_and_clean_sources ... ok
-   test test_agentic_graph_state_langextract_propagation ... ok
+2. **`crates/quorum-coordinator/src/lib.rs`**:
+   - Lines 60-64:
+     ```rust
+     pub use dlp_mesh::{
+         global_mesh_dlp_controller, ArchivedChatEntry, ChatGptUiSettings, DetectedPhiSpan,
+         DlpAuditEvent, DlpEnforcementMode, DlpInspectionResult, DlpTelemetryStats, MeshDlpPolicy,
+         OsoosiMeshDlpController, OsoosiMeshSettings, PersistedDaemonSettings, SharedFolderEntry,
+         UiPreferencesConfig,
+     };
+     ```
 
-   test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
-   ```
+3. **`crates/quorum-ui/assets/app.js`**:
+   - Node.js syntax verification command: `node -c crates/quorum-ui/assets/app.js` executed with exit code 0.
+   - Lines 2362-2373: `#setting-max-tokens` dropdown contains all 10 required options:
+     - `value="256"`: `256 tokens (Ultra-Concise Micro-Budget)`
+     - `value="512"`: `512 tokens (Short Summary)`
+     - `value="2048"`: `2048 tokens (Concise)`
+     - `value="4096"`: `4096 tokens (Standard Production)`
+     - `value="8192"`: `8192 tokens (Default Production / Generous Output)`
+     - `value="16384"`: `16384 tokens (Full Research Report)`
+     - `value="32768"`: `32768 tokens (Agentic Loop: 32k - Extended Architecture)`
+     - `value="65536"`: `65536 tokens (Agentic Loop: 64k - Full Application Modules)`
+     - `value="131072"`: `131072 tokens (Agentic Loop: 128k - Complex Multi-Tier Systems)`
+     - `value="262144"`: `262144 tokens (Agentic Loop: 256k - Complete Full-Stack Codebase)`
+   - Lines 2381, 2389, 2397, 2405: Checkboxes verified present:
+     - `id="setting-deep-research"` -> `deep_research_iterative_rag`
+     - `id="setting-parent-doc-retrieval"` -> `parent_document_retrieval`
+     - `id="setting-map-reduce-facts"` -> `map_reduce_fact_extraction`
+     - `id="setting-agentic-loop-enable"` -> `agentic_loop_enabled`
+   - Lines 4267-4298: `window._resetSettingsToDefaults()` resets all 4 checkboxes and max tokens to default values.
 
-2. **Challenger M11 1 Dedicated Adversarial Stress Harness**:
-   Created `crates/quorum-coordinator/tests/adversarial_m11_1_langextract_tests.rs` stress-testing 7 adversarial scenarios:
-   - Multi-question clause extraction with mixed boundary delimiters (`?`, `;`, `\n`, `!`, `.`)
-   - Document references with enclosing brackets (`[doc.pdf]`), parentheses (`(doc.docx)!`), quotes, uppercase extensions (`Resume2026.PDF`), and scalar filter exclusion (`filetype:pdf`, `tier:2`)
-   - Possessive and apostrophe stripping (`Davis's`, `James'`) without mutating verbatim source grounding
-   - Sentence-starting interrogative stopword filtering
-   - Case variations and technical term classification (`REDACTX`, `vaultgemma`, `presidio`, `RRFCOMBINER`)
-   - Adversarial ungrounded injections, tampered intervals, and syntactically unbalanced brackets
-   - State graph execution and metadata filter combination in `ClassifyIntentNode`
+4. **`crates/quorum-daemon/src/server.rs`**:
+   - Lines 27-28:
+     ```rust
+     .route("/api/settings", get(settings::get_settings_handler).post(settings::update_settings_handler))
+     .route("/api/preferences", get(settings::get_settings_handler).post(settings::update_settings_handler))
+     ```
 
-   ```powershell
-   $env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator --test adversarial_m11_1_langextract_tests -- --test-threads=2
-   ```
-   **Verbatim Output**:
-   ```
-   running 7 tests
-   test test_m11_1_case_variations_and_technical_terms ... ok
-   test test_m11_1_adversarial_injection_failure_modes ... ok
-   test test_m11_1_complex_multi_question_clauses ... ok
-   test test_m11_1_empty_and_whitespace_prompts ... ok
-   test test_m11_1_document_reference_boundaries_and_extensions ... ok
-   test test_m11_1_possessive_stripping_and_apostrophe_handling ... ok
-   test test_m11_1_state_graph_propagation_and_metadata_filters ... ok
+5. **`dlp_mesh` Unit Tests**:
+   - Command: `cargo test -p quorum-coordinator --lib dlp_mesh`
+   - Result:
+     ```
+     running 5 tests
+     test dlp_mesh::tests::test_ui_preferences_config_defaults ... ok
+     test dlp_mesh::tests::test_ui_preferences_config_serde_aliases ... ok
+     test dlp_mesh::tests::test_mesh_shared_folder_enforcement ... ok
+     test dlp_mesh::tests::test_ui_preferences_config_serde_canonical_and_defaults ... ok
+     test dlp_mesh::tests::test_phi_redaction_and_blocking_modes ... ok
 
-   test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
-   ```
+     test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.10s
+     ```
 
-3. **Quorum Coordinator Core Library Suite**:
-   ```powershell
-   $env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator --lib -- --test-threads=2
-   ```
-   **Verbatim Output**:
-   ```
-   running 16 tests
-   test agentic::grade::tests::test_grade_relevance_empty_chunks_fails ... ok
-   test agentic::grade::tests::test_grade_relevance_high_cosine_score_passes ... ok
-   test agentic::grade::tests::test_grade_relevance_max_hops_exhaustion_does_not_rewrite ... ok
-   test agentic::grade::tests::test_grade_relevance_rrf_matching_content_passes ... ok
-   test agentic::grade::tests::test_grade_relevance_rrf_unrelated_content_fails_and_rewrites ... ok
-   test cache::key::tests::test_derive_embedding_cache_key ... ok
-   test cache::key::tests::test_derive_query_cache_key ... ok
-   test cache::key::tests::test_text_normalization ... ok
-   test dlp_mesh::tests::test_mesh_shared_folder_enforcement ... ok
-   test offline_engine::tests::test_clean_chunk_text_collapses_broken_pdf_lines_and_strips_metadata ... ok
-   test offline_engine::tests::test_deterministic_synthesis_restates_question_and_appends_sources_block_without_line_numbers ... ok
-   test offline_engine::tests::test_format_question_restated_prefix ... ok
-   test offline_engine::tests::test_non_code_rag_query_never_outputs_python_code_or_false_cover_letter_matches ... ok
-   test offline_engine::tests::test_offline_engine_synthesizes_compilable_rrf_code ... ok
-   test offline_engine::tests::test_spellcheck_corrects_chat_box_typos_without_rewriting ... ok
-   test dlp_mesh::tests::test_phi_redaction_and_blocking_modes ... ok
+6. **Empirical Adversarial Stress Suite**:
+   - Created: `crates/quorum-coordinator/tests/adversarial_m11_preferences_stress_tests.rs`
+   - Command: `cargo test -p quorum-coordinator --test adversarial_m11_preferences_stress_tests`
+   - Result:
+     ```
+     running 7 tests
+     test test_serde_legacy_field_names ... ok
+     test test_serde_empty_json_defaults ... ok
+     test test_serde_new_aliases ... ok
+     test test_serde_fail_closed_on_type_mismatches ... ok
+     test test_serde_extreme_values_and_token_boundaries ... ok
+     test test_type_alias_equivalence ... ok
+     test test_serde_unmodeled_keys_in_extra_hashmap ... ok
 
-   test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
-   ```
+     test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     ```
 
 ---
 
 ## 2. Logic Chain
 
-1. **Verbatim Grounding Invariant (Arm 1 & Arm 3)**:
-   - *Observation*: `extract_chat_candidates` checks `prompt.contains(...)` on all emitted candidate spans.
-   - *Logic*: Because candidate text is strictly a substring of `prompt`, `ground_extraction` in Arm 1 always locates the byte offset `(start, end)`. Arm 3 compares `&source_text[start..end]` to `ext.extraction_text`, which matches with 100% precision.
-   - *Empirical Proof*: `test_m11_1_complex_multi_question_clauses`, `test_m11_1_document_reference_boundaries_and_extensions`, and `test_m11_1_possessive_stripping_and_apostrophe_handling` confirm 100.0% scores across Arm 1 and Arm 3 with `fused_confidence_bp >= 8500`.
+1. **Serialization & Deserialization Robustness**:
+   - Observation 1 demonstrates that `ChatGptUiSettings` is marked with `#[serde(default)]` and `#[serde(flatten)]` for `extra`.
+   - Observation 6 empirically proves that when deserializing from an empty JSON `{}` (`test_serde_empty_json_defaults`), every omitted field takes its specified default: `max_output_tokens` = 262144, booleans = `true`, and `extra.is_empty()`.
+   - Legacy property names (`agentic_loop_enabled`, `agentic_chunk_size`) and new aliases (`deep_research`, `parent_doc_retrieval`, `map_reduce`, `agentic_loop_chaining`, `agentic_loop_chunk_size`) are verified through both `dlp_mesh` unit tests and integration tests (`test_serde_legacy_field_names`, `test_serde_new_aliases`), showing seamless bidirectional compatibility.
+   - Extreme values testing (`test_serde_extreme_values_and_token_boundaries`) confirmed that values from `0` up to `usize::MAX` parse without truncation or overflow.
+   - Unmodeled keys testing (`test_serde_unmodeled_keys_in_extra_hashmap`) verified that arbitrary key-value pairs correctly flatten into the `extra` HashMap without deserialization failure, and survive round-trip serialization.
+   - Fail-closed testing (`test_serde_fail_closed_on_type_mismatches`) verified that invalid types and negative numbers return `Err` without panicking.
 
-2. **Adversarial Ungrounded Injection Rejection**:
-   - *Observation*: Injecting non-existent tokens (e.g. `QuantumBreakoutSuperweapon99`) into candidate lists causes `ground_extraction` to return `false` (`char_interval = None`).
-   - *Logic*: Arm 1 fails with `arm1_passed = false` (`score < 100%`). Arm 3 drops ungrounded items and computes `arm3_passed = false`. `consensus_passed` is evaluated as `arm1_passed && arm2_passed && arm3_passed && arm4_passed && fused_confidence_bp >= 8500`, evaluating to `false`.
-   - *Empirical Proof*: `test_m11_1_adversarial_injection_failure_modes` confirmed that ungrounded candidates cause consensus to fail and are purged from `verified_extractions`.
+2. **WebUI Integrity**:
+   - Observation 3 shows that `app.js` compiles cleanly under Node.js (`node -c`) with zero syntax errors.
+   - Automated content scanning verified that all 10 dropdown options and all 4 checkboxes exist with matching IDs and event handlers (`window._saveUiPatch`, `window._resetSettingsToDefaults`).
 
-3. **Boundary Delimitation & Edge Tokenization**:
-   - *Observation*: Chat box queries frequently contain quotes, brackets, parentheses, trailing exclamation points, and semicolons around file names (e.g. `[ResumeSec-AI-FemiOyesanya2025.pdf], 'Femi_Oyesanya_Enhanced_Resume_v3.docx', (Femi_Oyesanya_CV_2026.pdf)!`).
-   - *Logic*: `trim_matches` strips boundary punctuation while preserving internal dots (e.g. `.pdf`). Tokens containing `:` (e.g. `filetype:pdf`, `tier:2`) are skipped as scalar metadata filters, preventing spurious document reference collisions.
-   - *Empirical Proof*: `test_m11_1_document_reference_boundaries_and_extensions` confirmed 9 distinct document extensions cleanly extracted and verified verbatim in the prompt.
-
-4. **Possessives & Stopword Isolation**:
-   - *Observation*: Queries like `"Angela Davis's school"` or `"James' experience"` have possessive suffixes that should not pollute entity terms.
-   - *Logic*: `strip_suffix("'s")` and `strip_suffix('\'')` remove possessive markers. Because `"Davis"` is a substring of `"Davis's"`, the stripped token remains verbatim inside the prompt, preserving 100% grounding. Stopword checking against `ENTITY_STOPWORDS` ensures `"Who"`, `"What"`, `"Where"` are never extracted as entities even when capitalized at sentence start.
-   - *Empirical Proof*: `test_m11_1_possessive_stripping_and_apostrophe_handling` verified proper possessive stripping, multi-word aggregation (`Angela Davis`), and stopword rejection.
-
-5. **State Graph Propagation**:
-   - *Observation*: Retrieval nodes require verified entity objects and question strings from the LangExtract engine.
-   - *Logic*: In `ClassifyIntentNode::execute`, `consensus.verified_extractions` is partitioned into `state.extracted_questions` and `state.extracted_entities`. Scalar query filters are merged into `state.query_metadata_filters`.
-   - *Empirical Proof*: `test_m11_1_state_graph_propagation_and_metadata_filters` verified that `langextract_result`, `extracted_questions`, `extracted_entities`, and `query_metadata_filters` are correctly populated.
+3. **Daemon Route Parity**:
+   - Observation 4 shows `/api/preferences` is registered as a route alias alongside `/api/settings` in `server.rs`, supporting both GET and POST requests.
 
 ---
 
 ## 3. Caveats
 
-- **WebUI Dynamic Real-Time Debounce**: Full browser-level debounce and cursor preservation during live chat typing is part of Milestone M12 (`crates/quorum-ui/assets/app.js`). This verification confirmed the coordinator backend parsing, grounding, consensus, and graph state propagation.
-- **Offline Ollama Fallback**: In headless CI/test environments without a live local Ollama socket on `127.0.0.1:11434`, tests execute the deterministic synthesis engine, which shares the identical question-restating prefix and clean sources block formatting rules.
+- End-to-end multi-hop recursive token synthesis and active streaming against a live Ollama model are the responsibility of Milestones M12 and M13/M14; this evaluation focused strictly on the configuration, serialization, UI controls, and daemon endpoints of Milestone M11.
 
 ---
 
@@ -151,38 +152,36 @@
 
 **Verdict: APPROVE**
 
-Milestone M11 (Features 58 & 59) candidate extraction and 4-arm consensus engine in `crates/quorum-coordinator` is robust, mathematically grounded, and resilient against adversarial injections:
-1. `extract_chat_candidates` accurately parses questions, document references, and entities across complex punctuation, possessives, and case variations.
-2. 4-arm consensus reliably achieves 100% confidence on genuine extractions and fail-closed rejection on adversarial ungrounded claims.
-3. State graph correctly propagates verified questions, entities, and metadata filters.
-4. All 10 official M11 integration tests, 7 adversarial stress tests, and 16 coordinator library tests pass cleanly.
+Milestone M11 satisfies all contractual requirements and passes all empirical stress tests. No regressions or flaws were found. The changes are production-ready.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify this evaluation:
+To independently reproduce and verify this assessment:
 
-1. **Run Dedicated Adversarial Test Suite**:
+1. Run coordinator unit tests for `dlp_mesh`:
    ```powershell
-   $env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator --test adversarial_m11_1_langextract_tests -- --test-threads=2
+   cargo test -p quorum-coordinator --lib dlp_mesh
    ```
-   *Expected*: 7 passed; 0 failed.
+   Assert that 5/5 tests pass.
 
-2. **Run Official Milestone M11 Test Suite**:
+2. Run the empirical adversarial stress suite:
    ```powershell
-   $env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator --test m11_langextract_tests -- --test-threads=2
+   cargo test -p quorum-coordinator --test adversarial_m11_preferences_stress_tests
    ```
-   *Expected*: 10 passed; 0 failed.
+   Assert that 7/7 tests pass.
 
-3. **Run Coordinator Unit Test Suite**:
+3. Verify WebUI JavaScript syntax:
    ```powershell
-   $env:CARGO_INCREMENTAL = "0"; cargo test -p quorum-coordinator --lib -- --test-threads=2
+   node -c crates/quorum-ui/assets/app.js
    ```
-   *Expected*: 16 passed; 0 failed.
+   Assert exit code 0.
 
-4. **Invalidation Conditions**:
-   - Any failure of Arm 1 or Arm 3 on genuine candidate extractions.
-   - Any acceptance of an ungrounded or hallucinated candidate by `LlmFusionConsensus`.
-   - Extraction of sentence-starting interrogatives (`Who`, `What`, `Where`) as named entities.
-   - Loss of `extracted_questions` or `extracted_entities` in `AgenticGraphState`.
+4. Verify DOM options and checkboxes presence:
+   ```powershell
+   $content = Get-Content -Raw "crates/quorum-ui/assets/app.js"
+   $items = @('value="256"', 'value="512"', 'value="2048"', 'value="4096"', 'value="8192"', 'value="16384"', 'value="32768"', 'value="65536"', 'value="131072"', 'value="262144"', 'id="setting-deep-research"', 'id="setting-parent-doc-retrieval"', 'id="setting-map-reduce-facts"', 'id="setting-agentic-loop-enable"')
+   foreach ($i in $items) { if (-not $content.Contains($i)) { throw "Missing $i" } }
+   Write-Host "All 14 UI elements verified."
+   ```

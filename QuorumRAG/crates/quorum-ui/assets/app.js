@@ -2096,6 +2096,9 @@
       const loopEn = ui.agentic_loop_enabled !== false;
       const chunkSz = String(ui.agentic_chunk_size || 4096);
       const loopStrat = ui.agentic_strategy || 'auto_continuation';
+      const deepResEn = ui.deep_research_iterative_rag !== false;
+      const parentDocEn = ui.parent_document_retrieval !== false;
+      const mapReduceEn = ui.map_reduce_fact_extraction !== false;
       const restRlRunning = ui.restrl_daemon_running !== false;
       const restRlProcessed = Number(ui.restrl_processed_tasks || 14);
       const customModels = Array.isArray(ui.custom_models) ? ui.custom_models : [];
@@ -2372,10 +2375,34 @@
 
           <div class="settings-row">
             <div class="settings-row-info">
-              <label for="setting-agentic-loop-enable" class="settings-row-label">Agentic Loop Looping (Recursive Chaining)</label>
-              <div class="settings-row-desc">Auto-chain LLM turns recursively up to 256k tokens. Generates multi-part outputs seamlessly by feeding turn outputs back into context.</div>
+              <label for="setting-deep-research" class="settings-row-label">Deep Research &amp; Iterative Section RAG</label>
+              <div class="settings-row-desc">Generate structured DocumentPlan and SectionPlan multi-hop research outline.</div>
             </div>
-            <input id="setting-agentic-loop-enable" type="checkbox" ${loopEn ? 'checked' : ''} style="width:16px; height:16px; accent-color:#3b82f6; cursor:pointer;" onchange="window._saveUiPatch({agentic_loop_enabled: this.checked}); window._toast('Agentic Loop recursive chaining ' + (this.checked ? 'enabled' : 'disabled'))">
+            <input id="setting-deep-research" type="checkbox" ${deepResEn ? 'checked' : ''} style="width:16px; height:16px; accent-color:#3b82f6; cursor:pointer;" onchange="window._saveUiPatch({deep_research_iterative_rag: this.checked}); window._toast('Deep Research &amp; Iterative Section RAG ' + (this.checked ? 'enabled' : 'disabled'))">
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <label for="setting-parent-doc-retrieval" class="settings-row-label">Parent Document Context Expansion</label>
+              <div class="settings-row-desc">Stitch adjacent/surrounding chunks from the same document for broad context.</div>
+            </div>
+            <input id="setting-parent-doc-retrieval" type="checkbox" ${parentDocEn ? 'checked' : ''} style="width:16px; height:16px; accent-color:#3b82f6; cursor:pointer;" onchange="window._saveUiPatch({parent_document_retrieval: this.checked}); window._toast('Parent Document Context Expansion ' + (this.checked ? 'enabled' : 'disabled'))">
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <label for="setting-map-reduce-facts" class="settings-row-label">Map-Reduce Fact Sheet Extraction</label>
+              <div class="settings-row-desc">Distill retrieved chunks into dense fact sheets before synthesis.</div>
+            </div>
+            <input id="setting-map-reduce-facts" type="checkbox" ${mapReduceEn ? 'checked' : ''} style="width:16px; height:16px; accent-color:#3b82f6; cursor:pointer;" onchange="window._saveUiPatch({map_reduce_fact_extraction: this.checked}); window._toast('Map-Reduce Fact Sheet Extraction ' + (this.checked ? 'enabled' : 'disabled'))">
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <label for="setting-agentic-loop-enable" class="settings-row-label">Recursive Agentic Loop Chaining</label>
+              <div class="settings-row-desc">Auto-chain LLM turns recursively up to 256k tokens.</div>
+            </div>
+            <input id="setting-agentic-loop-enable" type="checkbox" ${loopEn ? 'checked' : ''} style="width:16px; height:16px; accent-color:#3b82f6; cursor:pointer;" onchange="window._saveUiPatch({agentic_loop_enabled: this.checked}); window._toast('Recursive Agentic Loop Chaining ' + (this.checked ? 'enabled' : 'disabled'))">
           </div>
 
           <div class="settings-row">
@@ -4261,6 +4288,9 @@
       agentic_loop_enabled: true,
       agentic_chunk_size: 4096,
       agentic_strategy: 'auto_continuation',
+      deep_research_iterative_rag: true,
+      parent_document_retrieval: true,
+      map_reduce_fact_extraction: true,
       restrl_daemon_running: true
     });
     renderSettingsTabContent(activeSettingsTab, '');

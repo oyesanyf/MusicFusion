@@ -1,61 +1,48 @@
-# BRIEFING — 2026-11-02T15:25:00Z
+# BRIEFING — 2026-11-03T00:22:30Z
 
 ## Mission
-Empirically stress-test question-restating affirmative synthesis, zero line numbers, zero raw headers, clean deduplicated sources with accuracy percentage, and CV/Resume prioritization for M11.
+Empirically challenge M11 implementation: daemon routing, preferences contract, default invariants, serialization, and dlp_mesh tests.
 
 ## 🔒 My Identity
 - Archetype: challenger
 - Roles: critic, specialist
-- Working directory: d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\
-- Original parent: 6e43b521-b448-4762-842a-0bc8d66e2854
+- Working directory: d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2
+- Original parent: 8ca8fbc4-65aa-495d-9a0f-9c489a4299dc
 - Milestone: M11
 - Instance: 2 of 2
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
-- Report any failures as findings — do NOT fix them yourself
-- Assert zero line numbers anywhere in synthesized responses
-- Assert zero raw file headers (`### 📄 `) in response bodies
-- Assert clean Sources block at end with accuracy score percentage, deduplicated by filename
-- Assert profile queries prioritize CV/Resume documents
+- Empirical verification mandatory — must run tests and oracles, no unverified claims
+- Report verdict explicitly as APPROVE or REQUEST_CHANGES
 
 ## Current Parent
-- Conversation ID: 6e43b521-b448-4762-842a-0bc8d66e2854
-- Updated: 2026-11-02T15:25:00Z
+- Conversation ID: 8ca8fbc4-65aa-495d-9a0f-9c489a4299dc
+- Updated: 2026-11-03T00:22:30Z
 
 ## Review Scope
-- **Files reviewed**:
-  - `crates/quorum-coordinator/src/offline_engine.rs`
-  - `crates/quorum-coordinator/src/agentic/retrieve.rs`
-  - `crates/quorum-coordinator/src/langextract/extraction.rs`
-  - `crates/quorum-coordinator/tests/m11_langextract_tests.rs`
-  - `crates/quorum-coordinator/tests/adversarial_m11_challenger_tests.rs`
-- **Interface contracts**: `d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md`
-- **Review criteria**: Question-restating affirmative synthesis, line-number elimination, raw-header elimination, clean deduplicated sources with accuracy percentage, profile document prioritization, cargo test suite passes.
-
-## Attack Surface
-- **Hypotheses tested**:
-  - Interrogative prefix restatement across 35+ interrogative variants, punctuations, and quotes. Result: PASSED.
-  - Zero line numbers (`Lines `, `(Lines`, `:start-end`) in synthesized response body and citations. Result: PASSED (100% eliminated).
-  - Zero raw file headers (`### 📄 `) in synthesized prose. Result: PASSED.
-  - End-of-response sources block deduplication by filename and percentage formatting. Result: PASSED.
-  - Profile query CV/Resume ranking prioritization and ChatGPT export artifact penalty (-300). Result: PASSED.
-- **Vulnerabilities found**:
-  - None blocking. Minor observation: `format_question_restated_prefix` applies `capitalize` on lowercased subclauses for certain patterns (e.g. `what did <sub` and `what does <sub`), normalizing multi-capitalized words like `PatientPoint` to `Patientpoint`. The 6 dispatch cases (`Who is femi`, `what is RedactX`, `where did Femi study`, `where did Femi go to school`, `what the Cigna policy`, `tell me about Femi`) preserve expected casing.
-- **Untested angles**:
-  - Live Ollama streaming with active GPU over loopback port 11434 (tested via unit fallback and offline engine integration tests).
-
-## Loaded Skills
-- None
+- **Files to review**: `crates/quorum-daemon/src/server.rs`, `crates/quorum-daemon/tests/daemon_tests.rs`, `crates/quorum-settings/src/lib.rs`, `crates/quorum-coordinator/src/dlp_mesh.rs`
+- **Interface contracts**: `d:\harfile\QuorumRAG\.agents\teamwork\ORIGINAL_REQUEST.md`, `d:\harfile\QuorumRAG\.agents\teamwork\sub_orch_m11\SCOPE.md`
+- **Review criteria**: correctness, empirical test reproduction, edge cases, invariants conformance
 
 ## Key Decisions Made
-- Authored and committed dedicated adversarial test suite `adversarial_m11_challenger_tests.rs` (`fdede18`).
-- Confirmed all required tests pass cleanly.
-- Evaluated verdict: APPROVE.
+- Constructed dedicated empirical challenge test suite `crates/quorum-daemon/tests/preferences_contract_challenge.rs`.
+- Tested GET and POST methods on `/api/preferences` and verified synchronization with `/api/settings`.
+- Verified all 7 default value invariants and 10 token budget levels for serialization and deserialization.
+- Verified graceful failure handling on malformed JSON and type mismatches.
+- Rendered verdict: APPROVE.
 
 ## Artifact Index
-- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\DISPATCH.md` — dispatch instructions
-- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\BRIEFING.md` — persistent memory
-- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\progress.md` — liveness heartbeat
-- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\handoff.md` — evaluation report
-- `crates/quorum-coordinator/tests/adversarial_m11_challenger_tests.rs` — committed adversarial stress tests
+- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\DISPATCH.md` — Incoming dispatch record
+- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\BRIEFING.md` — Situational awareness
+- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\progress.md` — Liveness and execution steps
+- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\report.md` — Empirical challenge findings
+- `d:\harfile\QuorumRAG\.agents\teamwork\challenger_m11_2\handoff.md` — 5-component handoff and final verdict
+
+## Attack Surface
+- **Hypotheses tested**: Dual-method endpoint routing (`/api/preferences`), serde alias mapping, 7 invariant defaults, 10-budget round-trips, malformed payload error gating.
+- **Vulnerabilities found**: None in Milestone M11 preferences contract.
+- **Untested angles**: Live socket multi-hop streaming continuation up to 262k tokens (scoped to M12/M13/M14).
+
+## Loaded Skills
+- None specified in dispatch

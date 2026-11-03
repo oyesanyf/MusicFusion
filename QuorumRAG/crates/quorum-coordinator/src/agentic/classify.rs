@@ -7,19 +7,35 @@ pub struct ClassifyIntentNode;
 impl ClassifyIntentNode {
     pub fn execute(state: &mut AgenticGraphState, hw: &HardwareTelemetry) {
         let lower = state.original_prompt.to_lowercase();
-        let is_continuation = lower == "continue"
-            || lower.starts_with("continue ")
-            || lower.contains("tell me more")
-            || lower.contains("go on")
-            || lower.contains("what else");
+        let is_continuation = crate::offline_engine::DeterministicOfflineSynthesisEngine::is_continuation_query(&lower);
 
         if is_continuation {
             // Locate the last non-continuation user query from history
             if let Some(last_user_turn) = state.conversation_history.iter().rev().find(|t| {
                 t.role.eq_ignore_ascii_case("user")
-                    && !t.content.to_ascii_lowercase().starts_with("continue")
+                    && !crate::offline_engine::DeterministicOfflineSynthesisEngine::is_continuation_query(&t.content.to_ascii_lowercase())
             }) {
                 state.current_query = last_user_turn.content.clone();
+            } else {
+                // Extract key terms from prior history turns
+                let mut terms = Vec::new();
+                for turn in state.conversation_history.iter().rev() {
+                    for word in turn.content.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                        let w = word.trim().to_ascii_lowercase();
+                        if w.len() >= 4 && !crate::agentic::retrieve::GENERIC_ATTRIBUTE_TERMS.contains(&w.as_str()) && !terms.contains(&w) {
+                            terms.push(w);
+                            if terms.len() >= 6 {
+                                break;
+                            }
+                        }
+                    }
+                    if !terms.is_empty() {
+                        break;
+                    }
+                }
+                if !terms.is_empty() {
+                    state.current_query = terms.join(" ");
+                }
             }
         }
 

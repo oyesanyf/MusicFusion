@@ -1,59 +1,75 @@
-# BRIEFING — 2026-11-02T15:13:00Z
+# BRIEFING — 2026-11-03T00:20:00Z
 
 ## Mission
-Implement Milestone M11 (Features 58 & 59): Google LangExtract chat candidate extraction, state graph propagation, target document boosting, and question-restating synthesis with zero line numbers and clean sources.
+Implement UiPreferencesConfig, Deep Research toggles, serialization aliases, WebUI settings controls, and daemon preferences endpoint for Milestone M11.
 
 ## 🔒 My Identity
 - Archetype: teamwork_worker
 - Roles: implementer, qa, specialist
 - Working directory: d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1
-- Original parent: 6e43b521-b448-4762-842a-0bc8d66e2854
+- Original parent: 8ca8fbc4-65aa-495d-9a0f-9c489a4299dc
 - Milestone: M11
 
 ## 🔒 Key Constraints
-- Follow minimal change principle and integrity mandate (no mocks, no fake data, genuine logic).
-- Remove line numbers completely from both synthesized response text and bottom Sources block.
-- In both deterministic fallback and LLM orchestration, never output raw `### 📄 filename (Lines X–Y)` headers or ChatGPT export artifacts (`fileciteturn0file0`, `sandbox:/mnt/data/...`).
-- Sources block at bottom must format: `- [📄 <file_name>](<file_path>) — **<score_pct>% accuracy**` deduplicated by filename.
-- Strongly prioritize genuine resume/CV documents for profile queries and boost document reference targets by +200 in retrieval.
-- Must pass `cargo test -p quorum-coordinator -- --test-threads=2` with `$env:CARGO_INCREMENTAL = "0"`.
+- Exclusive write ownership:
+  - `crates/quorum-coordinator/src/dlp_mesh.rs`
+  - `crates/quorum-coordinator/src/lib.rs`
+  - `crates/quorum-ui/assets/app.js`
+  - `crates/quorum-daemon/src/server.rs`
+- Genuine implementations only, no mocks or dummy data.
+- Process-scoped environment only; do not mutate system PATH.
 
 ## Current Parent
-- Conversation ID: 6e43b521-b448-4762-842a-0bc8d66e2854
-- Updated: 2026-11-02T15:13:00Z
+- Conversation ID: 8ca8fbc4-65aa-495d-9a0f-9c489a4299dc
+- Updated: 2026-11-03T00:20:00Z
 
 ## Task Summary
-- **What to build**: LangExtract candidate extraction, state graph fields, retrieval document boosting & BM25 augmentation, offline engine question-restating prefix & sources block without line numbers.
-- **Success criteria**: All coordinator tests pass, genuine candidate extraction passes 4-arm consensus, synthesis formats question-restating opening and clean sources without line numbers.
-- **Interface contracts**: `d:\harfile\QuorumRAG\.agents\teamwork\orchestrator\SCOPE.md`
-- **Code layout**: `crates/quorum-coordinator/src/`
+- **What to build**:
+  1. `crates/quorum-coordinator/src/dlp_mesh.rs`:
+     - Defined and exported `pub type UiPreferencesConfig = ChatGptUiSettings;`.
+     - Added fields: `deep_research_iterative_rag: bool`, `parent_document_retrieval: bool`, `map_reduce_fact_extraction: bool`.
+     - Serde aliases: `deep_research`, `parent_doc_retrieval`, `map_reduce`, `agentic_loop_chaining`, `agentic_loop_chunk_size`.
+     - Serde defaults: `default_true` (bool), `default_4096` (usize).
+     - Updated `impl Default for ChatGptUiSettings`.
+     - Unit tests for serialization/deserialization with aliases and round-trip.
+  2. `crates/quorum-coordinator/src/lib.rs`:
+     - Re-exported `UiPreferencesConfig`.
+  3. `crates/quorum-ui/assets/app.js`:
+     - In `renderSettingsTabContent('models')`:
+       - Retained 10-option dropdown for max tokens.
+       - Added 4 toggles with labels/descriptions: `deep_research_iterative_rag`, `parent_document_retrieval`, `map_reduce_fact_extraction`, `agentic_loop_enabled`.
+       - Update via `window._saveUiPatch({ field: this.checked })` and toast.
+       - Reset in `window._resetSettingsToDefaults()` to `true`.
+  4. `crates/quorum-daemon/src/server.rs`:
+     - Added route `/api/preferences` pointing to `get(settings::get_settings_handler).post(settings::update_settings_handler)`.
+- **Success criteria**: All unit tests pass (`cargo test -p quorum-coordinator --lib dlp_mesh`), `cargo check --workspace` passes.
+- **Interface contracts**: SCOPE.md and DISPATCH.md.
+- **Code layout**: QuorumRAG workspace crates.
+
+## Key Decisions Made
+- Maintained exact backward compatibility in `ChatGptUiSettings` while providing typed access and alias parsing.
+- Mirrored `/api/preferences` directly to `/api/settings` handler to avoid code duplication and support dual routes.
+
+## Artifact Index
+- `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\DISPATCH.md` — Task prompt & message log
+- `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\BRIEFING.md` — Situational awareness
+- `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\progress.md` — Liveness heartbeat
+- `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\changes.md` — Detailed list of file changes
+- `d:\harfile\QuorumRAG\.agents\teamwork\worker_m11_1\handoff.md` — Formal 5-component handoff report
 
 ## Change Tracker
 - **Files modified**:
-  - `crates/quorum-coordinator/src/langextract/extraction.rs`: Implemented `extract_chat_candidates` with verbatim spans and boundary handling.
-  - `crates/quorum-coordinator/src/langextract/mod.rs`: Re-exported `extract_chat_candidates`.
-  - `crates/quorum-coordinator/src/types.rs`: Added `langextract_result`, `extracted_questions`, `extracted_entities` to `AgenticGraphState`.
-  - `crates/quorum-coordinator/src/agentic/classify.rs`: Invoked extraction, consensus evaluation, and filter merging.
-  - `crates/quorum-coordinator/src/agentic/retrieve.rs`: Aligned dense vectors, augmented BM25 search, boosted document targets (+200), filtered ChatGPT artifacts.
-  - `crates/quorum-coordinator/src/agentic/mod.rs`: Saved/restored consensus in `QueryCache`, fixed channel deadlock with `try_send`.
-  - `crates/quorum-coordinator/src/offline_engine.rs`: Implemented `format_question_restated_prefix`, `format_sources_block`, updated deterministic fallback and streaming without line numbers or raw file headers.
-  - `crates/quorum-coordinator/tests/m11_langextract_tests.rs`: Added 10 integration and invariant tests (100% pass).
-- **Build status**: PASS
-- **Pending issues**: None
+  - `crates/quorum-coordinator/src/dlp_mesh.rs`: Added UiPreferencesConfig, fields, serde annotations, defaults, and 3 unit tests.
+  - `crates/quorum-coordinator/src/lib.rs`: Re-exported UiPreferencesConfig.
+  - `crates/quorum-ui/assets/app.js`: Added 4 interactive toggles and defaults reset.
+  - `crates/quorum-daemon/src/server.rs`: Added `/api/preferences` route.
+- **Build status**: `cargo test -p quorum-coordinator --lib dlp_mesh` passed (5/5), `cargo check --workspace` passed.
+- **Pending issues**: None.
 
 ## Quality Status
-- **Build/test result**: All tests pass (`m11_langextract_tests`: 10/10 pass; `offline_engine` unit tests: 6/6 pass; `adversarial_m8_5_challenger_stress_tests`: pass).
-- **Lint status**: Clean
-- **Tests added/modified**: 10 tests in `m11_langextract_tests.rs`, 2 tests in `offline_engine.rs`.
+- **Build/test result**: Pass (5/5 tests in dlp_mesh, check clean).
+- **Lint status**: Clean (no compiler warnings in dlp_mesh or server route).
+- **Tests added/modified**: `test_ui_preferences_config_defaults`, `test_ui_preferences_config_serde_aliases`, `test_ui_preferences_config_serde_canonical_and_defaults`.
 
 ## Loaded Skills
-- None explicitly assigned.
-
-## Key Decisions Made
-- Excluded line numbers completely from synthesized body and sources block per urgent user requirement.
-- In deterministic fallback, synthesized cohesive prose starting with affirmative question-restating prefix and clean bullet points without raw file headers.
-- Filtered out ChatGPT artifacts (`fileciteturn0file0`, `sandbox:/mnt/data/`) and boosted resume/CV documents in retrieve and offline engine.
-- Replaced blocking `.send().await` with non-blocking `.try_send()` for telemetry citation and finish events to prevent capacity deadlocks on unread channels.
-
-## Artifact Index
-- `handoff.md` — Final completion report
+- none

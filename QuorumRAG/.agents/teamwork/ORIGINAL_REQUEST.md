@@ -158,3 +158,133 @@ Incorporate and test all 5 of these architectural upgrades across crates/quorum-
 5. WebUI Action Buttons (▶️ Continue, 💾 Save File, 🗑️ Clear) + Live Port 3031 Restart:
    - Ensure .response-actions-bar in app.js includes ▶️ Continue, 💾 Save File, 🗑️ Clear.
    - In Milestone M14, terminate PID 80036 (quorumrag_live.exe), rebuild fresh quorumrag.exe, start on 0.0.0.0:3031, and verify all 4 live queries ("tell me all about african church and gang violance", "tell me about Angela davis", "continue", "tell me about eastern university") against http://127.0.0.1:3031/api/query.
+
+
+## Approved Task Prompt — 2026-11-02T23:50:02Z
+
+Incorporate Deep Research and Iterative Section RAG settings and engine capabilities into QuorumRAG—including parent document retrieval, recursive agentic loop chaining up to 262k tokens, map-reduce fact extraction, and offline engine truncation/continuation fixes—for production use to produce exhaustive, multi-page responses grounded in data without mid-sentence cutoffs.
+
+Working directory: d:\harfile\QuorumRAG
+Integrity mode: development
+
+## Requirements
+
+### R1. Deep Research and Iterative Section RAG Settings UI
+Add configuration fields to `UiPreferencesConfig` in `crates/quorum-coordinator/src/dlp_mesh.rs` and render interactive controls in QuorumRAG Settings (`crates/quorum-ui/assets/app.js`):
+- `max_output_tokens: usize` dropdown with options:
+  - `256` -> `256 tokens (Ultra-Concise Micro-Budget)`
+  - `512` -> `512 tokens (Short Summary)`
+  - `2048` -> `2048 tokens (Concise)`
+  - `4096` -> `4096 tokens (Standard Production)`
+  - `8192` -> `8192 tokens (Default Production / Generous Output)`
+  - `16384` -> `16384 tokens (Full Research Report)`
+  - `32768` -> `32768 tokens (Agentic Loop: 32k - Extended Architecture)`
+  - `65536` -> `65536 tokens (Agentic Loop: 64k - Full Application Modules)`
+  - `131072` -> `131072 tokens (Agentic Loop: 128k - Complex Multi-Tier Systems)`
+  - `262144` -> `262144 tokens (Agentic Loop: 256k - Complete Full-Stack Codebase)`
+- `agentic_loop_chaining: bool` (default `true`): Auto-chain LLM turns recursively up to 262k tokens.
+- `agentic_loop_chunk_size: usize` (default `4096`, options: 2048 / 4096 / 8192 tokens per recursive hop).
+- `deep_research_iterative_rag: bool` (default `true`): Structured multi-hop research (`SectionPlan` / `DocumentPlan`).
+- `parent_document_retrieval: bool` (default `true`): Expanding matched chunks with surrounding/adjacent parent chunks.
+- `map_reduce_fact_extraction: bool` (default `true`): Distilling retrieved chunks into dense fact sheets before synthesis.
+
+### R2. Parent Document Retrieval and Expanded Breadth
+Implement parent document retrieval in `crates/quorum-coordinator/src/offline_engine.rs` and `crates/quorum-coordinator/src/agentic/`:
+- Embed granular chunks for accurate retrieval, but stitch surrounding/adjacent chunks from the same document/file path to provide broader context rather than isolated fragments.
+- Expand retrieval breadth by supporting `top_k` from 20 up to 50 chunks, combining hybrid vector and lexical search with reranking.
+
+### R3. Iterative Section Generation and Recursive Agentic Loop Chaining
+Implement multi-hop iterative RAG and recursive turn chaining:
+- When enabled via settings or when the output token budget requires multi-section expansion, generate a structured `DocumentPlan` containing `SectionPlan` subtopics and targeted search queries from initial broad retrieval.
+- Iterate through each section, executing dedicated targeted vector queries and synthesizing standalone chapters using retrieved context while passing the previous section tail (`rolling_summary`, ~1500 chars) for continuity.
+- Recursively chain LLM turns up to the configured `max_output_tokens` when `done_reason == "length"` or when the user prompts "continue" or "tell me more", feeding turn outputs back into context.
+- Enforce a sentence-boundary completion guard so that generated text never cuts off mid-sentence.
+
+### R4. Map-Reduce Fact Sheet Extraction
+Implement a Map-Reduce / Refine extraction step over retrieved chunks prior to section writing:
+- Run parallel extraction over chunk groups (e.g., 3-4 chunks) to extract relevant facts, quotes, and metrics verbatim into fact sheets.
+- Provide the distilled fact sheets to the synthesis model for coherent, high-density chapter writing.
+
+### R5. Offline Engine Fixes, Truncation Guards, and Actions Bar
+Fix existing retrieval, ranking, and UI response defects:
+- Fix `file_hits` in `offline_engine.rs:499` to check filename tokens (`file_l`) rather than body tokens (`matches_whole_word`).
+- Remove the broken `scored.score < 0.35` RRF filter at `offline_engine.rs:505`.
+- Ensure follow-up queries like "tell me more" and "continue" never fail with empty chunks.
+- Format all responses to restate the question at the start, provide inline `[1]`, `[2]` citations, append `### 📚 Sources & Document Links` with `SOURCES` badges, and render the `.response-actions-bar` (`Continue`, `Copy`, `Regenerate`, `Read Aloud`, `Save File`, `Clear`, `👍`, `👎`).
+
+### R6. Build, Service Deployment, and Live Verification
+- Terminate existing daemon instances, clean/delete `target/debug/quorumrag.exe`, and rebuild `quorumrag.exe`.
+- Ship verified changes using `scripts/solo_pr_ship.ps1`.
+- Restart `quorumrag.exe` listening on `0.0.0.0:3031` and verify live SSE responses for `"tell me about sacred maths"` and `"tell me more"` without mid-sentence cutoffs.
+
+## Acceptance Criteria
+
+### Settings & Configuration
+- [ ] `UiPreferencesConfig` contains fields for `max_output_tokens`, `agentic_loop_chaining`, `agentic_loop_chunk_size`, `deep_research_iterative_rag`, `parent_document_retrieval`, and `map_reduce_fact_extraction`.
+- [ ] Settings UI displays the exact dropdown options from 256 tokens up to 262144 tokens, along with toggles for iterative RAG, parent document retrieval, map-reduce, and agentic loop chaining.
+
+### Retrieval & Synthesis
+- [ ] Parent document retrieval stitches adjacent chunks from the same document without returning isolated fragments.
+- [ ] Iterative section generation creates a structured outline of subtopics and targeted queries, querying and writing section by section.
+- [ ] Generated responses never terminate mid-sentence.
+- [ ] "tell me more" and "continue" follow-up queries retrieve relevant context and chain turns successfully without empty chunks.
+- [ ] Filename token search in `file_hits` checks `file_l`, and the `scored.score < 0.35` RRF filter is removed.
+
+### UI & Presentation
+- [ ] Responses open with a restatement of the question.
+- [ ] Responses contain inline bracketed citations matching cited sources.
+- [ ] Responses conclude with `### 📚 Sources & Document Links`, source badges, and the `.response-actions-bar` action buttons.
+
+### Verification
+- [ ] `cargo test` passes across all crates.
+- [ ] Live SSE test query for `"tell me about sacred maths"` on `0.0.0.0:3031` generates an exhaustive, multi-section response without mid-sentence cutoff.
+- [ ] Live SSE follow-up query for `"tell me more"` continues generating context without stalling on empty chunks.
+- [ ] Changes are committed and pushed via `scripts/solo_pr_ship.ps1`.
+
+## Verification Resources
+- Existing cargo test suite (`cargo test`).
+- Solo PR ship script: `scripts/solo_pr_ship.ps1`.
+- Live SSE test queries on `http://127.0.0.1:3031`:
+  - Initial query: `"tell me about sacred maths"`
+  - Continuation query: `"tell me more"`
+
+
+## Follow-up — 2026-11-02T23:52:52Z
+
+CRITICAL UPDATE FROM THE USER (`media_1793663504433_73a6de32.png`):
+The user said: "is already set, it must respect this the last response did not" and uploaded a screenshot showing `Max Output Tokens` in Settings already set to `262144 tokens (Agentic Loop: 256k - Complete Full-Stack Codebase)`.
+
+Analysis & Mandate:
+`ChatGptUiSettings` in `crates/quorum-coordinator/src/dlp_mesh.rs:248-251` and `316-319` ALREADY defines:
+```rust
+pub max_output_tokens: usize,      // default: 262144
+pub agentic_loop_enabled: bool,    // default: true
+pub agentic_chunk_size: usize,     // default: 4096
+pub agentic_strategy: String,      // default: "auto_continuation"
+```
+Root Cause Analysis:
+1. In `crates/quorum-coordinator/src/offline_engine.rs:1154`, someone hardcoded `let num_predict = 1600usize;` and completely ignored `ui.max_output_tokens`, `ui.agentic_loop_enabled`, `ui.agentic_chunk_size`, and `ui.agentic_strategy`!
+2. In `crates/quorum-daemon/src/handlers/chat.rs:111`, the SSE channel was previously only `256` events (`mpsc::channel(256)`), which truncated output after ~235 tokens ("Sacred math has been").
+3. You MUST ensure `offline_engine.rs` (`synthesize_with_history` / `query_local_ollama_chat`) and `agentic/` strictly read and respect:
+   - `ui.max_output_tokens` (e.g., `256`, `512`, `2048`, `4096`, `8192`, `16384`, `32768`, `65536`, `131072`, `262144`)
+   - `ui.agentic_loop_enabled` (`bool`)
+   - `ui.agentic_chunk_size` (`usize`, e.g. `4096` tokens per hop)
+   - `ui.agentic_strategy` (`"auto_continuation"`, `"iterative_sections"`, `"map_reduce"`, etc.)
+4. Specifically, when `ui.max_output_tokens` is set to a small value like `256` or `512` (and `agentic_loop_enabled` is false), `num_predict` respects that upper bound and finishes on a clean sentence boundary. When `ui.max_output_tokens` is set to `8192`..`262144` (or `ui.agentic_loop_enabled == true`), the synthesis engine must:
+   - Use `ui.agentic_chunk_size.max(2048)` as the per-hop `num_predict` budget (and `num_ctx = 16384` or `32768`),
+   - Retrieve a broad pool of chunks (`top_k` up to 20–50) with Parent Document / surrounding chunk expansion from the same document so the model has rich, non-fragmented evidence across all matching sections of the local documents,
+   - Execute the Deep Research / Iterative Section / Recursive Agentic Chaining loop across multiple grounded sections or continuation hops (passing `rolling_summary` = last ~1500 chars of the previous section for seamless continuity) so it generates a massive, comprehensive, multi-section response covering every distinct subtopic/chunk in the retrieved documents without cutting off mid-sentence and without repeating itself!
+   - Stream every single section/hop token in real time over `telemetry_tx` (`mpsc::channel(16384)` or `tx.blocking_send` inside `block_in_place` so zero tokens are ever dropped even on massive 256k responses!), followed by `### 📚 Sources & Document Links` + `CitationEmitted` + `ExecutionFinished`.
+   - In `query_local_ollama_chat`, use `tx.blocking_send(AgenticTelemetryEvent::TokenDelta { delta })` (inside `tokio::task::block_in_place`) or retry if full so NOT A SINGLE TOKEN IS EVER DROPPED regardless of how many thousands of tokens are streamed!
+
+
+## Follow-up — 2026-11-03T00:31:39Z
+
+The user asked: "is it done".
+Mandate: Provide immediate status update on M12–M15, expedite completing implementation in `offline_engine.rs` and `agentic/`, rebuilding `quorumrag.exe`, restarting on `0.0.0.0:3031`, and shipping via `scripts/solo_pr_ship.ps1` so the user can test immediately.
+
+
+## Follow-up — 2026-11-03T00:47:19Z
+
+URGENT FROM USER: The user asked: "is it there http://127.0.0.1:3031".
+Mandate: Since M12–M14 code changes in `offline_engine.rs`, `classify.rs`, and `retrieve.rs` are complete, immediately build `cargo build -p quorum-daemon --bin quorumrag` (with `$env:CARGO_INCREMENTAL="0"`, removing `target\debug\quorumrag.exe` first) and launch `d:\harfile\QuorumRAG\target\debug\quorumrag.exe --host 0.0.0.0 --port 3031 --data-dir "d:\harfile\QuorumRAG\.quorumrag-rag-index" --no-browser` right now so `http://127.0.0.1:3031` is live immediately for the user while any remaining M15 verification finishes.
