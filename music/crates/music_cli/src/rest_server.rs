@@ -122,6 +122,7 @@ pub struct AppState {
     pub reference_wavs: Arc<tokio::sync::RwLock<HashMap<String, StoredReferenceWav>>>,
     pub rl_policy: Arc<tokio::sync::RwLock<RlPolicy>>,
     pub last_synthesis_action: Arc<tokio::sync::RwLock<Option<SynthesisAction>>>,
+    pub album_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -140,6 +141,7 @@ impl AppState {
             reference_wavs: Arc::new(tokio::sync::RwLock::new(initial_refs)),
             rl_policy: Arc::new(tokio::sync::RwLock::new(RlPolicy::new(64, music_fusion::rl_policy::PolicyMode::Learned))),
             last_synthesis_action: Arc::new(tokio::sync::RwLock::new(None)),
+            album_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }
@@ -168,6 +170,8 @@ pub struct CreateSongRequest {
     pub image_base64: Option<String>,
     #[serde(default)]
     pub image_mime_type: Option<String>,
+    #[serde(default)]
+    pub target_album_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -181,6 +185,10 @@ pub struct CreateSongResponse {
     pub key_signature: String,
     pub lyrics: String,
     pub model_used: String,
+    pub saved_wav_path: Option<String>,
+    pub liked: bool,
+    pub album_id: Option<String>,
+    pub album_title: Option<String>,
     pub state: MusicProductionState,
     pub audio_urls: HashMap<String, String>,
 }
@@ -273,6 +281,8 @@ pub struct VersionSummary {
     pub judge_score: f32,
     pub created_at: String,
     pub iteration_summary: Option<String>,
+    pub lyrics: Option<String>,
+    pub prompt: Option<String>,
     pub stems: Vec<String>,
     pub has_master: bool,
 }
@@ -290,6 +300,9 @@ pub struct SongCatalogEntry {
     pub title: String,
     pub genre: String,
     pub latest_version: u32,
+    pub liked: bool,
+    pub album_id: Option<String>,
+    pub album_title: Option<String>,
     pub versions: Vec<VersionSummary>,
 }
 
@@ -421,7 +434,14 @@ pub async fn handle_create_song(
     State(state): State<AppState>,
     Json(req): Json<CreateSongRequest>,
 ) -> Response {
-    let prompt_lower = req.prompt.to_ascii_lowercase();
+    let effective_prompt = if req.prompt.trim().is_empty() {
+        req.genre
+            .clone()
+            .unwrap_or_else(|| "Acoustic Folk & Studio Poem Ballad".to_string())
+    } else {
+        req.prompt.clone()
+    };
+    let prompt_lower = effective_prompt.to_ascii_lowercase();
     let is_temp_test_storage = state.storage_dir.starts_with(std::env::temp_dir());
     let gemini_configured = !is_temp_test_storage
         && music_dsp::melodic_singing::MelodicSingingSynthesizer::resolve_dotenv_gemini_api_key().is_some();
@@ -430,8 +450,14 @@ pub async fn handle_create_song(
         .as_deref()
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false);
+    let has_lyrics_poem = req
+        .lyrics
+        .as_deref()
+        .map(|l| !l.trim().is_empty() && music_dsp::ReferenceRlSynthesizer::extract_raw_poem_lines_from_prompt(l).is_some())
+        .unwrap_or(false);
     let is_poem_prompt = !is_temp_test_storage
-        && (music_dsp::ReferenceRlSynthesizer::extract_raw_poem_lines_from_prompt(&req.prompt).is_some()
+        && (music_dsp::ReferenceRlSynthesizer::extract_raw_poem_lines_from_prompt(&effective_prompt).is_some()
+            || has_lyrics_poem
             || prompt_lower.contains("grasslands")
             || prompt_lower.contains("flamingos")
             || prompt_lower.contains("watering kingdoms"));
@@ -477,7 +503,7 @@ pub async fn handle_create_song(
             .await
             .select_action(&blended.blended_style_embedding, seed);
 
-        let prompt_owned = req.prompt.clone();
+        let prompt_owned = effective_prompt.clone();
         let lyrics_owned = req.lyrics.clone();
         let img_b64_owned = req.image_base64.clone();
         let img_mime_owned = req.image_mime_type.clone();
@@ -512,7 +538,29 @@ pub async fn handle_create_song(
             }
         };
 
-        let song_id = "rl_ensemble_showcase".to_string();
+        let base_title_part: String = synth_out
+            .title
+            .chars()
+            .take_while(|&c| c != '(' && c != '\u{2014}')
+            .collect();
+        let file_slug: String = base_title_part
+            .split_whitespace()
+            .map(|w| {
+                w.chars()
+                    .filter(|c| c.is_ascii_alphanumeric())
+                    .collect::<String>()
+            })
+            .filter(|w| !w.is_empty())
+            .take(7)
+            .collect::<Vec<_>>()
+            .join("_");
+        let clean_slug = if file_slug.is_empty() {
+            "Studio_Song".to_string()
+        } else {
+            file_slug
+        };
+        let short_hex = &uuid::Uuid::new_v4().simple().to_string()[..6];
+        let song_id = format!("song_{}_{}", clean_slug.to_ascii_lowercase(), short_hex);
         let version = 1u32;
         let v_dir = state.storage_dir.join("songs").join(&song_id).join("v1");
         let stems_dir = v_dir.join("stems");
@@ -546,14 +594,28 @@ pub async fn handle_create_song(
         let _ = std::fs::write(v_dir.join("lyrics.txt"), &synth_out.lyrics);
         let _ = std::fs::write(v_dir.join("genre.txt"), &synth_out.genre_label);
 
+        let mut saved_wav_path = None;
         let d_music_dir = Path::new(r"D:\music");
         if d_music_dir.exists() && d_music_dir.is_dir() {
+            let named_wav = d_music_dir.join(format!("{}.wav", clean_slug));
+            if synth_out
+                .final_master
+                .to_wav_file_with_format(&named_wav, pcm16)
+                .is_ok()
+            {
+                saved_wav_path = Some(named_wav.to_string_lossy().to_string());
+            }
+            let _ = synth_out
+                .final_master
+                .to_wav_file_with_format(&d_music_dir.join("LATEST_GENERATED_SONG.wav"), pcm16);
             let _ = synth_out
                 .final_master
                 .to_wav_file_with_format(&d_music_dir.join("GENERATED_RL_SAMPLE_SONG.wav"), pcm16);
-            let _ = synth_out
-                .final_master
-                .to_wav_file_with_format(&d_music_dir.join("Watering_Kingdoms_of_the_Grasslands_Poem.wav"), pcm16);
+            if prompt_lower.contains("grasslands") || prompt_lower.contains("flamingos") {
+                let _ = synth_out
+                    .final_master
+                    .to_wav_file_with_format(&d_music_dir.join("Watering_Kingdoms_of_the_Grasslands_Poem.wav"), pcm16);
+            }
         }
 
         let model_used = if synth_out.genre_label.contains("Lyria 3.5") {
@@ -593,6 +655,18 @@ pub async fn handle_create_song(
         ));
         let _ = state.runner.checkpointer().save_checkpoint(&final_state, "create_song_lyria35").await;
 
+        let mut user_meta = load_song_user_meta(&state.storage_dir, &final_state.song_id);
+        if let Some(ref target_aid) = req.target_album_id {
+            if !target_aid.trim().is_empty() {
+                let _guard = state.album_lock.lock().await;
+                if let Ok(album) = assign_song_to_album_locked(&state, target_aid.trim(), &final_state.song_id, final_state.version).await {
+                    user_meta.liked = true;
+                    user_meta.album_id = Some(album.album_id);
+                    user_meta.album_title = Some(album.title);
+                }
+            }
+        }
+
         let audio_urls = build_audio_urls(&final_state.song_id, final_state.version);
         return Json(CreateSongResponse {
             status: "success".to_string(),
@@ -604,6 +678,10 @@ pub async fn handle_create_song(
             key_signature: synth_out.key_signature,
             lyrics: synth_out.lyrics,
             model_used,
+            saved_wav_path,
+            liked: user_meta.liked,
+            album_id: user_meta.album_id,
+            album_title: user_meta.album_title,
             state: final_state,
             audio_urls,
         })
@@ -629,6 +707,17 @@ pub async fn handle_create_song(
 
     match state.runner.execute_song(init_state).await {
         Ok(final_state) => {
+            let mut user_meta = load_song_user_meta(&state.storage_dir, &final_state.song_id);
+            if let Some(ref target_aid) = req.target_album_id {
+                if !target_aid.trim().is_empty() {
+                    let _guard = state.album_lock.lock().await;
+                    if let Ok(album) = assign_song_to_album_locked(&state, target_aid.trim(), &final_state.song_id, final_state.version).await {
+                        user_meta.liked = true;
+                        user_meta.album_id = Some(album.album_id);
+                        user_meta.album_title = Some(album.title);
+                    }
+                }
+            }
             let audio_urls = build_audio_urls(&final_state.song_id, final_state.version);
             let title = final_state
                 .blueprint
@@ -645,6 +734,10 @@ pub async fn handle_create_song(
                 key_signature: final_state.key_signature.clone(),
                 lyrics: final_state.lyrics.clone(),
                 model_used: req.hf_model.unwrap_or_else(|| "pure_rust_dsp".to_string()),
+                saved_wav_path: None,
+                liked: user_meta.liked,
+                album_id: user_meta.album_id,
+                album_title: user_meta.album_title,
                 state: final_state,
                 audio_urls,
             }).into_response()
@@ -697,8 +790,14 @@ pub async fn handle_iterate_song(
         ..Default::default()
     };
 
-    let iteration_result = panel.run_iteration_fusion(&prev_state, &req.critique, &tweaks).await
-        .unwrap_or_else(|_| panel.offline_fallback_iteration(&prev_state, &req.critique, &tweaks));
+    let iteration_result = tokio::time::timeout(
+        std::time::Duration::from_secs(6),
+        panel.run_iteration_fusion(&prev_state, &req.critique, &tweaks),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or_else(|| panel.offline_fallback_iteration(&prev_state, &req.critique, &tweaks));
 
     let mut next_state = prev_state.clone();
     next_state.advance_version();
@@ -1332,6 +1431,8 @@ pub async fn handle_list_songs(State(state): State<AppState>) -> Response {
                         judge_score: st.judge_score,
                         created_at: st.created_at.clone(),
                         iteration_summary: st.history.last().cloned(),
+                        lyrics: if st.lyrics.is_empty() { None } else { Some(st.lyrics.clone()) },
+                        prompt: if st.style_prompt.is_empty() { None } else { Some(st.style_prompt.clone()) },
                         stems,
                         has_master,
                     });
@@ -1339,16 +1440,26 @@ pub async fn handle_list_songs(State(state): State<AppState>) -> Response {
             }
 
             if !versions.is_empty() {
+                let user_meta = load_song_user_meta(&state.storage_dir, &clean_id);
                 catalog.push(SongCatalogEntry {
                     song_id: clean_id,
                     title: song_title,
                     genre: song_genre,
                     latest_version: latest_v,
+                    liked: user_meta.liked,
+                    album_id: user_meta.album_id,
+                    album_title: user_meta.album_title,
                     versions,
                 });
             }
         }
     }
+
+    catalog.sort_by(|a, b| {
+        let a_ts = a.versions.last().map(|v| v.created_at.as_str()).unwrap_or("");
+        let b_ts = b.versions.last().map(|v| v.created_at.as_str()).unwrap_or("");
+        b_ts.cmp(a_ts)
+    });
 
     Json(ListSongsResponse { songs: catalog }).into_response()
 }
@@ -1383,16 +1494,24 @@ pub async fn handle_list_versions(
                 ];
             }
             let has_master = st.has_stem(STEM_FINAL_MASTER);
+            let ver_title = st
+                .blueprint
+                .as_ref()
+                .map(|b| b.title.clone())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| st.song_id.clone());
 
             versions.push(VersionSummary {
                 version: v,
-                title: st.song_id.clone(),
+                title: ver_title,
                 genre: st.genre.clone(),
                 bpm: st.bpm,
                 key_signature: st.key_signature.clone(),
                 judge_score: st.judge_score,
                 created_at: st.created_at.clone(),
                 iteration_summary: st.history.last().cloned(),
+                lyrics: if st.lyrics.is_empty() { None } else { Some(st.lyrics.clone()) },
+                prompt: if st.style_prompt.is_empty() { None } else { Some(st.style_prompt.clone()) },
                 stems,
                 has_master,
             });
@@ -2926,6 +3045,956 @@ pub async fn handle_set_gemini_env(
 }
 
 // ---------------------------------------------------------------------------
+// Unique Album Studio & Liked Song Persistence + Disk Export + ZIP Archive
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SongUserMeta {
+    #[serde(default)]
+    pub liked: bool,
+    #[serde(default)]
+    pub album_id: Option<String>,
+    #[serde(default)]
+    pub album_title: Option<String>,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlbumTrackEntry {
+    pub track_number: usize,
+    pub song_id: String,
+    pub version: u32,
+    pub title: String,
+    pub genre: String,
+    pub bpm: u32,
+    pub key_signature: String,
+    pub lyrics: String,
+    pub added_at: String,
+    pub exported_wav_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlbumRecord {
+    pub album_id: String,
+    pub title: String,
+    pub artist: String,
+    pub description: String,
+    #[serde(default)]
+    pub cover_data_url: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub disk_folder_path: String,
+    pub tracks: Vec<AlbumTrackEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListAlbumsResponse {
+    pub albums: Vec<AlbumRecord>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CreateAlbumRequest {
+    pub title: String,
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub cover_data_url: Option<String>,
+    #[serde(default)]
+    pub initial_song_id: Option<String>,
+    #[serde(default)]
+    pub initial_version: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct UpdateAlbumRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub cover_data_url: Option<String>,
+    #[serde(default)]
+    pub track_order: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddTrackToAlbumRequest {
+    pub song_id: String,
+    #[serde(default)]
+    pub version: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ToggleSongLikeRequest {
+    #[serde(default)]
+    pub liked: Option<bool>,
+}
+
+fn sanitize_safe_fs_slug(raw: &str, fallback: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut last_sep = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_sep = false;
+        } else if (ch == ' ' || ch == '_' || ch == '-') && !out.is_empty() && !last_sep {
+            out.push('_');
+            last_sep = true;
+        }
+        if out.len() >= 60 {
+            break;
+        }
+    }
+    let trimmed = out.trim_matches('_').trim_matches('-').to_string();
+    let upper = trimmed.to_ascii_uppercase();
+    let reserved = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    if trimmed.is_empty() || reserved.contains(&upper.as_str()) {
+        fallback.to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn verify_single_normal_component(segment: &str) -> anyhow::Result<()> {
+    if segment.is_empty()
+        || segment.contains(':')
+        || segment.contains('/')
+        || segment.contains('\\')
+        || segment.contains('%')
+        || segment.contains('\0')
+    {
+        anyhow::bail!("Unsafe path component rejected");
+    }
+    let mut comps = Path::new(segment).components();
+    match (comps.next(), comps.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Ok(()),
+        _ => anyhow::bail!("Non-normal path component rejected"),
+    }
+}
+
+fn resolve_albums_export_root(storage_dir: &Path) -> PathBuf {
+    let is_temp = storage_dir.starts_with(std::env::temp_dir());
+    let d_music = Path::new(r"D:\music");
+    if !is_temp && d_music.exists() && d_music.is_dir() {
+        d_music.join("Albums")
+    } else {
+        storage_dir.join("albums_export")
+    }
+}
+
+fn load_song_user_meta(storage_dir: &Path, song_id: &str) -> SongUserMeta {
+    let Ok(clean_id) = CheckpointManager::sanitize_path_component(song_id) else {
+        return SongUserMeta::default();
+    };
+    let meta_path = storage_dir.join("songs").join(clean_id).join("user_meta.json");
+    std::fs::read_to_string(&meta_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<SongUserMeta>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_song_user_meta(storage_dir: &Path, song_id: &str, meta: &SongUserMeta) {
+    let Ok(clean_id) = CheckpointManager::sanitize_path_component(song_id) else {
+        return;
+    };
+    let song_dir = storage_dir.join("songs").join(clean_id);
+    if !song_dir.exists() {
+        let _ = std::fs::create_dir_all(&song_dir);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(meta) {
+        let tmp_path = song_dir.join("user_meta.json.tmp");
+        let final_path = song_dir.join("user_meta.json");
+        if std::fs::write(&tmp_path, json).is_ok() {
+            let _ = std::fs::rename(&tmp_path, &final_path);
+        }
+    }
+}
+
+fn load_all_albums_sync(storage_dir: &Path) -> Vec<AlbumRecord> {
+    let albums_dir = storage_dir.join("albums");
+    let mut list = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&albums_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                let json_path = entry.path().join("album.json");
+                if let Ok(raw) = std::fs::read_to_string(&json_path) {
+                    if let Ok(rec) = serde_json::from_str::<AlbumRecord>(&raw) {
+                        list.push(rec);
+                    }
+                }
+            }
+        }
+    }
+    list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    list
+}
+
+fn load_single_album_sync(storage_dir: &Path, album_id: &str) -> anyhow::Result<AlbumRecord> {
+    let clean_id = CheckpointManager::sanitize_path_component(album_id)?;
+    let json_path = storage_dir.join("albums").join(&clean_id).join("album.json");
+    let raw = std::fs::read_to_string(&json_path)
+        .map_err(|_| anyhow::anyhow!("Album '{}' not found", clean_id))?;
+    let rec = serde_json::from_str::<AlbumRecord>(&raw)?;
+    Ok(rec)
+}
+
+fn decode_base64_simple(b64: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(b64.len() * 3 / 4);
+    let mut buf = 0u32;
+    let mut bits = 0u8;
+    for byte in b64.bytes() {
+        if byte.is_ascii_whitespace() {
+            continue;
+        }
+        if byte == b'=' {
+            break;
+        }
+        let val = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        buf = (buf << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buf >> bits) & 0xFF) as u8);
+        }
+    }
+    Some(out)
+}
+
+fn sync_album_to_disk(storage_dir: &Path, album: &mut AlbumRecord) -> anyhow::Result<()> {
+    let clean_id = CheckpointManager::sanitize_path_component(&album.album_id)?;
+    let album_meta_dir = storage_dir.join("albums").join(&clean_id);
+    std::fs::create_dir_all(&album_meta_dir)?;
+
+    let folder_slug = sanitize_safe_fs_slug(&album.title, "Unique_Album");
+    verify_single_normal_component(&folder_slug)?;
+    let export_root = resolve_albums_export_root(storage_dir);
+    let export_dir = export_root.join(&folder_slug);
+    std::fs::create_dir_all(&export_dir)?;
+    album.disk_folder_path = export_dir.to_string_lossy().to_string();
+
+    // Clean stale numbered WAV files (`NN - *.wav`) before writing updated tracklist order
+    if let Ok(existing) = std::fs::read_dir(&export_dir) {
+        for ent in existing.flatten() {
+            let p = ent.path();
+            if let Some(fname) = p.file_name().and_then(|n| n.to_str()) {
+                let bytes = fname.as_bytes();
+                let is_numbered_wav = bytes.len() > 8
+                    && bytes[0].is_ascii_digit()
+                    && bytes[1].is_ascii_digit()
+                    && fname[2..].starts_with(" - ")
+                    && fname.to_ascii_lowercase().ends_with(".wav");
+                if is_numbered_wav {
+                    let _ = std::fs::remove_file(&p);
+                }
+            }
+        }
+    }
+
+    let mut booklet = format!(
+        "# {}\n\n- **Artist / Poet:** {}\n- **Album ID:** `{}`\n- **Tracks:** {}\n- **Updated:** {}\n",
+        album.title,
+        if album.artist.trim().is_empty() { "Original Poems & Studio Vocalist" } else { album.artist.trim() },
+        album.album_id,
+        album.tracks.len(),
+        album.updated_at
+    );
+    if !album.description.trim().is_empty() {
+        booklet.push_str(&format!("\n## Liner Notes\n\n{}\n", album.description.trim()));
+    }
+    booklet.push_str("\n---\n");
+
+    for (idx, track) in album.tracks.iter_mut().enumerate() {
+        track.track_number = idx + 1;
+        let base_t: String = track
+            .title
+            .chars()
+            .take_while(|&c| c != '(' && c != '\u{2014}')
+            .collect();
+        let safe_track = sanitize_safe_fs_slug(base_t.trim(), &track.song_id).replace('_', " ");
+        let wav_filename = format!("{:02} - {}.wav", track.track_number, safe_track.trim());
+        verify_single_normal_component(&wav_filename)?;
+        let dst_wav = export_dir.join(&wav_filename);
+
+        let clean_song = CheckpointManager::sanitize_path_component(&track.song_id)
+            .unwrap_or_else(|_| "unknown_song".to_string());
+        let src_v = storage_dir
+            .join("songs")
+            .join(&clean_song)
+            .join(format!("v{}", track.version.max(1)))
+            .join("final_master.wav");
+        let src_v1 = storage_dir
+            .join("songs")
+            .join(&clean_song)
+            .join("v1")
+            .join("final_master.wav");
+
+        if src_v.exists() {
+            let _ = std::fs::copy(&src_v, &dst_wav);
+        } else if src_v1.exists() {
+            let _ = std::fs::copy(&src_v1, &dst_wav);
+        }
+        track.exported_wav_path = dst_wav.to_string_lossy().to_string();
+
+        booklet.push_str(&format!(
+            "\n## Track {:02}: {}\n- **Genre:** {} | **Tempo:** {} BPM | **Key:** {} | **Version:** v{}\n\n```text\n{}\n```\n",
+            track.track_number,
+            track.title,
+            track.genre,
+            track.bpm,
+            track.key_signature,
+            track.version,
+            if track.lyrics.trim().is_empty() { "(Instrumental / Custom Arrangement)" } else { track.lyrics.trim() }
+        ));
+    }
+
+    let _ = std::fs::write(export_dir.join("lyrics_booklet.md"), booklet.as_bytes());
+
+    if let Some(ref data_url) = album.cover_data_url {
+        if let Some((header_part, b64_part)) = data_url.split_once(";base64,") {
+            let ext = if header_part.contains("jpeg") || header_part.contains("jpg") {
+                "jpg"
+            } else if header_part.contains("webp") {
+                "webp"
+            } else {
+                "png"
+            };
+            if let Some(img_bytes) = decode_base64_simple(b64_part) {
+                if !img_bytes.is_empty() && img_bytes.len() <= 12 * 1024 * 1024 {
+                    let _ = std::fs::write(export_dir.join(format!("cover.{}", ext)), &img_bytes);
+                }
+            }
+        }
+    }
+
+    let manifest_json = serde_json::to_string_pretty(album)?;
+    let _ = std::fs::write(export_dir.join("album_manifest.json"), manifest_json.as_bytes());
+
+    let tmp_meta = album_meta_dir.join("album.json.tmp");
+    let final_meta = album_meta_dir.join("album.json");
+    std::fs::write(&tmp_meta, manifest_json.as_bytes())?;
+    std::fs::rename(&tmp_meta, &final_meta)?;
+    Ok(())
+}
+
+async fn resolve_track_entry_for_song(
+    state: &AppState,
+    clean_song_id: &str,
+    requested_version: Option<u32>,
+) -> anyhow::Result<AlbumTrackEntry> {
+    let versions = state
+        .runner
+        .checkpointer()
+        .list_versions(clean_song_id)
+        .unwrap_or_default();
+    if versions.is_empty() {
+        anyhow::bail!("Song '{}' does not exist in storage", clean_song_id);
+    }
+    let ver = requested_version
+        .filter(|v| versions.contains(v))
+        .unwrap_or_else(|| *versions.iter().max().unwrap_or(&1));
+    let st = state
+        .runner
+        .checkpointer()
+        .load_checkpoint(clean_song_id, ver)
+        .await?;
+    let title = st
+        .blueprint
+        .as_ref()
+        .and_then(|bp| if bp.title.trim().is_empty() { None } else { Some(bp.title.clone()) })
+        .unwrap_or_else(|| clean_song_id.to_string());
+    let lyrics = if !st.lyrics.trim().is_empty() {
+        st.lyrics.clone()
+    } else {
+        std::fs::read_to_string(
+            state
+                .storage_dir
+                .join("songs")
+                .join(clean_song_id)
+                .join(format!("v{}", ver))
+                .join("lyrics.txt"),
+        )
+        .unwrap_or_default()
+    };
+
+    Ok(AlbumTrackEntry {
+        track_number: 1,
+        song_id: clean_song_id.to_string(),
+        version: ver,
+        title,
+        genre: st.genre,
+        bpm: st.bpm,
+        key_signature: st.key_signature,
+        lyrics,
+        added_at: chrono::Utc::now().to_rfc3339(),
+        exported_wav_path: String::new(),
+    })
+}
+
+async fn assign_song_to_album_locked(
+    state: &AppState,
+    album_id: &str,
+    raw_song_id: &str,
+    version: u32,
+) -> anyhow::Result<AlbumRecord> {
+    let clean_album_id = CheckpointManager::sanitize_path_component(album_id)?;
+    let clean_song_id = resolve_song_alias(
+        &state.storage_dir,
+        &CheckpointManager::sanitize_path_component(raw_song_id)?,
+    );
+
+    let mut target_album = load_single_album_sync(&state.storage_dir, &clean_album_id)?;
+    let track_entry = resolve_track_entry_for_song(state, &clean_song_id, Some(version)).await?;
+
+    // If song was previously assigned to a different album, cleanly move it out of the old album
+    let prev_meta = load_song_user_meta(&state.storage_dir, &clean_song_id);
+    if let Some(prev_aid) = prev_meta.album_id.as_deref() {
+        if prev_aid != clean_album_id {
+            if let Ok(mut old_album) = load_single_album_sync(&state.storage_dir, prev_aid) {
+                let before = old_album.tracks.len();
+                old_album.tracks.retain(|t| t.song_id != clean_song_id);
+                if old_album.tracks.len() != before {
+                    old_album.updated_at = chrono::Utc::now().to_rfc3339();
+                    let _ = sync_album_to_disk(&state.storage_dir, &mut old_album);
+                }
+            }
+        }
+    }
+
+    if let Some(existing) = target_album
+        .tracks
+        .iter_mut()
+        .find(|t| t.song_id == clean_song_id)
+    {
+        existing.version = track_entry.version;
+        existing.title = track_entry.title;
+        existing.genre = track_entry.genre;
+        existing.bpm = track_entry.bpm;
+        existing.key_signature = track_entry.key_signature;
+        existing.lyrics = track_entry.lyrics;
+    } else {
+        target_album.tracks.push(track_entry);
+    }
+
+    target_album.updated_at = chrono::Utc::now().to_rfc3339();
+    sync_album_to_disk(&state.storage_dir, &mut target_album)?;
+
+    let updated_meta = SongUserMeta {
+        liked: true,
+        album_id: Some(target_album.album_id.clone()),
+        album_title: Some(target_album.title.clone()),
+        updated_at: target_album.updated_at.clone(),
+    };
+    save_song_user_meta(&state.storage_dir, &clean_song_id, &updated_meta);
+
+    Ok(target_album)
+}
+
+fn crc32_ieee(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &b in bytes {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            if (crc & 1) != 0 {
+                crc = (crc >> 1) ^ 0xEDB8_8320;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    !crc
+}
+
+fn build_stored_zip_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central_dir = Vec::new();
+    let mut count = 0u16;
+
+    for &(name, data) in entries {
+        let name_bytes = name.as_bytes();
+        if name_bytes.len() > u16::MAX as usize || data.len() > u32::MAX as usize {
+            continue;
+        }
+        let local_offset = out.len() as u32;
+        let crc = crc32_ieee(data);
+        let size = data.len() as u32;
+        let nlen = name_bytes.len() as u16;
+        let flags = 0x0800u16; // UTF-8 filename flag
+
+        // Local File Header (0x04034b50)
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        out.extend_from_slice(&flags.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // store method (0)
+        out.extend_from_slice(&0u16.to_le_bytes()); // mod time
+        out.extend_from_slice(&0x5421u16.to_le_bytes()); // mod date
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&nlen.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // extra len
+        out.extend_from_slice(name_bytes);
+        out.extend_from_slice(data);
+
+        // Central Directory Header (0x02014b50)
+        central_dir.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        central_dir.extend_from_slice(&20u16.to_le_bytes()); // version made by
+        central_dir.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        central_dir.extend_from_slice(&flags.to_le_bytes());
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // store method
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // mod time
+        central_dir.extend_from_slice(&0x5421u16.to_le_bytes()); // mod date
+        central_dir.extend_from_slice(&crc.to_le_bytes());
+        central_dir.extend_from_slice(&size.to_le_bytes());
+        central_dir.extend_from_slice(&size.to_le_bytes());
+        central_dir.extend_from_slice(&nlen.to_le_bytes());
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // extra
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // comment
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // disk start
+        central_dir.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
+        central_dir.extend_from_slice(&0u32.to_le_bytes()); // external attrs
+        central_dir.extend_from_slice(&local_offset.to_le_bytes());
+        central_dir.extend_from_slice(name_bytes);
+
+        count = count.saturating_add(1);
+    }
+
+    let cd_offset = out.len() as u32;
+    let cd_size = central_dir.len() as u32;
+    out.extend_from_slice(&central_dir);
+
+    // End of Central Directory Record (0x06054b50)
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // disk num
+    out.extend_from_slice(&0u16.to_le_bytes()); // cd start disk
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&cd_size.to_le_bytes());
+    out.extend_from_slice(&cd_offset.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // comment len
+    out
+}
+
+/// GET /api/albums - Lists all Unique Albums in `storage/albums/`.
+pub async fn handle_list_albums(State(state): State<AppState>) -> Response {
+    let albums = load_all_albums_sync(&state.storage_dir);
+    Json(ListAlbumsResponse { albums }).into_response()
+}
+
+/// GET /api/albums/:id - Returns a single Unique Album by ID.
+pub async fn handle_get_album(
+    State(state): State<AppState>,
+    AxumPath(album_id): AxumPath<String>,
+) -> Response {
+    match load_single_album_sync(&state.storage_dir, &album_id) {
+        Ok(album) => Json(album).into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/albums - Creates a brand-new Unique Album (enforcing case-insensitive title uniqueness)
+/// and optionally moves an initial liked song into it immediately.
+pub async fn handle_create_album(
+    State(state): State<AppState>,
+    Json(req): Json<CreateAlbumRequest>,
+) -> Response {
+    let clean_title = req.title.trim().to_string();
+    if clean_title.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Album title is required." })),
+        )
+            .into_response();
+    }
+
+    let _guard = state.album_lock.lock().await;
+    let existing_albums = load_all_albums_sync(&state.storage_dir);
+    let normalized_new = clean_title.to_ascii_lowercase();
+    let folder_new = sanitize_safe_fs_slug(&clean_title, "Unique_Album").to_ascii_lowercase();
+    if existing_albums.iter().any(|a| {
+        a.title.trim().to_ascii_lowercase() == normalized_new
+            || sanitize_safe_fs_slug(&a.title, "Unique_Album").to_ascii_lowercase() == folder_new
+    }) {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": format!(
+                    "An album named '{}' already exists. Choose a unique album title or add your song to the existing album.",
+                    clean_title
+                )
+            })),
+        )
+            .into_response();
+    }
+
+    let slug = sanitize_safe_fs_slug(&clean_title, "album").to_ascii_lowercase();
+    let short_hex = &uuid::Uuid::new_v4().simple().to_string()[..6];
+    let album_id = format!("album_{}_{}", slug, short_hex);
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let mut album = AlbumRecord {
+        album_id: album_id.clone(),
+        title: clean_title,
+        artist: req
+            .artist
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "Original Poems & Studio Vocalist".to_string()),
+        description: req
+            .description
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default(),
+        cover_data_url: req.cover_data_url.filter(|s| !s.trim().is_empty()),
+        created_at: now.clone(),
+        updated_at: now,
+        disk_folder_path: String::new(),
+        tracks: Vec::new(),
+    };
+
+    if let Err(e) = sync_album_to_disk(&state.storage_dir, &mut album) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to create album on disk: {}", e) })),
+        )
+            .into_response();
+    }
+
+    if let Some(ref init_song) = req.initial_song_id {
+        if !init_song.trim().is_empty() {
+            let ver = req.initial_version.unwrap_or(1);
+            if let Ok(updated) = assign_song_to_album_locked(&state, &album_id, init_song.trim(), ver).await {
+                album = updated;
+            }
+        }
+    }
+
+    (StatusCode::CREATED, Json(album)).into_response()
+}
+
+/// PUT /api/albums/:id - Updates album metadata and/or track ordering, enforcing unique titles.
+pub async fn handle_update_album(
+    State(state): State<AppState>,
+    AxumPath(album_id): AxumPath<String>,
+    Json(req): Json<UpdateAlbumRequest>,
+) -> Response {
+    let _guard = state.album_lock.lock().await;
+    let mut album = match load_single_album_sync(&state.storage_dir, &album_id) {
+        Ok(a) => a,
+        Err(e) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
+    let old_folder_path = album.disk_folder_path.clone();
+    let mut title_changed = false;
+
+    if let Some(new_title_raw) = req.title {
+        let new_title = new_title_raw.trim().to_string();
+        if new_title.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "Album title cannot be empty." })),
+            )
+                .into_response();
+        }
+        let all = load_all_albums_sync(&state.storage_dir);
+        let norm = new_title.to_ascii_lowercase();
+        let slug_norm = sanitize_safe_fs_slug(&new_title, "Unique_Album").to_ascii_lowercase();
+        if all.iter().any(|other| {
+            other.album_id != album.album_id
+                && (other.title.trim().to_ascii_lowercase() == norm
+                    || sanitize_safe_fs_slug(&other.title, "Unique_Album").to_ascii_lowercase() == slug_norm)
+        }) {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": format!("Another album already uses the title '{}'. Album titles must be unique.", new_title)
+                })),
+            )
+                .into_response();
+        }
+        if album.title != new_title {
+            album.title = new_title;
+            title_changed = true;
+        }
+    }
+
+    if let Some(artist) = req.artist {
+        album.artist = artist.trim().to_string();
+    }
+    if let Some(desc) = req.description {
+        album.description = desc.trim().to_string();
+    }
+    if let Some(cover) = req.cover_data_url {
+        album.cover_data_url = if cover.trim().is_empty() { None } else { Some(cover) };
+    }
+    if let Some(order) = req.track_order {
+        let mut reordered = Vec::with_capacity(album.tracks.len());
+        for sid in &order {
+            if let Some(pos) = album.tracks.iter().position(|t| &t.song_id == sid) {
+                reordered.push(album.tracks.remove(pos));
+            }
+        }
+        reordered.append(&mut album.tracks);
+        album.tracks = reordered;
+    }
+
+    album.updated_at = chrono::Utc::now().to_rfc3339();
+    if let Err(e) = sync_album_to_disk(&state.storage_dir, &mut album) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to sync album: {}", e) })),
+        )
+            .into_response();
+    }
+
+    if title_changed {
+        if !old_folder_path.is_empty() && old_folder_path != album.disk_folder_path {
+            let old_p = Path::new(&old_folder_path);
+            let export_root = resolve_albums_export_root(&state.storage_dir);
+            if old_p.starts_with(&export_root) && old_p.exists() {
+                let _ = std::fs::remove_dir_all(old_p);
+            }
+        }
+        for t in &album.tracks {
+            let mut m = load_song_user_meta(&state.storage_dir, &t.song_id);
+            m.album_title = Some(album.title.clone());
+            m.updated_at = album.updated_at.clone();
+            save_song_user_meta(&state.storage_dir, &t.song_id, &m);
+        }
+    }
+
+    Json(album).into_response()
+}
+
+/// DELETE /api/albums/:id - Deletes an album and safely returns its tracks to Unassigned Songs.
+pub async fn handle_delete_album(
+    State(state): State<AppState>,
+    AxumPath(album_id): AxumPath<String>,
+) -> Response {
+    let _guard = state.album_lock.lock().await;
+    let clean_id = match CheckpointManager::sanitize_path_component(&album_id) {
+        Ok(id) => id,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+    let album = match load_single_album_sync(&state.storage_dir, &clean_id) {
+        Ok(a) => a,
+        Err(e) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
+    for t in &album.tracks {
+        let mut m = load_song_user_meta(&state.storage_dir, &t.song_id);
+        if m.album_id.as_deref() == Some(album.album_id.as_str()) {
+            m.album_id = None;
+            m.album_title = None;
+            m.updated_at = chrono::Utc::now().to_rfc3339();
+            save_song_user_meta(&state.storage_dir, &t.song_id, &m);
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(state.storage_dir.join("albums").join(&clean_id));
+    if !album.disk_folder_path.is_empty() {
+        let export_p = Path::new(&album.disk_folder_path);
+        let export_root = resolve_albums_export_root(&state.storage_dir);
+        if export_p.starts_with(&export_root) && export_p.exists() {
+            let _ = std::fs::remove_dir_all(export_p);
+        }
+    }
+
+    Json(serde_json::json!({
+        "status": "deleted",
+        "album_id": clean_id,
+        "returned_songs_count": album.tracks.len()
+    }))
+    .into_response()
+}
+
+/// POST /api/albums/:id/tracks - Likes & moves a song into the specified Unique Album.
+pub async fn handle_add_track_to_album(
+    State(state): State<AppState>,
+    AxumPath(album_id): AxumPath<String>,
+    Json(req): Json<AddTrackToAlbumRequest>,
+) -> Response {
+    let _guard = state.album_lock.lock().await;
+    let ver = req.version.unwrap_or(1);
+    match assign_song_to_album_locked(&state, &album_id, &req.song_id, ver).await {
+        Ok(album) => Json(album).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// DELETE /api/albums/:id/tracks/:song_id - Removes a song from an album back to Unassigned Drafts.
+pub async fn handle_remove_track_from_album(
+    State(state): State<AppState>,
+    AxumPath((album_id, song_id)): AxumPath<(String, String)>,
+) -> Response {
+    let _guard = state.album_lock.lock().await;
+    let clean_song_id = match CheckpointManager::sanitize_path_component(&song_id) {
+        Ok(id) => resolve_song_alias(&state.storage_dir, &id),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+    let mut album = match load_single_album_sync(&state.storage_dir, &album_id) {
+        Ok(a) => a,
+        Err(e) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
+    album.tracks.retain(|t| t.song_id != clean_song_id);
+    album.updated_at = chrono::Utc::now().to_rfc3339();
+    if let Err(e) = sync_album_to_disk(&state.storage_dir, &mut album) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to update album folder: {}", e) })),
+        )
+            .into_response();
+    }
+
+    let mut meta = load_song_user_meta(&state.storage_dir, &clean_song_id);
+    if meta.album_id.as_deref() == Some(album.album_id.as_str()) {
+        meta.album_id = None;
+        meta.album_title = None;
+        meta.updated_at = album.updated_at.clone();
+        save_song_user_meta(&state.storage_dir, &clean_song_id, &meta);
+    }
+
+    Json(album).into_response()
+}
+
+/// POST /api/songs/:id/like - Marks or toggles `liked` on a song.
+pub async fn handle_toggle_song_like(
+    State(state): State<AppState>,
+    AxumPath(song_id): AxumPath<String>,
+    Json(req): Json<ToggleSongLikeRequest>,
+) -> Response {
+    let clean_song_id = match CheckpointManager::sanitize_path_component(&song_id) {
+        Ok(id) => resolve_song_alias(&state.storage_dir, &id),
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+    let mut meta = load_song_user_meta(&state.storage_dir, &clean_song_id);
+    meta.liked = req.liked.unwrap_or(!meta.liked);
+    meta.updated_at = chrono::Utc::now().to_rfc3339();
+    save_song_user_meta(&state.storage_dir, &clean_song_id, &meta);
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "song_id": clean_song_id,
+        "liked": meta.liked,
+        "album_id": meta.album_id,
+        "album_title": meta.album_title
+    }))
+    .into_response()
+}
+
+/// GET /api/albums/:id/export-zip - Bundles numbered 48 kHz WAVs + `lyrics_booklet.md` + `album_manifest.json` into a `.zip`.
+pub async fn handle_export_album_zip(
+    State(state): State<AppState>,
+    AxumPath(album_id): AxumPath<String>,
+) -> Response {
+    let mut album = match load_single_album_sync(&state.storage_dir, &album_id) {
+        Ok(a) => a,
+        Err(e) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+    let _ = sync_album_to_disk(&state.storage_dir, &mut album);
+
+    let safe_root = sanitize_safe_fs_slug(&album.title, "Unique_Album");
+    let export_dir = PathBuf::from(&album.disk_folder_path);
+    let mut owned_files: Vec<(String, Vec<u8>)> = Vec::new();
+
+    if export_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&export_dir) {
+            let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+            paths.sort();
+            for p in paths {
+                if let (Some(fname), Ok(bytes)) = (p.file_name().and_then(|n| n.to_str()), std::fs::read(&p)) {
+                    owned_files.push((format!("{}/{}", safe_root, fname), bytes));
+                }
+            }
+        }
+    }
+
+    let borrowed: Vec<(&str, &[u8])> = owned_files
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice()))
+        .collect();
+    let zip_bytes = build_stored_zip_archive(&borrowed);
+    let disposition = format!("attachment; filename=\"{}.zip\"", safe_root);
+
+    let mut headers = HeaderMap::new();
+    if let Ok(ct) = header::HeaderValue::from_str("application/zip") {
+        headers.insert(header::CONTENT_TYPE, ct);
+    }
+    if let Ok(cd) = header::HeaderValue::from_str(&disposition) {
+        headers.insert(header::CONTENT_DISPOSITION, cd);
+    }
+    if let Ok(cl) = header::HeaderValue::from_str(&zip_bytes.len().to_string()) {
+        headers.insert(header::CONTENT_LENGTH, cl);
+    }
+
+    (StatusCode::OK, headers, Body::from(zip_bytes)).into_response()
+}
+
+// ---------------------------------------------------------------------------
 // Router & Port Binding
 // ---------------------------------------------------------------------------
 
@@ -2947,9 +4016,16 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/songs/master", post(handle_master_song))
         .route("/api/songs/tts-vocals", post(handle_tts_vocals))
         .route("/api/songs/revert", post(handle_revert_song))
+        .route("/api/songs/:id/like", post(handle_toggle_song_like))
         .route("/api/songs/:id/versions", get(handle_list_versions))
         .route("/api/songs/:id/versions/:v/audio/:stem", get(handle_stream_audio))
         .route("/api/songs/:id/:version/audio/:file", get(handle_stream_audio))
+        // Unique Album Studio Endpoints
+        .route("/api/albums", get(handle_list_albums).post(handle_create_album))
+        .route("/api/albums/:id", get(handle_get_album).put(handle_update_album).delete(handle_delete_album))
+        .route("/api/albums/:id/tracks", post(handle_add_track_to_album))
+        .route("/api/albums/:id/tracks/:song_id", delete(handle_remove_track_from_album))
+        .route("/api/albums/:id/export-zip", get(handle_export_album_zip))
         // Dedicated Download Endpoints (Zero Errors)
         .route("/api/songs/:id/versions/:v/download", get(handle_download_version))
         .route("/api/songs/:id/download", get(handle_download_latest))

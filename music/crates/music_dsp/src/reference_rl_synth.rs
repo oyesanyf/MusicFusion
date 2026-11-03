@@ -135,12 +135,351 @@ impl ReferenceRlSynthesizer {
         None
     }
 
-    /// Checks whether provided lyrics are just the old pre-filled Kingston reggae placeholder.
+    /// Checks whether provided lyrics are just a pre-filled UI starter template placeholder.
     pub fn is_stale_default_reggae_lyrics(lyrics: &str) -> bool {
         let lower = lyrics.to_ascii_lowercase();
         lower.contains("hear the children crying, give thanks and praise")
             || lower.contains("sun rises over zion hill")
+            || lower.contains("got a ticket in my coat and a dollar in my hand")
+            || lower.contains("one love shining through the canyon rain")
+            || lower.contains("lagos sunrise shining on the ocean wave")
+            || lower.contains("rolling down the highway underneath a velvet sky")
+            || lower.contains("when the night is heavy and the road is long and steep")
             || (lower.contains("one love! one heart! let us get together") && lower.len() < 420)
+    }
+
+    /// Derives a clean, human-readable title from the opening line of a poem without trailing connector words.
+    pub fn derive_clean_poem_title(first_line: &str) -> String {
+        let cleaned: String = first_line
+            .chars()
+            .take_while(|&c| c != '.' && c != ',' && c != ';' && c != ':' && c != '!' && c != '?')
+            .collect();
+        let mut words: Vec<&str> = cleaned
+            .split_whitespace()
+            .filter(|w| !w.is_empty())
+            .take(6)
+            .collect();
+        let trailing_connectors = [
+            "and", "or", "of", "the", "a", "an", "in", "on", "at", "to", "for", "with", "around",
+            "into", "from", "by",
+        ];
+        while words.len() > 3 {
+            if let Some(last) = words.last() {
+                let lw = last
+                    .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+                    .to_ascii_lowercase();
+                if trailing_connectors.contains(&lw.as_str()) {
+                    words.pop();
+                    continue;
+                }
+            }
+            break;
+        }
+        let small_words = ["of", "and", "the", "in", "on", "at", "to", "for", "a", "an"];
+        words
+            .iter()
+            .enumerate()
+            .map(|(idx, raw_w)| {
+                let trimmed = raw_w.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '\'');
+                let lower_w = trimmed.to_ascii_lowercase();
+                if idx > 0 && small_words.contains(&lower_w.as_str()) {
+                    lower_w
+                } else {
+                    let mut chars = trimmed.chars();
+                    match chars.next() {
+                        Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                        None => String::new(),
+                    }
+                }
+            })
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn is_production_spec_clause(clause: &str) -> bool {
+        let lower = clause.to_ascii_lowercase();
+        lower.starts_with("genre:")
+            || lower.starts_with("global metadata:")
+            || lower.starts_with("vocal details:")
+            || lower.starts_with("arrangement:")
+            || lower.starts_with("for the lead and backing")
+            || lower.starts_with("for the guitars")
+            || lower.starts_with("for the drums")
+            || lower.starts_with("for the bass")
+            || lower.starts_with("for the keyboards")
+            || lower.starts_with("for the mastering")
+            || lower.contains("lead & backing vocals:")
+            || lower.contains("drums & percussion:")
+            || lower.contains("bass foundation:")
+            || lower.contains("mastering:")
+            || lower.contains("48 khz")
+            || lower.contains("16-bit pcm")
+            || lower.contains("16 bit pcm")
+            || lower.contains("studer a800")
+            || lower.contains("sidechain ducking")
+    }
+
+    /// Splits a combined user prompt (e.g. `"make folk music with acustic rythom of of this poernm A portrait of nettles..."`)
+    /// into `(Option<style_instruction>, Option<poem_lines>)`, supporting both multi-line and period-separated single-paragraph poems.
+    pub fn split_style_instruction_and_poem(prompt: &str) -> (Option<String>, Option<Vec<String>>) {
+        let trimmed_prompt = prompt.trim();
+        if trimmed_prompt.is_empty() {
+            return (None, None);
+        }
+
+        let lower_full = trimmed_prompt.to_ascii_lowercase();
+        let markers = [
+            "of of this poernm",
+            "of this poernm",
+            "of of this poem",
+            "of this poem",
+            "from this poernm",
+            "from this poem",
+            "this poernm:",
+            "this poem:",
+            "following poernm:",
+            "following poem:",
+            "following poem",
+            "this poernm ",
+            "this poem ",
+            "poernm:",
+            "poem:",
+            "lyrics:",
+        ];
+
+        let mut style_prefix: Option<String> = None;
+        let mut body_slice = trimmed_prompt;
+
+        for marker in markers {
+            if let Some(byte_pos) = lower_full.find(marker) {
+                if byte_pos <= 180 && trimmed_prompt.is_char_boundary(byte_pos) {
+                    let after_pos = byte_pos + marker.len();
+                    if trimmed_prompt.is_char_boundary(after_pos) {
+                        let raw_prefix = trimmed_prompt[..byte_pos]
+                            .trim()
+                            .trim_end_matches(|c: char| c == ':' || c == '-' || c == ',')
+                            .trim();
+                        let cleaned_prefix = raw_prefix
+                            .strip_suffix(" of")
+                            .or_else(|| raw_prefix.strip_suffix(" from"))
+                            .unwrap_or(raw_prefix)
+                            .trim();
+                        if !cleaned_prefix.is_empty() {
+                            style_prefix = Some(cleaned_prefix.to_string());
+                        }
+                        body_slice = trimmed_prompt[after_pos..]
+                            .trim_start_matches(|c: char| c == ':' || c == '-' || c.is_whitespace());
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut newline_lines = Vec::new();
+        for raw_line in body_slice.lines() {
+            let t = raw_line.trim();
+            if t.is_empty() || t.starts_with('[') || t.starts_with('(') || Self::is_production_spec_clause(t) {
+                continue;
+            }
+            let cleaned = t
+                .strip_prefix("create the song")
+                .or_else(|| t.strip_prefix("create the sonng"))
+                .or_else(|| t.strip_prefix("create a song"))
+                .unwrap_or(t)
+                .trim();
+            if cleaned.split_whitespace().count() >= 2 {
+                newline_lines.push(cleaned.to_string());
+            }
+        }
+
+        if newline_lines.len() >= 4 {
+            return (style_prefix, Some(newline_lines));
+        }
+        if newline_lines.len() >= 2 && !Self::looks_like_mix_iteration_clause(body_slice) {
+            return (style_prefix, Some(newline_lines));
+        }
+
+        // Single-paragraph poem fallback: split by sentence boundaries (`. `, `! `, `? `, `; `)
+        let mut sentence_clauses = Vec::new();
+        let mut current = String::new();
+        let mut chars = body_slice.chars().peekable();
+        while let Some(ch) = chars.next() {
+            current.push(ch);
+            if matches!(ch, '.' | '!' | '?' | ';') {
+                let next_is_boundary = match chars.peek() {
+                    None => true,
+                    Some(nc) => nc.is_whitespace(),
+                };
+                if next_is_boundary {
+                    let clause = current.trim().to_string();
+                    current.clear();
+                    if !clause.is_empty()
+                        && !Self::is_production_spec_clause(&clause)
+                        && clause.split_whitespace().count() >= 2
+                    {
+                        sentence_clauses.push(clause);
+                    }
+                }
+            }
+        }
+        let trailing = current.trim();
+        if !trailing.is_empty()
+            && !Self::is_production_spec_clause(trailing)
+            && trailing.split_whitespace().count() >= 2
+        {
+            sentence_clauses.push(trailing.to_string());
+        }
+
+        let min_clauses = if style_prefix.is_some() { 2 } else { 3 };
+        if sentence_clauses.len() >= min_clauses && !Self::looks_like_mix_iteration_clause(body_slice) {
+            (style_prefix, Some(sentence_clauses))
+        } else {
+            (style_prefix, None)
+        }
+    }
+
+    fn looks_like_mix_iteration_clause(text: &str) -> bool {
+        let l = text.trim().to_ascii_lowercase();
+        let prefixes = [
+            "boost ",
+            "increase ",
+            "decrease ",
+            "reduce ",
+            "lower ",
+            "trim ",
+            "revert",
+            "solo vocal",
+            "mute ",
+            "unmute ",
+            "speed up",
+            "slow down",
+            "re-master",
+            "remaster",
+            "add wah",
+            "more bass",
+            "less bass",
+        ];
+        prefixes.iter().any(|p| l.starts_with(p))
+    }
+
+    /// Formats a poet's lines verbatim in exact sequential order across natural song sections,
+    /// supporting short 2-line poems through long multi-stanza poems without dropping any lines.
+    pub fn format_poem_lines_as_song_sections(p_lines: &[String], bpm: u32, key: &str) -> String {
+        let n = p_lines.len();
+        if n == 0 {
+            return String::new();
+        }
+        if n <= 3 {
+            let v1_text = p_lines.join("\n");
+            let ch_text = if n >= 2 {
+                format!("{}\n{}", p_lines[n - 1], p_lines[0])
+            } else {
+                p_lines[0].clone()
+            };
+            return format!(
+                "[Intro]\n\
+                 (Warm acoustic folk rhythm guitar, upright bass, solo cello, and light organic percussion at {bpm} BPM in {key})\n\n\
+                 [Verse 1]\n\
+                 {v1}\n\n\
+                 [Chorus]\n\
+                 {ch}\n\n\
+                 [Outro]\n\
+                 {out}",
+                bpm = bpm,
+                key = key,
+                v1 = v1_text,
+                ch = ch_text,
+                out = p_lines[n - 1],
+            );
+        }
+        if n <= 10 {
+            let v1_end = (n / 3).clamp(2, 3).min(n);
+            let ch_end = (v1_end + 2).min(n);
+            let out_start = if n > ch_end + 1 { n - 1 } else { ch_end.min(n - 1) };
+            let v2_slice = if out_start > ch_end {
+                &p_lines[ch_end..out_start]
+            } else {
+                &p_lines[0..1]
+            };
+            let chorus_slice = if ch_end > v1_end {
+                &p_lines[v1_end..ch_end]
+            } else {
+                &p_lines[0..v1_end.min(2)]
+            };
+            let v1_text = p_lines[..v1_end].join("\n");
+            let ch_text = chorus_slice.join("\n");
+            let v2_text = v2_slice.join("\n");
+            let out_text = format!("{}\n{}", p_lines[out_start], p_lines[0]);
+            return format!(
+                "[Intro]\n\
+                 (Warm acoustic folk rhythm guitar, upright bass, solo cello, and light organic percussion at {bpm} BPM in {key})\n\n\
+                 [Verse 1]\n\
+                 {v1}\n\n\
+                 [Chorus]\n\
+                 {ch}\n\n\
+                 [Verse 2]\n\
+                 {v2}\n\n\
+                 [Chorus]\n\
+                 {ch}\n\n\
+                 [Outro]\n\
+                 {out}",
+                bpm = bpm,
+                key = key,
+                v1 = v1_text,
+                ch = ch_text,
+                v2 = v2_text,
+                out = out_text,
+            );
+        }
+
+        // Long poems (11 to 100+ lines): include 100% of lines sequentially without truncation
+        let v1_text = p_lines[0..3].join("\n");
+        let pre_text = p_lines[3..6].join("\n");
+        let ch_full = p_lines[6..10].join("\n");
+        let ch_rep = p_lines[6..9].join("\n");
+        let rem = &p_lines[10..];
+
+        let mut extra_sections = String::new();
+        let outro_text = if rem.len() == 1 {
+            format!("{}\n{}", rem[0], p_lines[0])
+        } else {
+            let outro_cnt = rem.len().min(2);
+            let mid = &rem[..rem.len() - outro_cnt];
+            let section_names = ["Verse 2", "Bridge", "Verse 3", "Verse 4", "Verse 5", "Bridge 2"];
+            for (chunk_idx, chunk) in mid.chunks(4).enumerate() {
+                let sec_label = section_names
+                    .get(chunk_idx)
+                    .copied()
+                    .unwrap_or("Verse");
+                extra_sections.push_str(&format!("[{}]\n{}\n\n", sec_label, chunk.join("\n")));
+            }
+            rem[rem.len() - outro_cnt..].join("\n")
+        };
+
+        format!(
+            "[Intro]\n\
+             (Lush modern indie folk and chamber pop arrangement at {bpm} BPM in {key} featuring fingerpicked acoustic guitar, grand piano, swirling violins and solo cello)\n\n\
+             [Verse 1]\n\
+             {v1}\n\n\
+             [Pre-Chorus]\n\
+             {pre}\n\n\
+             [Chorus]\n\
+             {ch_full}\n\n\
+             {extra}\
+             [Chorus]\n\
+             {ch_rep}\n\n\
+             [Outro]\n\
+             {out}",
+            bpm = bpm,
+            key = key,
+            v1 = v1_text,
+            pre = pre_text,
+            ch_full = ch_full,
+            extra = extra_sections,
+            ch_rep = ch_rep,
+            out = outro_text,
+        )
     }
 
     /// Builds a 3-section MiniMax Music 3 Structured Caption (`Global Metadata`, `Vocal Details`, `Arrangement`)
@@ -165,39 +504,9 @@ impl ReferenceRlSynthesizer {
         )
     }
 
-    /// Extracts raw poetic lines directly from `prompt` when a user pastes a multi-line poem or lyric stanza
-    /// as their prompt (like the 13-line Grasslands/Flamingos poem or any custom poem).
+    /// Extracts raw poetic lines directly from `prompt` when a user pastes a multi-line or single-paragraph poem.
     pub fn extract_raw_poem_lines_from_prompt(prompt: &str) -> Option<Vec<String>> {
-        let mut lines = Vec::new();
-        for raw_line in prompt.lines() {
-            let trimmed = raw_line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('[') || trimmed.starts_with('(') {
-                continue;
-            }
-            let lower = trimmed.to_ascii_lowercase();
-            // Skip pure technical instruction lines if mixed with a poem
-            if lower.starts_with("genre:")
-                || lower.starts_with("global metadata:")
-                || lower.starts_with("vocal details:")
-                || lower.starts_with("arrangement:")
-            {
-                continue;
-            }
-            let cleaned = trimmed
-                .strip_prefix("create the song")
-                .or_else(|| trimmed.strip_prefix("create the sonng"))
-                .or_else(|| trimmed.strip_prefix("create a song"))
-                .unwrap_or(trimmed)
-                .trim();
-            if cleaned.split_whitespace().count() >= 3 {
-                lines.push(cleaned.to_string());
-            }
-        }
-        if lines.len() >= 4 {
-            Some(lines)
-        } else {
-            None
-        }
+        Self::split_style_instruction_and_poem(prompt).1
     }
 
     /// Generates a brand-new song title, genre label, and 7-movement section-by-section structured lyrics
@@ -226,13 +535,7 @@ impl ReferenceRlSynthesizer {
         let title = if let Some(t) = explicit_title {
             format!("{} ({} BPM • {})", t, bpm, key)
         } else if let Some(ref p_lines) = custom_poem_lines {
-            let first_words: String = p_lines[0]
-                .split_whitespace()
-                .take(5)
-                .collect::<Vec<_>>()
-                .join(" ")
-                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ' ')
-                .to_string();
+            let first_words = Self::derive_clean_poem_title(&p_lines[0]);
             let base_t = if first_words.is_empty() { "Chamber Pop Poem" } else { &first_words };
             format!("{} — Chamber Pop Poem ({} BPM • {})", base_t, bpm, key)
         } else if is_1988_folk_soul {
@@ -243,52 +546,16 @@ impl ReferenceRlSynthesizer {
 
         let genre_label = if is_1988_folk_soul {
             "1988 Acoustic Folk & Soul Ballad".to_string()
+        } else if custom_poem_lines.is_some()
+            && (lower.contains("folk") || lower.contains("acustic") || lower.contains("acoustic"))
+        {
+            "Acoustic Folk & Studio Poem Ballad".to_string()
         } else {
             "Modern Indie Folk & Chamber Pop Poem Arrangement".to_string()
         };
 
         let lyrics = if let Some(p_lines) = custom_poem_lines {
-            let get_ln = |idx: usize| -> &str { p_lines[idx % p_lines.len()].as_str() };
-            format!(
-                "[Intro]\n\
-                 (Lush modern indie folk and chamber pop arrangement at {bpm} BPM in {key} featuring fingerpicked acoustic guitar, grand piano, swirling violins and solo cello)\n\n\
-                 [Verse 1]\n\
-                 {l0}\n\
-                 {l1}\n\
-                 {l2}\n\n\
-                 [Pre-Chorus]\n\
-                 {l3}\n\
-                 {l4}\n\
-                 {l5}\n\n\
-                 [Chorus]\n\
-                 {l6}\n\
-                 {l7}\n\
-                 {l8}\n\
-                 {l9}\n\n\
-                 [Verse 2]\n\
-                 {l10}\n\
-                 {l11}\n\n\
-                 [Instrumental]\n\
-                 (Wordless orchestral climax with expressive violins, grand piano, solo cello, and fluid basslines)\n\n\
-                 [Outro]\n\
-                 {l11}\n\
-                 {l12}",
-                bpm = bpm,
-                key = key,
-                l0 = get_ln(0),
-                l1 = get_ln(1),
-                l2 = get_ln(2),
-                l3 = get_ln(3),
-                l4 = get_ln(4),
-                l5 = get_ln(5),
-                l6 = get_ln(6),
-                l7 = get_ln(7),
-                l8 = get_ln(8),
-                l9 = get_ln(9),
-                l10 = get_ln(10),
-                l11 = get_ln(11),
-                l12 = get_ln(12),
-            )
+            Self::format_poem_lines_as_song_sections(&p_lines, bpm, key)
         } else if is_1988_folk_soul {
             format!(
                 "[Opening Instrumental]\n\
@@ -1239,7 +1506,8 @@ impl ReferenceRlSynthesizer {
         let has_explicit_custom_lyrics = custom_lyrics
             .map(|l| !l.trim().is_empty() && !Self::is_stale_default_reggae_lyrics(l))
             .unwrap_or(false);
-        let is_poem_prompt = Self::extract_raw_poem_lines_from_prompt(prompt).is_some()
+        let (style_prefix, extracted_poem) = Self::split_style_instruction_and_poem(prompt);
+        let is_poem_prompt = extracted_poem.is_some()
             || lower_prompt.contains("blackening skies")
             || lower_prompt.contains("traveling flamingos")
             || lower_prompt.contains("watering kingdoms");
@@ -1303,7 +1571,17 @@ impl ReferenceRlSynthesizer {
             .trim()
             .to_string();
 
-        let style_header = if is_poem_prompt
+        let style_header = if let Some(ref user_style) = style_prefix {
+            format!(
+                "Acoustic folk full-length studio song at {bpm} BPM in {key}. \
+                 Style direction: {user_style}. \
+                 Warm rhythmic steel-string acoustic guitar strumming and fingerpicking, expressive close-mic studio lead vocals \
+                 with natural stacked chorus harmonies, warm upright bass, solo cello, subtle violin swells, and organic percussion.",
+                bpm = bpm,
+                key = key_signature,
+                user_style = user_style
+            )
+        } else if is_poem_prompt
             && !lower_prompt.contains("reggae")
             && !lower_prompt.contains("afrobeats")
             && !lower_prompt.contains("hip-hop")
@@ -1660,10 +1938,58 @@ for fname, af in stem_specs:
             }
         });
 
-        let (title, genre_label, auto_lyrics) =
+        let (mut title, genre_label, auto_lyrics) =
             Self::compose_prompt_conditioned_lyrics_and_title(prompt, bpm, &key_signature);
         let structured_lyrics = match custom_lyrics {
-            Some(l) if !l.trim().is_empty() && !Self::is_stale_default_reggae_lyrics(l) => l.to_string(),
+            Some(l) if !l.trim().is_empty() && !Self::is_stale_default_reggae_lyrics(l) => {
+                let trimmed_custom = l.trim();
+                let custom_lower = trimmed_custom.to_ascii_lowercase();
+                let already_tagged = custom_lower.contains("[verse")
+                    || custom_lower.contains("[chorus")
+                    || custom_lower.contains("[intro")
+                    || custom_lower.contains("[bridge")
+                    || custom_lower.contains("[outro");
+                if already_tagged {
+                    if Self::extract_prompt_title(prompt).is_none()
+                        && Self::extract_raw_poem_lines_from_prompt(prompt).is_none()
+                    {
+                        if let Some(first_sung) = trimmed_custom
+                            .lines()
+                            .map(str::trim)
+                            .find(|ln| !ln.is_empty() && !ln.starts_with('[') && !ln.starts_with('('))
+                        {
+                            let derived = Self::derive_clean_poem_title(first_sung);
+                            if !derived.is_empty() {
+                                title = format!("{} - Poem Song ({} BPM | {})", derived, bpm, key_signature);
+                            }
+                        }
+                    }
+                    trimmed_custom.to_string()
+                } else {
+                    let raw_lines = Self::extract_raw_poem_lines_from_prompt(trimmed_custom)
+                        .unwrap_or_else(|| {
+                            trimmed_custom
+                                .lines()
+                                .map(str::trim)
+                                .filter(|ln| !ln.is_empty())
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                        });
+                    if !raw_lines.is_empty() {
+                        if Self::extract_prompt_title(prompt).is_none()
+                            && Self::extract_raw_poem_lines_from_prompt(prompt).is_none()
+                        {
+                            let derived = Self::derive_clean_poem_title(&raw_lines[0]);
+                            if !derived.is_empty() {
+                                title = format!("{} - Poem Song ({} BPM | {})", derived, bpm, key_signature);
+                            }
+                        }
+                        Self::format_poem_lines_as_song_sections(&raw_lines, bpm, &key_signature)
+                    } else {
+                        trimmed_custom.to_string()
+                    }
+                }
+            }
             _ => auto_lyrics,
         };
 
@@ -1913,5 +2239,42 @@ for fname, af in stem_specs:
             percussion_fills,
             draft_groove,
         }
+    }
+}
+
+#[cfg(test)]
+mod single_paragraph_poem_tests {
+    use super::ReferenceRlSynthesizer;
+
+    #[test]
+    fn splits_folk_instruction_and_single_paragraph_nettles_poem() {
+        let user_prompt = "make folk music with acustic rythom of of this poernm A portrait of nettles and flowers around the heart. Converse of many experience held. The heart seeps. A portrait of nettles, a portrait of flowers. Memories in a twitted twirl, a hurricane of love in the eyes of love's storm, and those heavenly un-forgetting. Passion provoked, forging along endlessness and seraphic still glows. Captivated calm. When tenderness pours, souls affixed. Oh, a place where cupid's stamps and shoots Nourished.";
+
+        let (style, lines_opt) = ReferenceRlSynthesizer::split_style_instruction_and_poem(user_prompt);
+        assert_eq!(style.as_deref(), Some("make folk music with acustic rythom"));
+        let lines = lines_opt.expect("single-paragraph poem clauses should be extracted");
+        assert_eq!(lines.len(), 9);
+        assert!(lines[0].starts_with("A portrait of nettles and flowers"));
+        assert_eq!(lines[6], "Captivated calm.");
+        assert!(lines[8].contains("Nourished"));
+
+        let (title, genre, lyrics) =
+            ReferenceRlSynthesizer::compose_prompt_conditioned_lyrics_and_title(user_prompt, 80, "G Major");
+        assert!(title.starts_with("A Portrait of Nettles and Flowers"));
+        assert!(genre.contains("Acoustic Folk"));
+        assert!(lyrics.contains("A portrait of nettles, a portrait of flowers."));
+        assert!(lyrics.contains("Captivated calm."));
+        assert!(lyrics.contains("Nourished."));
+
+        let lyria_prompt = ReferenceRlSynthesizer::build_lyria_3_5_prompt(
+            user_prompt,
+            Some("[Verse 1]\nGot a ticket in my coat and a dollar in my hand"),
+            80,
+            "G Major",
+            &lyrics,
+        );
+        assert!(lyria_prompt.contains("make folk music with acustic rythom"));
+        assert!(lyria_prompt.contains("A portrait of nettles and flowers around the heart."));
+        assert!(!lyria_prompt.contains("Got a ticket in my coat"));
     }
 }

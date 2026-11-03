@@ -216,6 +216,14 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     attachedPhotoBase64: null,
     attachedPhotoMime: null,
     attachedPhotoName: null,
+    albums: [],
+    activeAlbumId: null,
+    albumPlaybackQueue: null,
+    showAllSongsInSidebar: false,
+    pendingAlbumModalContext: null,
+    pendingCoverDataUrl: null,
+    pendingTargetAlbumIdForCreation: '',
+    songOrder: ['rl_ensemble_showcase'],
     isPlayingMaster: false,
     isPlayingStems: false,
     stemsMuted: {},
@@ -234,6 +242,9 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
         id: 'rl_ensemble_showcase',
         title: 'D:\\music Reference RL Showcase',
         genre: 'RL Ensemble Blend',
+        liked: false,
+        albumId: null,
+        albumTitle: null,
         versions: {
           1: buildSongVersionRecord(
             'rl_ensemble_showcase',
@@ -403,6 +414,58 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.btnBootstrapOllama = document.getElementById('btn-bootstrap-ollama');
     DOM.settingsModelsStatus = document.getElementById('settings-models-status');
     DOM.settingsThemeSelect = document.getElementById('settings-theme-select');
+
+    // Unique Albums Studio, Poem-As-Is Target Selector & Native Album Dialog
+    DOM.sidebarAlbumsList = document.getElementById('sidebar-albums-list');
+    DOM.albumsCount = document.getElementById('albums-count');
+    DOM.btnSidebarNewAlbum = document.getElementById('btn-sidebar-new-album');
+    DOM.sidebarSongsHeading = document.getElementById('sidebar-songs-heading');
+    DOM.btnToggleSongFilter = document.getElementById('btn-toggle-song-filter');
+    DOM.heroTargetAlbumSelect = document.getElementById('hero-target-album-select');
+    DOM.newSongAlbumTargetPill = document.getElementById('new-song-album-target-pill');
+    DOM.btnCardLikeSong = document.getElementById('btn-card-like-song');
+    DOM.btnCardMoveToAlbum = document.getElementById('btn-card-move-to-album');
+    DOM.btnToggleRefImporter = document.getElementById('btn-toggle-ref-importer');
+    DOM.refImporterCollapsibleBody = document.getElementById('ref-importer-collapsible-body');
+
+    DOM.albumWorkspaceSection = document.getElementById('album-workspace-section');
+    DOM.albumViewCoverImg = document.getElementById('album-view-cover-img');
+    DOM.albumViewCoverFallback = document.getElementById('album-view-cover-fallback');
+    DOM.albumViewCount = document.getElementById('album-view-count');
+    DOM.albumViewTitle = document.getElementById('album-view-title');
+    DOM.albumViewArtist = document.getElementById('album-view-artist');
+    DOM.albumViewDesc = document.getElementById('album-view-desc');
+    DOM.albumViewDiskPath = document.getElementById('album-view-disk-path');
+    DOM.btnAlbumPlayAll = document.getElementById('btn-album-play-all');
+    DOM.btnAlbumAddPoemSong = document.getElementById('btn-album-add-poem-song');
+    DOM.btnAlbumEditMeta = document.getElementById('btn-album-edit-meta');
+    DOM.btnAlbumExportZip = document.getElementById('btn-album-export-zip');
+    DOM.btnAlbumDelete = document.getElementById('btn-album-delete');
+    DOM.btnAlbumCloseView = document.getElementById('btn-album-close-view');
+    DOM.albumExistingSongPicker = document.getElementById('album-existing-song-picker');
+    DOM.btnAlbumAddExisting = document.getElementById('btn-album-add-existing');
+    DOM.albumViewTracklist = document.getElementById('album-view-tracklist');
+
+    DOM.albumMoveDialog = document.getElementById('album-move-dialog');
+    DOM.albumDialogTitle = document.getElementById('album-dialog-title');
+    DOM.btnAlbumDialogClose = document.getElementById('btn-album-dialog-close');
+    DOM.albumMoveForm = document.getElementById('album-move-form');
+    DOM.albumDialogSongBanner = document.getElementById('album-dialog-song-banner');
+    DOM.albumDialogSongName = document.getElementById('album-dialog-song-name');
+    DOM.albumModeFieldset = document.getElementById('album-mode-fieldset');
+    DOM.radioAlbumCreateNew = document.getElementById('radio-album-create-new');
+    DOM.radioAlbumExisting = document.getElementById('radio-album-existing');
+    DOM.albumExistingGroup = document.getElementById('album-existing-group');
+    DOM.albumExistingSelect = document.getElementById('album-existing-select');
+    DOM.albumNewFieldsGroup = document.getElementById('album-new-fields-group');
+    DOM.albumTitleInput = document.getElementById('album-title-input');
+    DOM.albumTitleError = document.getElementById('album-title-error');
+    DOM.albumArtistInput = document.getElementById('album-artist-input');
+    DOM.albumDescInput = document.getElementById('album-desc-input');
+    DOM.albumCoverInput = document.getElementById('album-cover-input');
+    DOM.albumFormSubmitError = document.getElementById('album-form-submit-error');
+    DOM.btnAlbumDialogCancel = document.getElementById('btn-album-dialog-cancel');
+    DOM.btnAlbumDialogSubmit = document.getElementById('btn-album-dialog-submit');
   }
 
   // ==========================================================================
@@ -485,6 +548,7 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
       State.isPlayingMaster = false;
       renderWaveform(0);
       DOM.waveformProgress.style.width = '0%';
+      advanceAlbumPlaybackOnEnded();
     });
   }
 
@@ -1184,6 +1248,24 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
   // ==========================================================================
   // Version Switcher & Sidebar Song Selector (A/B Compare + Direct Play)
   // ==========================================================================
+  function compactHeaderTitle(rawTitle) {
+    if (!rawTitle) return 'Studio Track';
+    return String(rawTitle)
+      .split(/\s+\(|\s+-\s+Chamber|\s+\u2014\s+/)[0]
+      .trim() || String(rawTitle);
+  }
+
+  function compactGenreBadge(rawGenre) {
+    if (!rawGenre) return 'Studio Master';
+    const g = String(rawGenre);
+    const hasLyria = /lyria\s*3\.5/i.test(g);
+    let base = g.split(/\u2022|-/)[0].trim();
+    if (/acoustic folk/i.test(base)) base = 'Acoustic Folk';
+    else if (/indie folk|chamber pop/i.test(base)) base = 'Indie Folk';
+    else if (base.length > 20) base = base.slice(0, 20).trim();
+    return hasLyria ? (base + ' | Lyria 3.5') : base;
+  }
+
   function rebuildHeaderVersionDropdown(song, activeVer) {
     if (!DOM.headerVersionSelect || !song || !song.versions) return;
     DOM.headerVersionSelect.innerHTML = '';
@@ -1192,7 +1274,8 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
       const vObj = song.versions[vNum];
       const opt = document.createElement('option');
       opt.value = vNum;
-      opt.textContent = `Version ${vNum} (${vObj.bpm} BPM — ${vObj.title})`;
+      const roleLabel = vNum === 1 ? 'Original Master' : 'Edited Mix';
+      opt.textContent = `v${vNum}: ${roleLabel} (${vObj.bpm} BPM, ${vObj.key || 'G Major'})`;
       if (vNum === activeVer) opt.selected = true;
       DOM.headerVersionSelect.appendChild(opt);
     });
@@ -1285,9 +1368,15 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
 
     State.activeVersion = targetVer;
 
-    // Update Top Header
-    if (DOM.headerTrackTitle) DOM.headerTrackTitle.textContent = ver.title;
-    if (DOM.headerGenrePill) DOM.headerGenrePill.textContent = `🎵 ${song.genre}`;
+    // Update Top Header with concise single-line labels + full hover tooltip
+    if (DOM.headerTrackTitle) {
+      DOM.headerTrackTitle.textContent = compactHeaderTitle(ver.title);
+      DOM.headerTrackTitle.title = ver.title;
+    }
+    if (DOM.headerGenrePill) {
+      DOM.headerGenrePill.textContent = `🎵 ${compactGenreBadge(song.genre)}`;
+      DOM.headerGenrePill.title = song.genre;
+    }
     rebuildHeaderVersionDropdown(song, targetVer);
 
     // Update Prompt Bubble
@@ -1365,6 +1454,8 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     if (ver.lyrics) {
       renderLyrics(ver.lyrics);
     }
+    syncActiveSongLikeAndAlbumButtons();
+    highlightPlayingAlbumTrackRow();
 
     renderSuggestionChips(ver.suggestedIterations);
     DOM.deckStatusMsg.textContent = `Loaded "${ver.title}" — v${targetVer} (${ver.bpm} BPM, ${ver.key})`;
@@ -1546,6 +1637,9 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
           id: songId,
           title: cleanTitle,
           genre: 'Local Studio WAV',
+          liked: false,
+          albumId: null,
+          albumTitle: null,
           versions: {
             1: {
               version: 1,
@@ -1597,36 +1691,83 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
   }
 
   function addSongCardToSidebar(songId, title, genre, bpm, key, versionCount) {
+    if (!State.songOrder.includes(songId)) {
+      State.songOrder.unshift(songId);
+    }
+    if (State.songs[songId]) {
+      if (title && !State.songs[songId].title) State.songs[songId].title = title;
+      if (genre && !State.songs[songId].genre) State.songs[songId].genre = genre;
+    }
+    renderSidebarSongsList();
+  }
+
+  function renderSidebarSongsList() {
     if (!DOM.songHistory) return;
-    const existing = DOM.songHistory.querySelector(`.history-item[data-song-id="${songId}"]`);
-    if (existing) return;
+    const allIds = State.songOrder.filter(id => Boolean(State.songs[id]));
+    Object.keys(State.songs).forEach(id => {
+      if (!allIds.includes(id)) allIds.push(id);
+    });
 
-    const card = document.createElement('div');
-    card.className = 'history-item';
-    card.dataset.songId = songId;
-    card.dataset.version = '1';
-    card.tabIndex = 0;
+    const visibleIds = State.showAllSongsInSidebar
+      ? allIds
+      : allIds.filter(id => !State.songs[id]?.albumId);
 
-    let chipsHtml = `<button type="button" class="version-chip sidebar-play-btn" data-action="play-song" data-song-id="${escapeHTML(songId)}" title="Play ${escapeHTML(title)} now" style="background:#10a37f; color:#fff; font-weight:600;">▶ Play</button>`;
-    const totalVers = Math.max(1, versionCount || 1);
-    for (let v = 1; v <= totalVers; v++) {
-      chipsHtml += `<button type="button" class="version-chip ${v === 1 ? 'active' : ''}" data-song-id="${escapeHTML(songId)}" data-version="${v}" title="Version ${v}">v${v}</button>`;
+    if (DOM.sidebarSongsHeading) {
+      DOM.sidebarSongsHeading.textContent = State.showAllSongsInSidebar ? 'ALL STUDIO SONGS' : 'UNASSIGNED SONGS';
     }
-
-    card.innerHTML = `
-      <div class="history-item-top">
-        <span class="history-genre-badge reggae">${escapeHTML(genre)}</span>
-        <span class="history-time">Local / Ready</span>
-      </div>
-      <div class="history-item-title">${escapeHTML(title)}</div>
-      <div class="history-item-meta">${bpm} BPM • ${escapeHTML(key)} • 48 kHz</div>
-      <div class="history-version-chips">${chipsHtml}</div>
-    `;
-
-    DOM.songHistory.prepend(card);
+    if (DOM.btnToggleSongFilter) {
+      DOM.btnToggleSongFilter.setAttribute('aria-pressed', State.showAllSongsInSidebar ? 'true' : 'false');
+      DOM.btnToggleSongFilter.textContent = State.showAllSongsInSidebar ? 'Unassigned Only' : 'Show All';
+    }
     if (DOM.historyCount) {
-      DOM.historyCount.textContent = String(DOM.songHistory.querySelectorAll('.history-item').length);
+      DOM.historyCount.textContent = String(visibleIds.length);
     }
+
+    if (visibleIds.length === 0) {
+      const assignedCount = allIds.filter(id => Boolean(State.songs[id]?.albumId)).length;
+      DOM.songHistory.innerHTML = `<div class="sidebar-albums-empty">${
+        assignedCount > 0
+          ? 'All current songs have been moved into Unique Albums above. Click + New Song to paste another poem, or click Show All.'
+          : 'No unassigned songs yet. Paste a poem as-is to generate your first song.'
+      }</div>`;
+      return;
+    }
+
+    let html = '';
+    visibleIds.forEach(songId => {
+      const song = State.songs[songId];
+      if (!song) return;
+      const verNums = Object.keys(song.versions || {}).map(n => parseInt(n, 10)).filter(n => !isNaN(n)).sort((a, b) => a - b);
+      const firstVer = song.versions[verNums[0] || 1] || {};
+      const bpm = firstVer.bpm || 80;
+      const key = firstVer.key || 'G Major';
+      const displayTitle = compactHeaderTitle(song.title || songId);
+      const displayGenre = compactGenreBadge(song.genre || 'Studio Master');
+      const isActive = State.activeSongId === songId;
+      const liked = Boolean(song.liked);
+      const albumBadgeLabel = song.albumTitle ? ('💿 ' + compactHeaderTitle(song.albumTitle)) : '💿 Album';
+
+      let chipsHtml = `<button type="button" class="version-chip sidebar-play-btn" data-action="play-song" data-song-id="${escapeHTML(songId)}" style="background:#10a37f; color:#fff; font-weight:600;">▶ Play</button>`;
+      verNums.forEach(v => {
+        const chipActive = (isActive && State.activeVersion === v) || (!isActive && v === (verNums[verNums.length - 1] || 1));
+        chipsHtml += `<button type="button" class="version-chip ${chipActive ? 'active' : ''}" data-song-id="${escapeHTML(songId)}" data-version="${v}">v${v}</button>`;
+      });
+      chipsHtml += `<button type="button" class="version-chip sidebar-like-btn" data-action="like-song" data-song-id="${escapeHTML(songId)}" aria-pressed="${liked ? 'true' : 'false'}" style="${liked ? 'color:#e11d48; border-color:#e11d48;' : ''}">${liked ? '♥' : '♡'}</button>`;
+      chipsHtml += `<button type="button" class="version-chip sidebar-album-btn" data-action="move-album" data-song-id="${escapeHTML(songId)}" style="border-color:#10a37f; color:var(--text-primary);">${escapeHTML(albumBadgeLabel)}</button>`;
+
+      html += `
+        <div class="history-item ${isActive ? 'active' : ''}" data-song-id="${escapeHTML(songId)}" data-version="${verNums[verNums.length - 1] || 1}" tabindex="0">
+          <div class="history-item-top">
+            <span class="history-genre-badge reggae">${escapeHTML(displayGenre)}</span>
+            <span class="history-time">${song.albumTitle ? 'In Album' : 'Ready'}</span>
+          </div>
+          <div class="history-item-title">${escapeHTML(displayTitle)}</div>
+          <div class="history-item-meta">${bpm} BPM | ${escapeHTML(key)} | 48 kHz</div>
+          <div class="history-version-chips">${chipsHtml}</div>
+        </div>
+      `;
+    });
+    DOM.songHistory.innerHTML = html;
   }
 
   function setupLocalFileLoader() {
@@ -1784,12 +1925,51 @@ Grace and love shining forevermore!`
     }
   }
 
-  function openNewSongChatInterface(templateKey) {
+  function populateHeroTargetAlbumSelect(selectedAlbumId) {
+    if (!DOM.heroTargetAlbumSelect) return;
+    const desired = typeof selectedAlbumId === 'string'
+      ? selectedAlbumId
+      : (DOM.heroTargetAlbumSelect.value || '');
+    let opts = '<option value="">Keep in Unassigned Songs first (Listen &amp; Move to a Unique Album if I like it)</option>';
+    (State.albums || []).forEach(album => {
+      const count = Array.isArray(album.tracks) ? album.tracks.length : 0;
+      opts += `<option value="${escapeHTML(album.album_id)}">Add directly into Unique Album: ${escapeHTML(album.title)} (${count} ${count === 1 ? 'song' : 'songs'})</option>`;
+    });
+    DOM.heroTargetAlbumSelect.innerHTML = opts;
+    if (desired && (State.albums || []).some(a => a.album_id === desired)) {
+      DOM.heroTargetAlbumSelect.value = desired;
+    } else {
+      DOM.heroTargetAlbumSelect.value = '';
+    }
+    syncHeroAlbumTargetPill();
+  }
+
+  function syncHeroAlbumTargetPill() {
+    if (!DOM.newSongAlbumTargetPill || !DOM.heroTargetAlbumSelect) return;
+    const aid = DOM.heroTargetAlbumSelect.value;
+    const found = (State.albums || []).find(a => a.album_id === aid);
+    if (found) {
+      DOM.newSongAlbumTargetPill.textContent = '💿 Destination Album: ' + found.title;
+      DOM.newSongAlbumTargetPill.classList.remove('hidden');
+    } else {
+      DOM.newSongAlbumTargetPill.textContent = '';
+      DOM.newSongAlbumTargetPill.classList.add('hidden');
+    }
+  }
+
+  function openNewSongChatInterface(templateKey, targetAlbumId) {
     setCapsuleMode(false);
-    if (templateKey || (DOM.newSongNlPrompt && !DOM.newSongNlPrompt.value.trim())) {
-      applyNewSongTemplate(templateKey || 'reggae');
-    } else if (DOM.newSongNlPrompt && DOM.chatInputTextarea) {
-      DOM.chatInputTextarea.value = DOM.newSongNlPrompt.value;
+    populateHeroTargetAlbumSelect(typeof targetAlbumId === 'string' ? targetAlbumId : undefined);
+
+    if (templateKey) {
+      applyNewSongTemplate(templateKey);
+    } else {
+      if (DOM.newSongNlPrompt && isStarterTemplateLyrics(DOM.newSongNlPrompt.value)) {
+        DOM.newSongNlPrompt.value = '';
+      }
+      if (DOM.newSongLyricsInput && isStarterTemplateLyrics(DOM.newSongLyricsInput.value)) {
+        DOM.newSongLyricsInput.value = '';
+      }
     }
 
     if (DOM.newSongChatHero) {
@@ -1801,7 +1981,10 @@ Grace and love shining forevermore!`
     if (DOM.newSongNlPrompt) {
       DOM.newSongNlPrompt.focus();
     }
-    DOM.deckStatusMsg.textContent = 'New Song Chat Composer open — pre-filled with Vocals + All Instruments example!';
+    const targetObj = (State.albums || []).find(a => a.album_id === (DOM.heroTargetAlbumSelect ? DOM.heroTargetAlbumSelect.value : ''));
+    DOM.deckStatusMsg.textContent = targetObj
+      ? `Paste your next poem as-is to generate a new song for album "${targetObj.title}"`
+      : 'Poem-As-Is Composer open - paste any poem directly to generate music with Google Gemini Lyria 3.5';
   }
 
   function closeNewSongChatInterface() {
@@ -1826,10 +2009,7 @@ Grace and love shining forevermore!`
       DOM.btnCapsuleMode.className = 'capsule-mode-pill';
       DOM.modePillIcon.textContent = '🎵';
       DOM.modePillText.textContent = 'New Song';
-      DOM.chatInputTextarea.placeholder = "Describe a new song with vocals and all instruments...";
-      if (!DOM.chatInputTextarea.value.trim() && DOM.newSongNlPrompt) {
-        DOM.chatInputTextarea.value = DOM.newSongNlPrompt.value;
-      }
+      DOM.chatInputTextarea.placeholder = "Paste your poem as-is (or describe a new song with vocals and instruments)...";
     }
   }
 
@@ -1845,10 +2025,11 @@ Grace and love shining forevermore!`
       this.style.height = Math.min(160, this.scrollHeight) + 'px';
     });
 
-    // Enter key sends (IME-safe via !e.isComposing)
+    // IME-safe Enter-to-send (checks e.isComposing and legacy keyCode 229)
     DOM.chatInputTextarea.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+        if (e.isComposing || e.keyCode === 229) return;
         submitPrompt();
       }
     });
@@ -1937,6 +2118,56 @@ Grace and love shining forevermore!`
   // ==========================================================================
   // Song Submission: Create Hit or Iterate Song
   // ==========================================================================
+  function looksLikeMixIterationPrompt(text) {
+    const clean = (text || '').trim().toLowerCase();
+    if (!clean) return false;
+    return /^(boost|increase|raise|decrease|reduce|lower|cut|trim|mute|unmute|solo|revert|undo|remaster|re-master|speed\s+up|slow\s+down|faster|slower|pan|add\s+reverb|add\s+delay|add\s+wah|add\s+syncopated|elevate\s+gospel|more\s+bass|more\s+reverb|more\s+vocals|less\s+bass|change\s+bpm|change\s+tempo|change\s+key|make\s+the\s+(?:bass|drums|guitar|vocals|voice|mix|tempo))\b/.test(clean);
+  }
+
+  function shouldCreateNewSongFromPrompt(text) {
+    if (!State.isIterating || State.attachedPhotoBase64) return true;
+    if (/\b(this poem|this poernm|of this poem|of of this poernm|following poem)\b/i.test(text)) return true;
+    if (/\b(make|create|generate|compose|write|turn|set)\b[\s\S]{0,90}\b(new\s+song|song|music|track|folk|ballad|anthem|poem|poernm)\b/i.test(text)) {
+      return true;
+    }
+    if (looksLikeMixIterationPrompt(text)) return false;
+    const nonEmptyLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (nonEmptyLines.length >= 2) return true;
+    const sentenceClauses = text
+      .split(/[.!?]+(?:\s+|$)/)
+      .map(s => s.trim())
+      .filter(s => s.split(/\s+/).filter(Boolean).length >= 2);
+    if (sentenceClauses.length >= 3) return true;
+    return false;
+  }
+
+  function announcePoliteStatus(msg) {
+    const announcer = document.getElementById('studio-polite-announcer');
+    if (announcer) {
+      announcer.textContent = msg;
+    }
+  }
+
+  function appendGeneratingProgressBubble(headingText, subText, progressLabel) {
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble assistant-bubble';
+    bubble.innerHTML = `
+      <div class="bubble-header">
+        <span class="bubble-avatar assistant-avatar">🎵</span>
+        <span class="bubble-author">Universal Music Producer</span>
+        <span class="bubble-timestamp">Working...</span>
+      </div>
+      <div class="bubble-content">
+        <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">${escapeHTML(headingText)}</div>
+        <div style="font-size: 12.5px; color: var(--text-secondary);">${escapeHTML(subText)}</div>
+        <progress class="studio-gen-progress" aria-label="${escapeHTML(progressLabel)}"></progress>
+      </div>
+    `;
+    DOM.chatMessages.appendChild(bubble);
+    bubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    return bubble;
+  }
+
   function submitPrompt() {
     let text = DOM.chatInputTextarea.value.trim();
     if (!text && State.attachedPhotoBase64) {
@@ -1944,20 +2175,23 @@ Grace and love shining forevermore!`
     }
     if (!text) return;
 
-    const nonEmptyLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    const isPoemOrPhoto = Boolean(State.attachedPhotoBase64) || nonEmptyLines.length >= 4;
+    const createNewSong = shouldCreateNewSongFromPrompt(text);
+    if (createNewSong) {
+      closeNewSongChatInterface();
+      setCapsuleMode(false);
+    }
 
     DOM.btnSendPrompt.disabled = true;
-    DOM.deckStatusMsg.textContent = (!State.isIterating || isPoemOrPhoto)
+    DOM.deckStatusMsg.textContent = createNewSong
       ? 'Synthesizing full-length studio song via Google Gemini Lyria 3.5...'
-      : 'Iterating track via Multi-LLM Panel...';
+      : 'Applying mix iteration...';
 
     // Append User Bubble to conversation
     appendUserMessage(State.attachedPhotoName ? ('[Photo: ' + State.attachedPhotoName + ']\n' + text) : text);
     DOM.chatInputTextarea.value = '';
     DOM.chatInputTextarea.style.height = 'auto';
 
-    if (State.isIterating && !isPoemOrPhoto) {
+    if (!createNewSong) {
       executeIteration(text);
     } else {
       executeCreation(text);
@@ -1996,6 +2230,11 @@ Grace and love shining forevermore!`
     const nextVer = State.activeVersion + 1;
     const bpm = parseInt(DOM.sliderBpm.value, 10);
     const key = DOM.selectKey.value;
+    const pendingBubble = appendGeneratingProgressBubble(
+      `Producing Version v${nextVer} Mix Adjustment...`,
+      `Applying "${feedback.slice(0, 90)}" while preserving your song's vocals and melody.`,
+      `Producing Version ${nextVer}`
+    );
 
     fetch('/api/songs/iterate', {
       method: 'POST',
@@ -2013,6 +2252,7 @@ Grace and love shining forevermore!`
       })
     })
     .then(async r => {
+      if (pendingBubble && pendingBubble.parentNode) pendingBubble.remove();
       const data = await r.json().catch(() => null);
       if (!r.ok || !data || data.error || !data.audio_urls) {
         console.warn('Iteration returned error or missing audio_urls; using resilient fallback:', data);
@@ -2022,6 +2262,7 @@ Grace and love shining forevermore!`
       }
     })
     .catch(err => {
+      if (pendingBubble && pendingBubble.parentNode) pendingBubble.remove();
       console.warn('Network error during iteration; falling back to last valid audio:', err);
       onIterationSuccess(nextVer, feedback, bpm, key, null);
     });
@@ -2176,6 +2417,12 @@ Grace and love shining forevermore!`
             <button type="button" class="btn-inline-revert" data-version="${version}" title="Revert to previous state (v${Math.max(1, version - 1)})">
               ⏪ Revert to Last State
             </button>
+            <button type="button" class="btn-inline-like" data-inline-like-song="${escapeHTML(State.activeSongId)}" aria-pressed="${State.songs[State.activeSongId]?.liked ? 'true' : 'false'}">
+              ${State.songs[State.activeSongId]?.liked ? '♥ Liked' : '♡ Like'}
+            </button>
+            <button type="button" class="btn-inline-album" data-inline-album-song="${escapeHTML(State.activeSongId)}" data-version="${version}">
+              ${State.songs[State.activeSongId]?.albumTitle ? ('💿 In Album: ' + escapeHTML(compactHeaderTitle(State.songs[State.activeSongId].albumTitle))) : '💿 Move to Unique Album...'}
+            </button>
             <a href="${downloadUrl}" download="${State.activeSongId}_v${version}_master.wav" class="btn-inline-download" title="Download 48 kHz WAV">
               ⬇ Download WAV
             </a>
@@ -2215,23 +2462,163 @@ Grace and love shining forevermore!`
         performStudioRevert(Math.max(1, version - 1));
       });
     }
+    const iterSongId = State.activeSongId;
+    const btnIterLike = bubble.querySelector('.btn-inline-like');
+    if (btnIterLike) {
+      btnIterLike.addEventListener('click', () => {
+        toggleSongLike(iterSongId);
+      });
+    }
+    const btnIterAlbum = bubble.querySelector('.btn-inline-album');
+    if (btnIterAlbum) {
+      btnIterAlbum.addEventListener('click', () => {
+        openAlbumMoveModal({ mode: 'move_song', songId: iterSongId, version: version });
+      });
+    }
 
     DOM.chatMessages.appendChild(bubble);
     bubble.scrollIntoView({ behavior: 'smooth' });
   }
 
+  function isStarterTemplateLyrics(rawLyrics) {
+    if (!rawLyrics) return true;
+    return /create an authentic 1977 roots reggae hit|create a modern afrobeats hit|create a stadium blues-rock odyssey|create an uplifting soul & gospel choir anthem|got a ticket in my coat|one love!\s*one heart!|lagos sunrise shining|rolling down the highway underneath a velvet sky|when the night is heavy and the road is long and steep/i.test(rawLyrics);
+  }
+
+  function renderCreatedSongIntoBubble(bubble, songData, promptText) {
+    const songId = songData.id;
+    const title = songData.title;
+    const genre = songData.genre;
+    const bpm = songData.bpm;
+    const key = songData.key;
+    const modelUsed = songData.modelUsed || 'models/lyria-3.5';
+    const savedWavPath = songData.savedWavPath || '';
+    const lyrics = songData.lyrics || '';
+    const isLiked = Boolean(songData.liked || State.songs[songId]?.liked);
+    const albumTitle = songData.albumTitle || State.songs[songId]?.albumTitle || '';
+    const bust = Date.now();
+    const masterUrl = `/api/songs/${songId}/versions/1/audio/final_master?t=${bust}`;
+    const downloadUrl = `/api/songs/${songId}/versions/1/download`;
+    const transcriptId = `lyrics-transcript-${songId}-${bust}`;
+
+    const savedBadgeHtml = savedWavPath
+      ? `<div style="font-size: 11.5px; color: var(--text-secondary);">Saved on disk: <code>${escapeHTML(savedWavPath)}</code></div>`
+      : '';
+
+    const albumCalloutHtml = albumTitle
+      ? `<div data-inline-album-note="${escapeHTML(songId)}" style="font-size: 12px; font-weight: 700; color: #10a37f; margin-top: 2px;">💿 In Unique Album: ${escapeHTML(albumTitle)}</div>`
+      : `<div data-inline-album-note="${escapeHTML(songId)}" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Listen below - if you like how your poem sounds, click <strong>Like</strong> or <strong>Move to Unique Album</strong>.</div>`;
+
+    bubble.innerHTML = `
+      <div class="bubble-header">
+        <span class="bubble-avatar assistant-avatar">🎵</span>
+        <span class="bubble-author">Universal Music Producer</span>
+        <span class="bubble-timestamp">Just now - Poem Song Ready</span>
+        <span class="bubble-quality-badge success">✓ ${escapeHTML(modelUsed)}</span>
+      </div>
+      <div class="bubble-content">
+        <div class="created-song-inline-card">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">
+            <div>
+              <div style="font-size: 15px; font-weight: 700; color: var(--text-primary);">${escapeHTML(title)}</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                ${escapeHTML(genre)} | ${bpm} BPM | ${escapeHTML(key)} | 48 kHz 16-bit PCM Stereo WAV
+              </div>
+              ${savedBadgeHtml}
+              ${albumCalloutHtml}
+            </div>
+          </div>
+          <audio controls preload="metadata" src="${masterUrl}" aria-details="${transcriptId}" style="width: 100%; height: 40px; border-radius: 8px;"></audio>
+          <div class="inline-actions-row">
+            <button type="button" class="btn-inline-like" data-inline-like-song="${escapeHTML(songId)}" aria-pressed="${isLiked ? 'true' : 'false'}">
+              ${isLiked ? '♥ Liked' : '♡ Like Song'}
+            </button>
+            <button type="button" class="btn-inline-album" data-inline-album-song="${escapeHTML(songId)}" data-version="1">
+              ${albumTitle ? ('💿 In Album: ' + escapeHTML(compactHeaderTitle(albumTitle))) : '💿 Move to Unique Album...'}
+            </button>
+            <button type="button" class="btn-inline-test" data-song-id="${escapeHTML(songId)}">
+              ▶ Play in Studio Deck
+            </button>
+            <button type="button" class="btn-inline-solo-vocals" data-song-id="${escapeHTML(songId)}">
+              🎤 Solo Vocals
+            </button>
+            <a href="${downloadUrl}" download="${escapeHTML(title.replace(/[^a-zA-Z0-9_-]+/g, '_'))}.wav" class="btn-inline-download">
+              ⬇ Download 48 kHz WAV
+            </a>
+          </div>
+          <details id="${transcriptId}" class="created-song-lyrics-details">
+            <summary>View Verbatim Sung Poem &amp; Section Lyrics</summary>
+            <pre style="white-space: pre-wrap; font-family: inherit; margin-top: 8px; line-height: 1.5; color: var(--text-primary);">${escapeHTML(lyrics || promptText)}</pre>
+          </details>
+        </div>
+      </div>
+    `;
+
+    const btnLike = bubble.querySelector('.btn-inline-like');
+    if (btnLike) {
+      btnLike.addEventListener('click', () => {
+        toggleSongLike(songId);
+      });
+    }
+    const btnAlbum = bubble.querySelector('.btn-inline-album');
+    if (btnAlbum) {
+      btnAlbum.addEventListener('click', () => {
+        openAlbumMoveModal({ mode: 'move_song', songId: songId, version: 1 });
+      });
+    }
+    const btnPlayDeck = bubble.querySelector('.btn-inline-test');
+    if (btnPlayDeck) {
+      btnPlayDeck.addEventListener('click', () => {
+        State.activeSongId = songId;
+        switchVersion(1, true);
+      });
+    }
+    const btnSolo = bubble.querySelector('.btn-inline-solo-vocals');
+    if (btnSolo) {
+      btnSolo.addEventListener('click', () => {
+        State.activeSongId = songId;
+        switchVersion(1, false);
+        const verObj = State.songs[songId]?.versions[1];
+        if (verObj && verObj.audioUrls && verObj.audioUrls.vocals && DOM.masterAudio) {
+          DOM.masterAudio.src = verObj.audioUrls.vocals + '?t=' + Date.now();
+          DOM.masterAudio.load();
+          DOM.masterAudio.play().then(() => {
+            DOM.btnMasterPlay.textContent = '⏸';
+            State.isPlayingMaster = true;
+            DOM.deckStatusMsg.textContent = 'Solo Vocals Playing';
+          }).catch(() => {});
+        }
+      });
+    }
+    bubble.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
   function executeCreation(promptText) {
-    const genre = (DOM.heroGenreSelect && !DOM.newSongChatHero?.classList.contains('hidden'))
+    const heroVisible = Boolean(DOM.newSongChatHero && !DOM.newSongChatHero.classList.contains('hidden'));
+    const genre = (DOM.heroGenreSelect && heroVisible)
       ? DOM.heroGenreSelect.value
       : DOM.capsuleGenreSelect.value;
     const bpm = parseInt(DOM.sliderBpm.value, 10);
     const key = DOM.selectKey.value;
-    const isHeroOpen = DOM.newSongChatHero && !DOM.newSongChatHero.classList.contains('hidden');
-    const lyrics = (isHeroOpen && DOM.newSongLyricsInput) ? DOM.newSongLyricsInput.value.trim() : '';
+    const rawLyricsBox = DOM.newSongLyricsInput ? DOM.newSongLyricsInput.value.trim() : '';
+    const lyrics = (!isStarterTemplateLyrics(rawLyricsBox)) ? rawLyricsBox : '';
+    const targetAlbumId = State.pendingTargetAlbumIdForCreation
+      || ((heroVisible && DOM.heroTargetAlbumSelect) ? DOM.heroTargetAlbumSelect.value : '');
+    State.pendingTargetAlbumIdForCreation = '';
+
+    if (DOM.newSongNlPrompt) DOM.newSongNlPrompt.value = '';
+    if (DOM.newSongLyricsInput && !isStarterTemplateLyrics(rawLyricsBox)) DOM.newSongLyricsInput.value = '';
+
+    closeNewSongChatInterface();
+    const pendingBubble = appendGeneratingProgressBubble(
+      'Composing & Recording Your Poem Song with Google Gemini Lyria 3.5...',
+      'Preserving every line of your poem verbatim and generating expressive studio vocals and full instrumentation (~30-45 seconds).',
+      'Synthesizing poem song with Google Gemini Lyria 3.5'
+    );
 
     if (DOM.btnGenerateNewSongMain) {
       DOM.btnGenerateNewSongMain.disabled = true;
-      DOM.btnGenerateNewSongMain.innerHTML = '<span>⏳ Synthesizing Full Song via Gemini Lyria 3.5...</span>';
+      DOM.btnGenerateNewSongMain.innerHTML = '<span>⏳ Synthesizing Poem Song via Gemini Lyria 3.5...</span>';
     }
 
     const payload = {
@@ -2243,7 +2630,8 @@ Grace and love shining forevermore!`
       engine_mode: DOM.selectEngineMode ? DOM.selectEngineMode.value : 'auto',
       hf_model: DOM.selectHfModel ? DOM.selectHfModel.value : 'models/lyria-3.5',
       image_base64: State.attachedPhotoBase64 || undefined,
-      image_mime_type: State.attachedPhotoMime || undefined
+      image_mime_type: State.attachedPhotoMime || undefined,
+      target_album_id: targetAlbumId || undefined
     };
 
     State.attachedPhotoBase64 = null;
@@ -2259,40 +2647,64 @@ Grace and love shining forevermore!`
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    .then(r => r.json())
+    .then(async r => {
+      const data = await r.json().catch(() => null);
+      if (!r.ok || !data || data.error || !data.song_id) {
+        throw new Error((data && data.error) ? data.error : `Server returned status ${r.status}`);
+      }
+      return data;
+    })
     .then(data => {
       DOM.btnSendPrompt.disabled = false;
       if (DOM.btnGenerateNewSongMain) {
         DOM.btnGenerateNewSongMain.disabled = false;
-        DOM.btnGenerateNewSongMain.innerHTML = '<span>🚀 Generate Song (Vocals + All Instruments)</span>';
+        DOM.btnGenerateNewSongMain.innerHTML = '<span>🚀 Generate Song from Poem (Vocals + All Instruments)</span>';
       }
-      if (data && data.song_id) {
-        const newId = data.song_id;
-        const resolvedBpm = data.bpm || bpm;
-        const resolvedKey = data.key_signature || key;
-        const resolvedGenre = data.genre || genre;
-        const newTitle = data.title || `${resolvedGenre} (${resolvedBpm} BPM)`;
-        const resolvedLyrics = data.lyrics || lyrics || undefined;
-        State.songs[newId] = {
-          id: newId,
-          title: newTitle,
-          genre: resolvedGenre,
-          versions: {
-            1: buildSongVersionRecord(newId, 1, newTitle, resolvedBpm, resolvedKey, promptText, 9.9, resolvedLyrics)
-          }
-        };
-        addSongCardToSidebar(newId, newTitle, resolvedGenre, resolvedBpm, resolvedKey, 1);
-        closeNewSongChatInterface();
-        State.activeSongId = newId;
-        switchVersion(1, true);
-        if (DOM.masterAudio) {
-          const bust = Date.now();
-          DOM.masterAudio.src = `/api/songs/${newId}/versions/1/audio/final_master?t=${bust}`;
-          DOM.masterAudio.load();
-          DOM.masterAudio.play().catch(() => {});
+      const newId = data.song_id;
+      const resolvedBpm = data.bpm || bpm;
+      const resolvedKey = data.key_signature || key;
+      const resolvedGenre = data.genre || genre;
+      const newTitle = data.title || `${resolvedGenre} (${resolvedBpm} BPM)`;
+      const resolvedLyrics = data.lyrics || lyrics || undefined;
+      State.songs[newId] = {
+        id: newId,
+        title: newTitle,
+        genre: resolvedGenre,
+        liked: Boolean(data.liked),
+        albumId: data.album_id || null,
+        albumTitle: data.album_title || null,
+        versions: {
+          1: buildSongVersionRecord(newId, 1, newTitle, resolvedBpm, resolvedKey, promptText, 9.9, resolvedLyrics)
         }
+      };
+      addSongCardToSidebar(newId, newTitle, compactGenreBadge(resolvedGenre), resolvedBpm, resolvedKey, 1);
+      State.activeSongId = newId;
+      setCapsuleMode(true);
+      switchVersion(1, true);
+      if (DOM.masterAudio) {
+        const bust = Date.now();
+        DOM.masterAudio.src = `/api/songs/${newId}/versions/1/audio/final_master?t=${bust}`;
+        DOM.masterAudio.load();
+        DOM.masterAudio.play().catch(() => {});
       }
-      DOM.deckStatusMsg.textContent = `Complete Lyria 3.5 song created and playing!`;
+      renderCreatedSongIntoBubble(pendingBubble, {
+        id: newId,
+        title: newTitle,
+        genre: resolvedGenre,
+        bpm: resolvedBpm,
+        key: resolvedKey,
+        lyrics: resolvedLyrics,
+        liked: Boolean(data.liked),
+        albumId: data.album_id || null,
+        albumTitle: data.album_title || null,
+        modelUsed: data.model_used || 'models/lyria-3.5',
+        savedWavPath: data.saved_wav_path || ''
+      }, promptText);
+      if (data.album_id) {
+        fetchAlbumsCatalog(data.album_id);
+      }
+      announcePoliteStatus(`New poem song ${compactHeaderTitle(newTitle)} is ready and playing.`);
+      DOM.deckStatusMsg.textContent = `Poem song "${compactHeaderTitle(newTitle)}" created and playing!`;
     })
     .catch((err) => {
       DOM.btnSendPrompt.disabled = false;
@@ -2300,7 +2712,28 @@ Grace and love shining forevermore!`
         DOM.btnGenerateNewSongMain.disabled = false;
         DOM.btnGenerateNewSongMain.innerHTML = '<span>🚀 Generate Song (Vocals + All Instruments)</span>';
       }
-      DOM.deckStatusMsg.textContent = `Error creating song: ${err && err.message ? err.message : 'Request failed'}`;
+      const errMsg = err && err.message ? err.message : 'Request failed';
+      if (pendingBubble) {
+        pendingBubble.innerHTML = `
+          <div class="bubble-header">
+            <span class="bubble-avatar assistant-avatar">🎵</span>
+            <span class="bubble-author">Universal Music Producer</span>
+            <span class="bubble-timestamp">Error</span>
+          </div>
+          <div class="bubble-content" role="alert">
+            <p style="color:#dc2626; font-weight:600; margin-bottom:8px;">Could not finish generating song: ${escapeHTML(errMsg)}</p>
+            <button type="button" class="btn-inline-test" id="btn-retry-last-create">↻ Retry Song Generation</button>
+          </div>
+        `;
+        const retryBtn = pendingBubble.querySelector('#btn-retry-last-create');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => {
+            pendingBubble.remove();
+            executeCreation(promptText);
+          });
+        }
+      }
+      DOM.deckStatusMsg.textContent = `Error creating song: ${errMsg}`;
     });
   }
 
@@ -2308,6 +2741,16 @@ Grace and love shining forevermore!`
   // Collapsible Drawers & Accordion Logic
   // ==========================================================================
   function setupCollapsibleDrawers() {
+    const btnToggleRef = document.getElementById('btn-toggle-ref-importer');
+    const refBody = document.getElementById('ref-importer-collapsible-body');
+    if (btnToggleRef && refBody) {
+      btnToggleRef.addEventListener('click', function () {
+        const isExpanded = this.getAttribute('aria-expanded') === 'true';
+        this.setAttribute('aria-expanded', String(!isExpanded));
+        refBody.classList.toggle('hidden', isExpanded);
+        this.textContent = isExpanded ? '▸ Show Importer' : '▾ Hide Importer';
+      });
+    }
     // Stems Drawer
     DOM.toggleStemsBtn.addEventListener('click', function () {
       const isExpanded = this.getAttribute('aria-expanded') === 'true';
@@ -2436,6 +2879,29 @@ Grace and love shining forevermore!`
     if (!DOM.songHistory) return;
 
     DOM.songHistory.addEventListener('click', function (e) {
+      const likeBtn = e.target.closest('.sidebar-like-btn');
+      if (likeBtn) {
+        e.stopPropagation();
+        const sid = likeBtn.dataset.songId;
+        if (sid) toggleSongLike(sid);
+        return;
+      }
+
+      const albumBtn = e.target.closest('.sidebar-album-btn');
+      if (albumBtn) {
+        e.stopPropagation();
+        const sid = albumBtn.dataset.songId;
+        if (sid) {
+          const songObj = State.songs[sid];
+          if (songObj && songObj.albumId) {
+            openAlbumWorkspace(songObj.albumId);
+          } else {
+            openAlbumMoveModal({ mode: 'move_song', songId: sid, version: 1 });
+          }
+        }
+        return;
+      }
+
       const playBtn = e.target.closest('.sidebar-play-btn');
       if (playBtn) {
         e.stopPropagation();
@@ -2481,11 +2947,12 @@ Grace and love shining forevermore!`
     fetch('/api/songs')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (!data || !Array.isArray(data.songs) || data.songs.length === 0) return;
-        const freshSongs = {};
-        if (DOM.songHistory) {
-          DOM.songHistory.innerHTML = '';
+        if (!data || !Array.isArray(data.songs) || data.songs.length === 0) {
+          fetchAlbumsCatalog();
+          return;
         }
+        const freshSongs = {};
+        const orderedIds = [];
         data.songs.forEach(entry => {
           if (!entry || !entry.song_id) return;
           const versionsObj = {};
@@ -2494,42 +2961,41 @@ Grace and love shining forevermore!`
               entry.song_id,
               v.version,
               v.title || entry.title || entry.song_id,
-              v.bpm || 96,
-              v.key_signature || 'C Major',
-              v.iteration_summary || 'Synthesized from Reference WAV Pool via RL Policy & Legal Originality Guard.',
-              v.judge_score || 9.6
+              v.bpm || 80,
+              v.key_signature || 'G Major',
+              v.prompt || v.iteration_summary || 'Synthesized via Google Gemini Lyria 3.5 Studio Master.',
+              v.judge_score || 9.8,
+              v.lyrics || undefined
             );
           });
           if (Object.keys(versionsObj).length > 0) {
             freshSongs[entry.song_id] = {
               id: entry.song_id,
               title: entry.title || entry.song_id,
-              genre: entry.genre || 'RL Ensemble Blend',
+              genre: entry.genre || 'Studio Master',
+              liked: Boolean(entry.liked),
+              albumId: entry.album_id || null,
+              albumTitle: entry.album_title || null,
               versions: versionsObj
             };
-            const firstVer = versionsObj[1] || Object.values(versionsObj)[0];
-            addSongCardToSidebar(
-              entry.song_id,
-              entry.title || entry.song_id,
-              entry.genre || 'RL Ensemble Blend',
-              firstVer ? firstVer.bpm : 96,
-              firstVer ? firstVer.key : 'C Major',
-              Object.keys(versionsObj).length
-            );
+            orderedIds.push(entry.song_id);
           }
         });
-        const ids = Object.keys(freshSongs);
-        if (ids.length > 0) {
+        if (orderedIds.length > 0) {
           State.songs = freshSongs;
-          if (DOM.historyCount) {
-            DOM.historyCount.textContent = String(ids.length);
-          }
-          State.activeSongId = ids[0];
-          const latestVer = data.songs[0].latest_version || 1;
+          State.songOrder = orderedIds;
+          renderSidebarSongsList();
+          const preferredId = freshSongs[State.activeSongId] ? State.activeSongId : orderedIds[0];
+          State.activeSongId = preferredId;
+          const matchingEntry = data.songs.find(s => s.song_id === preferredId) || data.songs[0];
+          const latestVer = (matchingEntry && matchingEntry.latest_version) || 1;
           switchVersion(latestVer, false);
         }
+        fetchAlbumsCatalog();
       })
-      .catch(() => {});
+      .catch(() => {
+        fetchAlbumsCatalog();
+      });
   }
 
   // ==========================================================================
@@ -2576,29 +3042,49 @@ Grace and love shining forevermore!`
     }
     if (DOM.heroGenreSelect) {
       DOM.heroGenreSelect.addEventListener('change', function () {
-        const g = (this.value || '').toLowerCase();
-        if (g.includes('afrobeats') || g.includes('amapiano')) {
-          applyNewSongTemplate('afrobeats');
-        } else if (g.includes('blues') || g.includes('rock')) {
-          applyNewSongTemplate('bluesrock');
-        } else if (g.includes('soul') || g.includes('gospel')) {
-          applyNewSongTemplate('gospel');
-        } else {
-          applyNewSongTemplate('reggae');
+        const val = this.value || 'Acoustic Folk';
+        if (DOM.capsuleGenreSelect) {
+          DOM.capsuleGenreSelect.value = val;
         }
-        this.value = DOM.capsuleGenreSelect.value;
+        const g = val.toLowerCase();
+        const presetDefaults = g.includes('folk') ? { bpm: 80, key: 'G Major' }
+          : (g.includes('afrobeats') ? { bpm: 104, key: 'C Major' }
+          : (g.includes('amapiano') ? { bpm: 113, key: 'F Minor' }
+          : (g.includes('blues') || g.includes('rock') ? { bpm: 120, key: 'E Minor' }
+          : (g.includes('soul') || g.includes('gospel') ? { bpm: 72, key: 'G Major' }
+          : (g.includes('reggae') ? { bpm: 76, key: 'A Major' } : null)))));
+        if (presetDefaults) {
+          if (DOM.sliderBpm) DOM.sliderBpm.value = presetDefaults.bpm;
+          if (DOM.valBpm) DOM.valBpm.textContent = `${presetDefaults.bpm} BPM`;
+          if (DOM.selectKey) DOM.selectKey.value = presetDefaults.key;
+          if (DOM.valKey) DOM.valKey.textContent = presetDefaults.key;
+        }
+      });
+    }
+    if (DOM.newSongNlPrompt) {
+      DOM.newSongNlPrompt.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          if (e.isComposing || e.keyCode === 229) return;
+          if (DOM.btnGenerateNewSongMain) DOM.btnGenerateNewSongMain.click();
+        }
       });
     }
     if (DOM.btnGenerateNewSongMain) {
       DOM.btnGenerateNewSongMain.addEventListener('click', function () {
         setCapsuleMode(false);
-        const promptVal = (DOM.newSongNlPrompt && DOM.newSongNlPrompt.value.trim())
-          ? DOM.newSongNlPrompt.value.trim()
-          : DOM.chatInputTextarea.value.trim();
-        if (promptVal) {
-          DOM.chatInputTextarea.value = promptVal;
-          submitPrompt();
+        State.pendingTargetAlbumIdForCreation = DOM.heroTargetAlbumSelect ? DOM.heroTargetAlbumSelect.value : '';
+        const nlText = DOM.newSongNlPrompt ? DOM.newSongNlPrompt.value.trim() : '';
+        const lyricsBoxText = DOM.newSongLyricsInput ? DOM.newSongLyricsInput.value.trim() : '';
+        const capsuleText = DOM.chatInputTextarea ? DOM.chatInputTextarea.value.trim() : '';
+        const promptVal = nlText || lyricsBoxText || capsuleText;
+        if (!promptVal) {
+          if (DOM.newSongNlPrompt) DOM.newSongNlPrompt.focus();
+          DOM.deckStatusMsg.textContent = 'Paste your poem above first, then click Generate Song from Poem.';
+          return;
         }
+        DOM.chatInputTextarea.value = promptVal;
+        submitPrompt();
       });
     }
     document.querySelectorAll('.chatgpt-quick-action-row[data-template]').forEach(btn => {
@@ -3682,6 +4168,850 @@ Grace and love shining forevermore!`
   }
 
   // ==========================================================================
+  // Unique Albums Studio, Song Likes & Accessible Native <dialog> Controller
+  // ==========================================================================
+  function syncActiveSongLikeAndAlbumButtons() {
+    const song = State.songs[State.activeSongId];
+    const isLiked = Boolean(song && song.liked);
+    const albumTitle = (song && song.albumTitle) ? song.albumTitle : '';
+
+    if (DOM.btnCardLikeSong) {
+      DOM.btnCardLikeSong.setAttribute('aria-pressed', isLiked ? 'true' : 'false');
+      DOM.btnCardLikeSong.textContent = isLiked ? '♥ Liked' : '♡ Like';
+    }
+    if (DOM.btnCardMoveToAlbum) {
+      DOM.btnCardMoveToAlbum.textContent = albumTitle
+        ? ('💿 In Album: ' + compactHeaderTitle(albumTitle))
+        : '💿 Move to Album...';
+    }
+  }
+
+  function syncInlineSongButtons(songId) {
+    const song = State.songs[songId];
+    if (!song) return;
+    const isLiked = Boolean(song.liked);
+    const albumTitle = song.albumTitle || '';
+
+    document.querySelectorAll(`[data-inline-like-song="${CSS.escape(songId)}"]`).forEach(btn => {
+      btn.setAttribute('aria-pressed', isLiked ? 'true' : 'false');
+      btn.textContent = isLiked ? '♥ Liked' : '♡ Like Song';
+    });
+    document.querySelectorAll(`[data-inline-album-song="${CSS.escape(songId)}"]`).forEach(btn => {
+      btn.textContent = albumTitle
+        ? ('💿 In Album: ' + compactHeaderTitle(albumTitle))
+        : '💿 Move to Unique Album...';
+    });
+    document.querySelectorAll(`[data-inline-album-note="${CSS.escape(songId)}"]`).forEach(note => {
+      if (albumTitle) {
+        note.style.color = '#10a37f';
+        note.style.fontWeight = '700';
+        note.textContent = '💿 In Unique Album: ' + albumTitle;
+      } else {
+        note.style.color = 'var(--text-muted)';
+        note.style.fontWeight = '400';
+        note.textContent = 'Listen below - if you like how your poem sounds, click Like or Move to Unique Album.';
+      }
+    });
+  }
+
+  async function toggleSongLike(songId, forceLiked) {
+    if (!songId) return;
+    if (songId.startsWith('local_')) {
+      const localSong = State.songs[songId];
+      if (localSong) {
+        localSong.liked = typeof forceLiked === 'boolean' ? forceLiked : !localSong.liked;
+        syncActiveSongLikeAndAlbumButtons();
+        syncInlineSongButtons(songId);
+        renderSidebarSongsList();
+      }
+      return;
+    }
+    try {
+      const bodyObj = typeof forceLiked === 'boolean' ? { liked: forceLiked } : {};
+      const res = await fetch(`/api/songs/${encodeURIComponent(songId)}/like`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyObj)
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) return;
+
+      const resolvedId = data.song_id || songId;
+      [songId, resolvedId].forEach(id => {
+        if (State.songs[id]) {
+          State.songs[id].liked = Boolean(data.liked);
+          if (data.album_id !== undefined) State.songs[id].albumId = data.album_id || null;
+          if (data.album_title !== undefined) State.songs[id].albumTitle = data.album_title || null;
+          syncInlineSongButtons(id);
+        }
+      });
+      syncActiveSongLikeAndAlbumButtons();
+      renderSidebarSongsList();
+
+      const sTitle = compactHeaderTitle(State.songs[resolvedId]?.title || State.songs[songId]?.title || resolvedId);
+      if (data.liked) {
+        announcePoliteStatus(`Liked ${sTitle}. Click Move to Album to place it into a Unique Album.`);
+        DOM.deckStatusMsg.textContent = `♥ Liked "${sTitle}" - click 💿 Move to Album to place it in a Unique Album!`;
+      } else {
+        announcePoliteStatus(`Removed like from ${sTitle}.`);
+        DOM.deckStatusMsg.textContent = `Removed like from "${sTitle}".`;
+      }
+    } catch (err) {
+      console.warn('toggleSongLike failed:', err);
+    }
+  }
+
+  async function fetchAlbumsCatalog(albumIdToOpen) {
+    try {
+      const res = await fetch('/api/albums');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !Array.isArray(data.albums)) return;
+
+      State.albums = data.albums;
+
+      // Sync song -> album membership from authoritative album records
+      const assignedMap = {};
+      State.albums.forEach(album => {
+        (album.tracks || []).forEach(t => {
+          assignedMap[t.song_id] = { albumId: album.album_id, albumTitle: album.title };
+        });
+      });
+      Object.keys(State.songs).forEach(sid => {
+        if (assignedMap[sid]) {
+          State.songs[sid].albumId = assignedMap[sid].albumId;
+          State.songs[sid].albumTitle = assignedMap[sid].albumTitle;
+          State.songs[sid].liked = true;
+        } else if (State.songs[sid].albumId && !State.albums.some(a => a.album_id === State.songs[sid].albumId)) {
+          State.songs[sid].albumId = null;
+          State.songs[sid].albumTitle = null;
+        }
+        syncInlineSongButtons(sid);
+      });
+
+      renderSidebarAlbumsList();
+      renderSidebarSongsList();
+      populateHeroTargetAlbumSelect();
+      syncActiveSongLikeAndAlbumButtons();
+
+      const targetOpen = albumIdToOpen || State.activeAlbumId;
+      if (targetOpen && State.albums.some(a => a.album_id === targetOpen)) {
+        openAlbumWorkspace(targetOpen, false);
+      } else if (State.activeAlbumId && !State.albums.some(a => a.album_id === State.activeAlbumId)) {
+        closeAlbumWorkspace();
+      }
+    } catch (err) {
+      console.warn('fetchAlbumsCatalog failed:', err);
+    }
+  }
+
+  function renderSidebarAlbumsList() {
+    if (!DOM.sidebarAlbumsList) return;
+    const albums = State.albums || [];
+    if (DOM.albumsCount) {
+      DOM.albumsCount.textContent = String(albums.length);
+    }
+    if (albums.length === 0) {
+      DOM.sidebarAlbumsList.innerHTML = `
+        <div class="sidebar-albums-empty" id="sidebar-albums-empty">
+          No albums yet. Like any generated poem song and click <strong>Move to Album</strong> to start a unique album.
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    albums.forEach(album => {
+      const trackCount = Array.isArray(album.tracks) ? album.tracks.length : 0;
+      const isActive = State.activeAlbumId === album.album_id;
+      html += `
+        <button type="button" class="sidebar-album-item ${isActive ? 'active' : ''}" data-album-id="${escapeHTML(album.album_id)}">
+          <div style="min-width:0; flex:1;">
+            <div class="sidebar-album-title">💿 ${escapeHTML(album.title)}</div>
+            <div class="sidebar-album-sub">${escapeHTML(album.artist || 'Original Poems')}</div>
+          </div>
+          <span class="sidebar-album-count">${trackCount} ${trackCount === 1 ? 'song' : 'songs'}</span>
+        </button>
+      `;
+    });
+    DOM.sidebarAlbumsList.innerHTML = html;
+  }
+
+  function openAlbumWorkspace(albumId, scrollToCard = true) {
+    const album = (State.albums || []).find(a => a.album_id === albumId);
+    if (!album || !DOM.albumWorkspaceSection) return;
+
+    State.activeAlbumId = album.album_id;
+    renderSidebarAlbumsList();
+    renderAlbumWorkspace(album);
+    DOM.albumWorkspaceSection.classList.remove('hidden');
+    if (scrollToCard) {
+      DOM.albumWorkspaceSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function closeAlbumWorkspace() {
+    State.activeAlbumId = null;
+    if (DOM.albumWorkspaceSection) {
+      DOM.albumWorkspaceSection.classList.add('hidden');
+    }
+    renderSidebarAlbumsList();
+  }
+
+  function highlightPlayingAlbumTrackRow() {
+    if (!DOM.albumViewTracklist) return;
+    DOM.albumViewTracklist.querySelectorAll('.album-track-row').forEach(row => {
+      const sid = row.getAttribute('data-track-song-id');
+      row.classList.toggle('playing', sid === State.activeSongId);
+    });
+    if (DOM.btnAlbumPlayAll) {
+      const queueActive = Boolean(State.albumPlaybackQueue && State.albumPlaybackQueue.albumId === State.activeAlbumId && State.isPlayingMaster);
+      DOM.btnAlbumPlayAll.textContent = queueActive ? '⏸ Pause Album Playback' : '▶ Play Full Album';
+    }
+  }
+
+  function renderAlbumWorkspace(album) {
+    if (!album || !DOM.albumWorkspaceSection) return;
+    const tracks = Array.isArray(album.tracks) ? album.tracks : [];
+
+    if (DOM.albumViewTitle) DOM.albumViewTitle.textContent = album.title;
+    if (DOM.albumViewArtist) DOM.albumViewArtist.textContent = album.artist || 'Original Poems & Studio Vocalist';
+    if (DOM.albumViewDesc) {
+      DOM.albumViewDesc.textContent = album.description || 'Add more poem songs anytime - tracks are exported in sequential order to D:\music\Albums.';
+    }
+    if (DOM.albumViewCount) {
+      DOM.albumViewCount.textContent = `${tracks.length} ${tracks.length === 1 ? 'song' : 'songs'}`;
+    }
+    if (DOM.albumViewDiskPath) {
+      DOM.albumViewDiskPath.textContent = album.disk_folder_path || 'D:\music\Albums';
+    }
+    if (DOM.btnAlbumExportZip) {
+      DOM.btnAlbumExportZip.href = `/api/albums/${encodeURIComponent(album.album_id)}/export-zip`;
+    }
+    if (DOM.albumViewCoverImg && DOM.albumViewCoverFallback) {
+      if (album.cover_data_url) {
+        DOM.albumViewCoverImg.src = album.cover_data_url;
+        DOM.albumViewCoverImg.classList.remove('hidden');
+        DOM.albumViewCoverFallback.classList.add('hidden');
+      } else {
+        DOM.albumViewCoverImg.removeAttribute('src');
+        DOM.albumViewCoverImg.classList.add('hidden');
+        DOM.albumViewCoverFallback.classList.remove('hidden');
+      }
+    }
+
+    // Populate quick picker for moving other existing studio songs into this album
+    if (DOM.albumExistingSongPicker && DOM.btnAlbumAddExisting) {
+      const inThisAlbum = new Set(tracks.map(t => t.song_id));
+      const candidateIds = Object.keys(State.songs).filter(sid => !sid.startsWith('local_') && !inThisAlbum.has(sid));
+      if (candidateIds.length === 0) {
+        DOM.albumExistingSongPicker.innerHTML = '<option value="">No other studio songs outside this album yet</option>';
+        DOM.btnAlbumAddExisting.disabled = true;
+      } else {
+        let pickerHtml = '';
+        candidateIds.forEach(sid => {
+          const s = State.songs[sid];
+          const suffix = s.albumTitle ? ` (currently in ${s.albumTitle})` : (s.liked ? ' (♥ Liked)' : '');
+          pickerHtml += `<option value="${escapeHTML(sid)}">${escapeHTML(compactHeaderTitle(s.title || sid))}${escapeHTML(suffix)}</option>`;
+        });
+        DOM.albumExistingSongPicker.innerHTML = pickerHtml;
+        DOM.btnAlbumAddExisting.disabled = false;
+      }
+    }
+
+    if (!DOM.albumViewTracklist) return;
+    if (tracks.length === 0) {
+      DOM.albumViewTracklist.innerHTML = `
+        <li class="sidebar-albums-empty">
+          This Unique Album has 0 tracks right now. Click <strong>➕ Add Poem Song to Album</strong> above to paste a poem and generate Track 01, or move an existing song in below.
+        </li>
+      `;
+      return;
+    }
+
+    let listHtml = '';
+    tracks.forEach((track, idx) => {
+      const padNum = String(track.track_number || (idx + 1)).padStart(2, '0');
+      const isPlayingThis = track.song_id === State.activeSongId;
+      const dlUrl = `/api/songs/${encodeURIComponent(track.song_id)}/versions/${track.version || 1}/download`;
+      listHtml += `
+        <li class="album-track-row ${isPlayingThis ? 'playing' : ''}" data-track-song-id="${escapeHTML(track.song_id)}">
+          <span class="album-track-num">${padNum}</span>
+          <div class="album-track-info">
+            <div class="album-track-title">${escapeHTML(compactHeaderTitle(track.title))}</div>
+            <div class="album-track-meta">${escapeHTML(compactGenreBadge(track.genre))} | ${track.bpm} BPM | ${escapeHTML(track.key_signature)} | v${track.version || 1}</div>
+          </div>
+          <div class="album-track-actions">
+            <button type="button" class="sidebar-mini-action-btn" data-album-track-action="play" data-track-index="${idx}">▶ Play</button>
+            <button type="button" class="sidebar-mini-action-btn" data-album-track-action="up" data-track-index="${idx}" ${idx === 0 ? 'disabled' : ''} aria-label="Move track ${padNum} up">↑</button>
+            <button type="button" class="sidebar-mini-action-btn" data-album-track-action="down" data-track-index="${idx}" ${idx === tracks.length - 1 ? 'disabled' : ''} aria-label="Move track ${padNum} down">↓</button>
+            <a href="${dlUrl}" download="${padNum}_${escapeHTML(track.title.replace(/[^a-zA-Z0-9_-]+/g, '_'))}.wav" class="sidebar-mini-action-btn" style="text-decoration:none;">⬇ WAV</a>
+            <button type="button" class="sidebar-mini-action-btn" data-album-track-action="remove" data-song-id="${escapeHTML(track.song_id)}">↩ Unassign</button>
+          </div>
+        </li>
+      `;
+    });
+    DOM.albumViewTracklist.innerHTML = listHtml;
+    highlightPlayingAlbumTrackRow();
+  }
+
+  function playAlbumTrackAtIndex(albumId, trackIndex) {
+    const album = (State.albums || []).find(a => a.album_id === albumId);
+    if (!album || !Array.isArray(album.tracks) || trackIndex < 0 || trackIndex >= album.tracks.length) {
+      State.albumPlaybackQueue = null;
+      highlightPlayingAlbumTrackRow();
+      return;
+    }
+    const track = album.tracks[trackIndex];
+    State.albumPlaybackQueue = { albumId: album.album_id, trackIndex: trackIndex };
+
+    if (!State.songs[track.song_id]) {
+      State.songs[track.song_id] = {
+        id: track.song_id,
+        title: track.title,
+        genre: track.genre,
+        liked: true,
+        albumId: album.album_id,
+        albumTitle: album.title,
+        versions: {
+          [track.version || 1]: buildSongVersionRecord(
+            track.song_id,
+            track.version || 1,
+            track.title,
+            track.bpm || 80,
+            track.key_signature || 'G Major',
+            'Album Master Track',
+            9.9,
+            track.lyrics || ''
+          )
+        }
+      };
+    }
+
+    State.activeSongId = track.song_id;
+    switchVersion(track.version || 1, true);
+    highlightPlayingAlbumTrackRow();
+    DOM.deckStatusMsg.textContent = `▶ Playing Album "${album.title}" - Track ${String(trackIndex + 1).padStart(2, '0')}: "${compactHeaderTitle(track.title)}"`;
+  }
+
+  function advanceAlbumPlaybackOnEnded() {
+    if (!State.albumPlaybackQueue) return;
+    const { albumId, trackIndex } = State.albumPlaybackQueue;
+    const album = (State.albums || []).find(a => a.album_id === albumId);
+    if (!album || !Array.isArray(album.tracks)) {
+      State.albumPlaybackQueue = null;
+      return;
+    }
+    const nextIdx = trackIndex + 1;
+    if (nextIdx < album.tracks.length) {
+      playAlbumTrackAtIndex(albumId, nextIdx);
+    } else {
+      State.albumPlaybackQueue = null;
+      highlightPlayingAlbumTrackRow();
+      announcePoliteStatus(`Finished playing full album ${album.title}.`);
+      DOM.deckStatusMsg.textContent = `Finished playing full album "${album.title}" (${album.tracks.length} tracks).`;
+    }
+  }
+
+  async function reorderAlbumTrack(albumId, fromIndex, delta) {
+    const album = (State.albums || []).find(a => a.album_id === albumId);
+    if (!album || !Array.isArray(album.tracks)) return;
+    const toIndex = fromIndex + delta;
+    if (toIndex < 0 || toIndex >= album.tracks.length) return;
+
+    const order = album.tracks.map(t => t.song_id);
+    const [moved] = order.splice(fromIndex, 1);
+    order.splice(toIndex, 0, moved);
+
+    try {
+      const res = await fetch(`/api/albums/${encodeURIComponent(albumId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_order: order })
+      });
+      if (res.ok) {
+        await fetchAlbumsCatalog(albumId);
+        announcePoliteStatus(`Updated track order for album ${album.title}.`);
+      }
+    } catch (err) {
+      console.warn('reorderAlbumTrack failed:', err);
+    }
+  }
+
+  async function removeSongFromAlbum(albumId, songId) {
+    try {
+      const res = await fetch(`/api/albums/${encodeURIComponent(albumId)}/tracks/${encodeURIComponent(songId)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        if (State.songs[songId]) {
+          State.songs[songId].albumId = null;
+          State.songs[songId].albumTitle = null;
+          syncInlineSongButtons(songId);
+        }
+        await fetchAlbumsCatalog(albumId);
+        announcePoliteStatus('Moved song back to Unassigned Songs.');
+        DOM.deckStatusMsg.textContent = 'Moved track back to Unassigned Songs.';
+      }
+    } catch (err) {
+      console.warn('removeSongFromAlbum failed:', err);
+    }
+  }
+
+  function syncAlbumDialogModeUI() {
+    if (!DOM.albumMoveDialog) return;
+    const ctx = State.pendingAlbumModalContext || { mode: 'move_song' };
+    const isExistingMode = ctx.mode === 'move_song' && DOM.radioAlbumExisting && DOM.radioAlbumExisting.checked;
+
+    if (DOM.albumExistingGroup) {
+      DOM.albumExistingGroup.classList.toggle('hidden', !isExistingMode);
+    }
+    if (DOM.albumNewFieldsGroup) {
+      DOM.albumNewFieldsGroup.classList.toggle('hidden', isExistingMode);
+    }
+    if (DOM.albumTitleInput) {
+      DOM.albumTitleInput.required = !isExistingMode;
+    }
+  }
+
+  function validateAlbumTitleUniqueness() {
+    if (!DOM.albumTitleInput || !DOM.albumTitleError) return true;
+    const raw = DOM.albumTitleInput.value.trim();
+    if (!raw) {
+      DOM.albumTitleError.textContent = '';
+      DOM.albumTitleError.classList.add('hidden');
+      DOM.albumTitleInput.removeAttribute('aria-invalid');
+      return true;
+    }
+    const ctx = State.pendingAlbumModalContext || {};
+    const editingId = ctx.mode === 'edit_album' ? ctx.albumId : null;
+    const lower = raw.toLowerCase();
+    const conflict = (State.albums || []).find(a => a.album_id !== editingId && (a.title || '').trim().toLowerCase() === lower);
+    if (conflict) {
+      DOM.albumTitleError.textContent = `An album named "${conflict.title}" already exists. Choose a unique title or select Move into an Existing Album.`;
+      DOM.albumTitleError.classList.remove('hidden');
+      DOM.albumTitleInput.setAttribute('aria-invalid', 'true');
+      return false;
+    }
+    DOM.albumTitleError.textContent = '';
+    DOM.albumTitleError.classList.add('hidden');
+    DOM.albumTitleInput.removeAttribute('aria-invalid');
+    return true;
+  }
+
+  function openAlbumMoveModal(context) {
+    if (!DOM.albumMoveDialog) return;
+    const ctx = context || { mode: 'move_song', songId: State.activeSongId, version: State.activeVersion || 1 };
+    State.pendingAlbumModalContext = ctx;
+    State.pendingCoverDataUrl = null;
+
+    if (DOM.albumFormSubmitError) {
+      DOM.albumFormSubmitError.textContent = '';
+      DOM.albumFormSubmitError.classList.add('hidden');
+    }
+    if (DOM.albumTitleError) {
+      DOM.albumTitleError.textContent = '';
+      DOM.albumTitleError.classList.add('hidden');
+    }
+    if (DOM.albumTitleInput) {
+      DOM.albumTitleInput.removeAttribute('aria-invalid');
+    }
+    if (DOM.albumCoverInput) {
+      DOM.albumCoverInput.value = '';
+    }
+
+    const albums = State.albums || [];
+    if (DOM.albumExistingSelect) {
+      DOM.albumExistingSelect.innerHTML = albums.map(a => {
+        const cnt = Array.isArray(a.tracks) ? a.tracks.length : 0;
+        return `<option value="${escapeHTML(a.album_id)}">${escapeHTML(a.title)} (${cnt} ${cnt === 1 ? 'song' : 'songs'})</option>`;
+      }).join('');
+    }
+
+    if (ctx.mode === 'edit_album') {
+      const album = albums.find(a => a.album_id === ctx.albumId);
+      if (!album) return;
+      if (DOM.albumDialogTitle) DOM.albumDialogTitle.textContent = 'Edit Unique Album Details';
+      if (DOM.albumDialogSongBanner) DOM.albumDialogSongBanner.classList.add('hidden');
+      if (DOM.albumModeFieldset) DOM.albumModeFieldset.classList.add('hidden');
+      if (DOM.radioAlbumCreateNew) DOM.radioAlbumCreateNew.checked = true;
+      if (DOM.albumTitleInput) DOM.albumTitleInput.value = album.title || '';
+      if (DOM.albumArtistInput) DOM.albumArtistInput.value = album.artist || 'Original Poems & Studio Vocalist';
+      if (DOM.albumDescInput) DOM.albumDescInput.value = album.description || '';
+      if (DOM.btnAlbumDialogSubmit) DOM.btnAlbumDialogSubmit.textContent = 'Save Unique Album';
+    } else if (ctx.mode === 'new_empty_album') {
+      if (DOM.albumDialogTitle) DOM.albumDialogTitle.textContent = 'Create a New Unique Album';
+      if (DOM.albumDialogSongBanner) DOM.albumDialogSongBanner.classList.add('hidden');
+      if (DOM.albumModeFieldset) DOM.albumModeFieldset.classList.add('hidden');
+      if (DOM.radioAlbumCreateNew) DOM.radioAlbumCreateNew.checked = true;
+      if (DOM.albumTitleInput) DOM.albumTitleInput.value = '';
+      if (DOM.albumDescInput) DOM.albumDescInput.value = '';
+      if (DOM.btnAlbumDialogSubmit) DOM.btnAlbumDialogSubmit.textContent = 'Create Unique Album';
+    } else {
+      const songObj = State.songs[ctx.songId] || State.songs[State.activeSongId];
+      const sTitle = songObj ? compactHeaderTitle(songObj.title) : (ctx.songId || 'Selected Song');
+      if (DOM.albumDialogTitle) DOM.albumDialogTitle.textContent = 'Like & Move Song to a Unique Album';
+      if (DOM.albumDialogSongBanner) DOM.albumDialogSongBanner.classList.remove('hidden');
+      if (DOM.albumDialogSongName) DOM.albumDialogSongName.textContent = sTitle;
+
+      if (albums.length > 0) {
+        if (DOM.albumModeFieldset) DOM.albumModeFieldset.classList.remove('hidden');
+        if (DOM.radioAlbumExisting) DOM.radioAlbumExisting.disabled = false;
+        if (songObj && songObj.albumId && DOM.albumExistingSelect) {
+          DOM.albumExistingSelect.value = songObj.albumId;
+        } else if (State.activeAlbumId && DOM.albumExistingSelect) {
+          DOM.albumExistingSelect.value = State.activeAlbumId;
+        }
+        // Default to Existing Album if an album is already open, else let user create new or choose existing
+        if (State.activeAlbumId && DOM.radioAlbumExisting) {
+          DOM.radioAlbumExisting.checked = true;
+        } else if (DOM.radioAlbumCreateNew) {
+          DOM.radioAlbumCreateNew.checked = true;
+        }
+      } else {
+        if (DOM.albumModeFieldset) DOM.albumModeFieldset.classList.add('hidden');
+        if (DOM.radioAlbumCreateNew) DOM.radioAlbumCreateNew.checked = true;
+      }
+      if (DOM.albumTitleInput) DOM.albumTitleInput.value = '';
+      if (DOM.albumDescInput) DOM.albumDescInput.value = '';
+      if (DOM.btnAlbumDialogSubmit) DOM.btnAlbumDialogSubmit.textContent = '♥ Like & Move to Unique Album';
+    }
+
+    syncAlbumDialogModeUI();
+    if (!DOM.albumMoveDialog.open) {
+      DOM.albumMoveDialog.showModal();
+    }
+  }
+
+  function setupUniqueAlbumsStudio() {
+    if (DOM.btnToggleRefImporter && DOM.refImporterCollapsibleBody) {
+      DOM.btnToggleRefImporter.addEventListener('click', () => {
+        const nowHidden = DOM.refImporterCollapsibleBody.classList.toggle('hidden');
+        DOM.btnToggleRefImporter.setAttribute('aria-expanded', nowHidden ? 'false' : 'true');
+        DOM.btnToggleRefImporter.textContent = nowHidden ? '▸ Show Importer' : '▾ Hide Importer';
+      });
+    }
+
+    if (DOM.heroTargetAlbumSelect) {
+      DOM.heroTargetAlbumSelect.addEventListener('change', syncHeroAlbumTargetPill);
+    }
+
+    if (DOM.btnCardLikeSong) {
+      DOM.btnCardLikeSong.addEventListener('click', () => {
+        toggleSongLike(State.activeSongId);
+      });
+    }
+    if (DOM.btnCardMoveToAlbum) {
+      DOM.btnCardMoveToAlbum.addEventListener('click', () => {
+        openAlbumMoveModal({
+          mode: 'move_song',
+          songId: State.activeSongId,
+          version: State.activeVersion || 1
+        });
+      });
+    }
+    if (DOM.btnSidebarNewAlbum) {
+      DOM.btnSidebarNewAlbum.addEventListener('click', () => {
+        openAlbumMoveModal({ mode: 'new_empty_album' });
+      });
+    }
+    if (DOM.btnToggleSongFilter) {
+      DOM.btnToggleSongFilter.addEventListener('click', () => {
+        State.showAllSongsInSidebar = !State.showAllSongsInSidebar;
+        renderSidebarSongsList();
+      });
+    }
+
+    if (DOM.sidebarAlbumsList) {
+      DOM.sidebarAlbumsList.addEventListener('click', (e) => {
+        const btn = e.target.closest('.sidebar-album-item');
+        if (btn && btn.dataset.albumId) {
+          openAlbumWorkspace(btn.dataset.albumId, true);
+        }
+      });
+    }
+
+    // Album Workspace actions
+    if (DOM.btnAlbumPlayAll) {
+      DOM.btnAlbumPlayAll.addEventListener('click', () => {
+        if (!State.activeAlbumId) return;
+        if (State.albumPlaybackQueue && State.albumPlaybackQueue.albumId === State.activeAlbumId && DOM.masterAudio) {
+          if (!DOM.masterAudio.paused) {
+            DOM.masterAudio.pause();
+            highlightPlayingAlbumTrackRow();
+            return;
+          }
+          DOM.masterAudio.play().catch(() => {});
+          highlightPlayingAlbumTrackRow();
+          return;
+        }
+        playAlbumTrackAtIndex(State.activeAlbumId, 0);
+      });
+    }
+    if (DOM.btnAlbumAddPoemSong) {
+      DOM.btnAlbumAddPoemSong.addEventListener('click', () => {
+        if (!State.activeAlbumId) return;
+        openNewSongChatInterface(null, State.activeAlbumId);
+      });
+    }
+    if (DOM.btnAlbumEditMeta) {
+      DOM.btnAlbumEditMeta.addEventListener('click', () => {
+        if (!State.activeAlbumId) return;
+        openAlbumMoveModal({ mode: 'edit_album', albumId: State.activeAlbumId });
+      });
+    }
+    if (DOM.btnAlbumDelete) {
+      DOM.btnAlbumDelete.addEventListener('click', async () => {
+        if (!State.activeAlbumId) return;
+        const album = (State.albums || []).find(a => a.album_id === State.activeAlbumId);
+        if (!album) return;
+        const confirmed = window.confirm(`Delete Unique Album "${album.title}"? Its songs will not be deleted - they will safely return to Unassigned Songs.`);
+        if (!confirmed) return;
+        try {
+          const res = await fetch(`/api/albums/${encodeURIComponent(album.album_id)}`, { method: 'DELETE' });
+          if (res.ok) {
+            closeAlbumWorkspace();
+            await fetchAlbumsCatalog();
+            announcePoliteStatus(`Deleted album ${album.title} and returned songs to Unassigned Songs.`);
+            DOM.deckStatusMsg.textContent = `Deleted album "${album.title}" (songs returned to Unassigned Songs).`;
+          }
+        } catch (err) {
+          console.warn('Delete album failed:', err);
+        }
+      });
+    }
+    if (DOM.btnAlbumCloseView) {
+      DOM.btnAlbumCloseView.addEventListener('click', closeAlbumWorkspace);
+    }
+    if (DOM.btnAlbumAddExisting && DOM.albumExistingSongPicker) {
+      DOM.btnAlbumAddExisting.addEventListener('click', async () => {
+        const aid = State.activeAlbumId;
+        const sid = DOM.albumExistingSongPicker.value;
+        if (!aid || !sid) return;
+        DOM.btnAlbumAddExisting.disabled = true;
+        try {
+          const latestVer = Math.max(1, ...Object.keys(State.songs[sid]?.versions || { 1: true }).map(n => parseInt(n, 10) || 1));
+          const res = await fetch(`/api/albums/${encodeURIComponent(aid)}/tracks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ song_id: sid, version: latestVer })
+          });
+          const data = await res.json().catch(() => null);
+          if (res.ok && data) {
+            await fetchAlbumsCatalog(aid);
+            announcePoliteStatus(`Moved song into album ${data.title}.`);
+            DOM.deckStatusMsg.textContent = `💿 Moved track into Unique Album "${data.title}"!`;
+          }
+        } finally {
+          DOM.btnAlbumAddExisting.disabled = false;
+        }
+      });
+    }
+    if (DOM.albumViewTracklist) {
+      DOM.albumViewTracklist.addEventListener('click', (e) => {
+        const actionBtn = e.target.closest('[data-album-track-action]');
+        if (!actionBtn || !State.activeAlbumId) return;
+        const action = actionBtn.getAttribute('data-album-track-action');
+        const idx = parseInt(actionBtn.getAttribute('data-track-index') || '0', 10);
+        if (action === 'play') {
+          playAlbumTrackAtIndex(State.activeAlbumId, idx);
+        } else if (action === 'up') {
+          reorderAlbumTrack(State.activeAlbumId, idx, -1);
+        } else if (action === 'down') {
+          reorderAlbumTrack(State.activeAlbumId, idx, 1);
+        } else if (action === 'remove') {
+          const sid = actionBtn.getAttribute('data-song-id');
+          if (sid) removeSongFromAlbum(State.activeAlbumId, sid);
+        }
+      });
+    }
+
+    // Native <dialog id="album-move-dialog"> lifecycle & accessible light-dismiss
+    if (!DOM.albumMoveDialog) return;
+
+    DOM.albumMoveDialog.addEventListener('close', () => {
+      DOM.albumMoveDialog.returnValue = '';
+      State.pendingCoverDataUrl = null;
+    });
+
+    if (!('closedBy' in HTMLDialogElement.prototype)) {
+      let pointerDownOutside = false;
+      const isOutside = (ev) => {
+        const r = DOM.albumMoveDialog.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        return ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom;
+      };
+      DOM.albumMoveDialog.addEventListener('pointerdown', (ev) => {
+        pointerDownOutside = isOutside(ev);
+      });
+      DOM.albumMoveDialog.addEventListener('pointerup', (ev) => {
+        if (pointerDownOutside && isOutside(ev)) {
+          DOM.albumMoveDialog.close('dismiss');
+        }
+        pointerDownOutside = false;
+      });
+    }
+
+    if (DOM.btnAlbumDialogClose) {
+      DOM.btnAlbumDialogClose.addEventListener('click', () => DOM.albumMoveDialog.close('cancel'));
+    }
+    if (DOM.btnAlbumDialogCancel) {
+      DOM.btnAlbumDialogCancel.addEventListener('click', () => DOM.albumMoveDialog.close('cancel'));
+    }
+    if (DOM.radioAlbumCreateNew) {
+      DOM.radioAlbumCreateNew.addEventListener('change', syncAlbumDialogModeUI);
+    }
+    if (DOM.radioAlbumExisting) {
+      DOM.radioAlbumExisting.addEventListener('change', syncAlbumDialogModeUI);
+    }
+    if (DOM.albumTitleInput) {
+      DOM.albumTitleInput.addEventListener('blur', validateAlbumTitleUniqueness);
+      DOM.albumTitleInput.addEventListener('input', () => {
+        if (DOM.albumTitleError) {
+          DOM.albumTitleError.textContent = '';
+          DOM.albumTitleError.classList.add('hidden');
+        }
+        DOM.albumTitleInput.removeAttribute('aria-invalid');
+      });
+    }
+    if (DOM.albumCoverInput) {
+      DOM.albumCoverInput.addEventListener('change', function () {
+        const file = this.files && this.files[0];
+        if (!file) {
+          State.pendingCoverDataUrl = null;
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          State.pendingCoverDataUrl = String((ev.target && ev.target.result) || '');
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    if (DOM.albumMoveForm) {
+      DOM.albumMoveForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const ctx = State.pendingAlbumModalContext || { mode: 'move_song', songId: State.activeSongId, version: 1 };
+        const useExisting = ctx.mode === 'move_song' && DOM.radioAlbumExisting && DOM.radioAlbumExisting.checked;
+
+        if (!useExisting && !validateAlbumTitleUniqueness()) {
+          if (DOM.albumTitleInput) DOM.albumTitleInput.focus();
+          return;
+        }
+
+        if (DOM.albumFormSubmitError) {
+          DOM.albumFormSubmitError.textContent = '';
+          DOM.albumFormSubmitError.classList.add('hidden');
+        }
+        if (DOM.btnAlbumDialogSubmit) {
+          DOM.btnAlbumDialogSubmit.disabled = true;
+        }
+
+        try {
+          let resultAlbum = null;
+
+          if (ctx.mode === 'edit_album') {
+            const payload = {
+              title: DOM.albumTitleInput ? DOM.albumTitleInput.value.trim() : '',
+              artist: DOM.albumArtistInput ? DOM.albumArtistInput.value.trim() : '',
+              description: DOM.albumDescInput ? DOM.albumDescInput.value.trim() : ''
+            };
+            if (State.pendingCoverDataUrl) {
+              payload.cover_data_url = State.pendingCoverDataUrl;
+            }
+            const res = await fetch(`/api/albums/${encodeURIComponent(ctx.albumId)}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data || data.error) {
+              if (res.status === 409 && DOM.albumTitleError && DOM.albumTitleInput) {
+                DOM.albumTitleError.textContent = (data && data.error) || 'Album title must be unique.';
+                DOM.albumTitleError.classList.remove('hidden');
+                DOM.albumTitleInput.setAttribute('aria-invalid', 'true');
+                DOM.albumTitleInput.focus();
+                return;
+              }
+              throw new Error((data && data.error) || `Server returned status ${res.status}`);
+            }
+            resultAlbum = data;
+          } else if (useExisting) {
+            const targetId = DOM.albumExistingSelect ? DOM.albumExistingSelect.value : '';
+            if (!targetId) throw new Error('Select an existing Unique Album first.');
+            const res = await fetch(`/api/albums/${encodeURIComponent(targetId)}/tracks`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                song_id: ctx.songId,
+                version: ctx.version || 1
+              })
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data || data.error) {
+              throw new Error((data && data.error) || `Server returned status ${res.status}`);
+            }
+            resultAlbum = data;
+          } else {
+            const titleVal = DOM.albumTitleInput ? DOM.albumTitleInput.value.trim() : '';
+            if (!titleVal) {
+              if (DOM.albumTitleError && DOM.albumTitleInput) {
+                DOM.albumTitleError.textContent = 'Enter a unique title for your album.';
+                DOM.albumTitleError.classList.remove('hidden');
+                DOM.albumTitleInput.setAttribute('aria-invalid', 'true');
+                DOM.albumTitleInput.focus();
+              }
+              return;
+            }
+            const payload = {
+              title: titleVal,
+              artist: DOM.albumArtistInput ? DOM.albumArtistInput.value.trim() : 'Original Poems & Studio Vocalist',
+              description: DOM.albumDescInput ? DOM.albumDescInput.value.trim() : '',
+              cover_data_url: State.pendingCoverDataUrl || undefined,
+              initial_song_id: ctx.mode === 'move_song' ? ctx.songId : undefined,
+              initial_version: ctx.mode === 'move_song' ? (ctx.version || 1) : undefined
+            };
+            const res = await fetch('/api/albums', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data || data.error) {
+              if (res.status === 409 && DOM.albumTitleError && DOM.albumTitleInput) {
+                DOM.albumTitleError.textContent = (data && data.error) || 'Album title must be unique.';
+                DOM.albumTitleError.classList.remove('hidden');
+                DOM.albumTitleInput.setAttribute('aria-invalid', 'true');
+                DOM.albumTitleInput.focus();
+                return;
+              }
+              throw new Error((data && data.error) || `Server returned status ${res.status}`);
+            }
+            resultAlbum = data;
+          }
+
+          DOM.albumMoveDialog.close('saved');
+          if (resultAlbum && resultAlbum.album_id) {
+            await fetchAlbumsCatalog(resultAlbum.album_id);
+            openAlbumWorkspace(resultAlbum.album_id, true);
+            announcePoliteStatus(`Album ${resultAlbum.title} updated and synced to D:\music\Albums.`);
+            DOM.deckStatusMsg.textContent = `💿 Unique Album "${resultAlbum.title}" ready (${(resultAlbum.tracks || []).length} songs exported to ${resultAlbum.disk_folder_path})!`;
+          }
+        } catch (err) {
+          if (DOM.albumFormSubmitError) {
+            DOM.albumFormSubmitError.textContent = err && err.message ? err.message : 'Could not save album.';
+            DOM.albumFormSubmitError.classList.remove('hidden');
+          }
+        } finally {
+          if (DOM.btnAlbumDialogSubmit) {
+            DOM.btnAlbumDialogSubmit.disabled = false;
+          }
+        }
+      });
+    }
+  }
+
+  // ==========================================================================
   // Initialization
   // ==========================================================================
   function init() {
@@ -3698,6 +5028,7 @@ Grace and love shining forevermore!`
     setupPresets();
     setupSidebar();
     setupSidebarSongSelection();
+    setupUniqueAlbumsStudio();
     setupTTSControls();
     setupReferenceWavImporterAndRL();
     setupThemeToggle();

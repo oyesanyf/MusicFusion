@@ -50,11 +50,31 @@
       </div>
 
       <!-- Scrollable Navigation and History -->
-      <nav class="sidebar-nav-list" id="sidebar-nav-list">
-        <!-- Section: Song & Version History -->
-        <div class="sidebar-section-header">
-          <span class="section-title">SONG &amp; VERSION HISTORY</span>
-          <span class="section-count" id="history-count">1</span>
+      <nav class="sidebar-nav-list" id="sidebar-nav-list" aria-label="Albums and Song Library">
+        <!-- Section: Unique Albums -->
+        <div class="sidebar-section-header" style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+          <span class="section-title">💿 UNIQUE ALBUMS</span>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="section-count" id="albums-count">0</span>
+            <button type="button" class="sidebar-mini-action-btn" id="btn-sidebar-new-album">+ New Album</button>
+          </div>
+        </div>
+
+        <div class="sidebar-albums-container" id="sidebar-albums-list">
+          <div class="sidebar-albums-empty" id="sidebar-albums-empty">
+            No albums yet. Like any generated poem song and click <strong>Move to Album</strong> to start a unique album.
+          </div>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <!-- Section: Unassigned / Draft Songs & Version History -->
+        <div class="sidebar-section-header" style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+          <span class="section-title" id="sidebar-songs-heading">UNASSIGNED SONGS</span>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="section-count" id="history-count">1</span>
+            <button type="button" class="sidebar-mini-action-btn" id="btn-toggle-song-filter" aria-pressed="false">Show All</button>
+          </div>
         </div>
 
         <div class="sidebar-history-container" id="sidebar-song-history">
@@ -269,47 +289,37 @@
         <div class="chat-messages" id="chat-messages">
 
           <!-- ============================================================ -->
-          <!-- CHATGPT NEW SONG NATURAL LANGUAGE CHAT COMPOSER (PRE-FILLED) -->
+          <!-- POEM-AS-IS & NEW SONG COMPOSER                               -->
           <!-- ============================================================ -->
-          <section class="chatgpt-new-song-hero hidden" id="new-song-chat-hero" aria-label="New Song Natural Language Chat Composer">
-            <h2 class="chatgpt-hero-heading">Hey, producer. Ready to dive in?</h2>
-            <p class="chatgpt-hero-sub">Describe your new song in natural language below. Pre-filled with a complete example showing how to control <strong>Lead &amp; Choir Vocals</strong> + <strong>All Instruments</strong> (Drums, Sub-Bass, Guitar Solo, Organ &amp; Brass).</p>
+          <section class="chatgpt-new-song-hero hidden" id="new-song-chat-hero" aria-label="Poem As-Is and New Song Composer">
+            <h2 class="chatgpt-hero-heading">Paste your poem as-is &amp; generate music</h2>
+            <p class="chatgpt-hero-sub">Give any poem directly as-is (multi-line stanzas or a single paragraph, with or without a music style note). Every line is preserved in exact poem order and sung with studio vocals via <strong>Google Gemini Lyria 3.5</strong>.</p>
 
             <!-- Main ChatGPT Pill Composer Box -->
             <div class="chatgpt-pill-composer-box">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <label for="new-song-nl-prompt" style="font-size:12px; font-weight:600; color:var(--text-secondary);">💬 NATURAL LANGUAGE SONG PROMPT (VOCALS + ALL INSTRUMENTS + PRODUCTION):</label>
-                <span style="font-size:11.5px; color:var(--text-muted);">Editable • Synced with Chat Bar</span>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px; flex-wrap:wrap;">
+                <label for="new-song-nl-prompt" style="font-size:12.5px; font-weight:700; color:var(--text-primary);">📜 PASTE YOUR POEM AS-IS (OPTIONAL STYLE NOTE + POEM):</label>
+                <span id="new-song-album-target-pill" class="album-target-pill hidden"></span>
               </div>
-              <textarea id="new-song-nl-prompt" class="chatgpt-nl-textarea" rows="7" spellcheck="false">Create a 1988 Acoustic Folk and Soul Ballad titled "One Love Shining" at 104 BPM in A Major.
-For the lead and backing vocals, feature a soulful, warm, and slightly smoky contralto or raspy acoustic tenor lead vocal singing clear, articulated English storytelling lyrics right from the start. Support the lead with subtle, intimate dual harmony backing vocals that swell gently in call and response during every chorus and outro.
-For the guitars, which serve as the rhythm and lead foundation, anchor the track with a continuous, hypnotic fingerpicked steel string acoustic guitar riff that loops throughout the song, blending bright hammer ons with warm open chords. Replace the electric solo with a sixteen bar melodic, woody acoustic slide guitar solo during the bridge that captures a sense of longing and motion.
-For the drums and percussion, begin with an intimate, stripped back arrangement in the first verse using only a subtle shaker and soft woodblock. Build into the chorus and second verse with a tight, dry studio drum kit featuring a crisp cross stick rimshot, brushed snare swells, and driving sixteenth note hi hat accents that push the narrative forward.
-For the bass foundation, lay down a deep, melodic fretless bass line played with warm fingerstyle articulation in the 55 to 90 Hz range, recorded with subtle analog tape saturation to give the low end a rounded, woody resonance beneath the acoustic guitar.
-For the keyboards and atmospheric layers, replace the heavy brass and funk keys with a whisper quiet, sustained Hammond B3 organ pad tucked low in the mix, accompanied by delicate Wurlitzer electric piano chords and yearning pedal steel guitar swells that bloom softly during the transitions.
-For the mastering, apply a 1988 Los Angeles analog studio Studer A800 48 kHz 16 bit PCM stereo tape master with natural dynamic range and vocal priority compression so the intimate storytelling vocals and acoustic strings sit right at the front of the mix.</textarea>
+              <p id="new-song-nl-hint" style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">Example: paste your poem directly, or write "make acoustic folk music of this poem" followed by your poem. Listen first, and if you like it, move it into a Unique Album!</p>
+              <textarea id="new-song-nl-prompt" name="poem_or_prompt" class="chatgpt-nl-textarea" rows="6" aria-describedby="new-song-nl-hint" placeholder="Paste your poem here as-is..." spellcheck="true"></textarea>
 
-              <!-- Sung Lyrics Box (Directly drives Lead & Choir Vocal Synthesis) -->
+              <!-- Sung Lyrics Box (Optional separate poem/lyrics box if user wants style above & poem below) -->
               <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-subtle);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                  <label for="new-song-lyrics-input" style="font-size:12px; font-weight:600; color:var(--text-secondary);">🎤 SUNG ENGLISH STORYTELLING LYRICS (CONTRALTO / TENOR LEAD + DUAL HARMONY):</label>
-                  <span style="font-size:11.5px; color:var(--text-muted);">Synthesized into yue_vocals.wav &amp; raspy_tenor_vocals.wav</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label for="new-song-lyrics-input" style="font-size:12px; font-weight:600; color:var(--text-secondary);">🎤 OPTIONAL SEPARATE POEM / LYRICS BOX:</label>
+                  <span style="font-size:11.5px; color:var(--text-muted);">Leave blank when your poem is in the box above</span>
                 </div>
-                <textarea id="new-song-lyrics-input" class="chatgpt-nl-textarea" rows="5" style="min-height:105px; font-size:13px;" spellcheck="false">[Verse 1]
-Got a ticket in my coat and a dollar in my hand,
-Tracing every highway line across this restless land.
-You said keep the promise burning when the night gets cold,
-Every mile we travel is a story being told.
+                <p id="new-song-lyrics-hint" style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">If you prefer describing only the music style above and pasting your raw poem separately, paste it here.</p>
+                <textarea id="new-song-lyrics-input" name="custom_lyrics" class="chatgpt-nl-textarea" rows="4" style="min-height:84px; font-size:13px;" aria-describedby="new-song-lyrics-hint" placeholder="Optional: leave blank when your poem is already pasted above..." spellcheck="true"></textarea>
+              </div>
 
-[Chorus]
-One love shining through the canyon rain!
-Carried on the rhythm of a midnight westbound train!
-From the wooden porch steps to the California sea,
-One love shining over you and me!
-
-[Outro]
-One love shining, roll on down the line,
-Acoustic strings and tender souls forever intertwined.</textarea>
+              <!-- Optional Target Album Selector when composing directly for an Album -->
+              <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-subtle); display:grid; grid-template-columns:1fr; gap:4px;">
+                <label for="hero-target-album-select" style="font-size:12px; font-weight:600; color:var(--text-secondary);">💿 DESTINATION AFTER GENERATION:</label>
+                <select id="hero-target-album-select" name="target_album_id" class="version-select" style="width:100%; max-width:100%; min-height:40px; font-size:13px;">
+                  <option value="" selected>Keep in Unassigned Songs first (Listen &amp; Move to a Unique Album if I like it)</option>
+                </select>
               </div>
 
               <!-- Dedicated ModelFusion Text-to-Voice (TTS) Section -->
@@ -346,8 +356,10 @@ Acoustic strings and tender souls forever intertwined.</textarea>
               <!-- Composer Toolbar (Genre, BPM, Key, Generate Button) -->
               <div class="chatgpt-composer-toolbar">
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                  <select id="hero-genre-select" class="version-select" title="Select Genre">
-                    <option value="Roots Reggae" selected>🇯🇲 Roots Reggae (76 BPM)</option>
+                  <label for="hero-genre-select" class="visually-hidden">Musical Style</label>
+                  <select id="hero-genre-select" class="version-select" title="Select Musical Style">
+                    <option value="Acoustic Folk &amp; Poem Ballad" selected>🪕 Acoustic Folk &amp; Poem Ballad (80 BPM)</option>
+                    <option value="Roots Reggae">🇯🇲 Roots Reggae (76 BPM)</option>
                     <option value="Afrobeats">🌍 Afrobeats (104 BPM)</option>
                     <option value="Amapiano">🎹 Amapiano (113 BPM)</option>
                     <option value="Soul / Gospel">🎤 Soul &amp; Gospel (72 BPM)</option>
@@ -359,8 +371,8 @@ Acoustic strings and tender souls forever intertwined.</textarea>
                   <button type="button" class="rate-btn" id="btn-hero-back-studio" title="Return to Active Song Player">🎧 Back to Active Song</button>
                 </div>
 
-                <button type="button" class="chatgpt-blue-send-btn" id="btn-generate-new-song-main" title="Generate Full Song with Vocals &amp; All Instruments">
-                  <span>🚀 Generate Song (Vocals + All Instruments)</span>
+                <button type="button" class="chatgpt-blue-send-btn" id="btn-generate-new-song-main">
+                  <span>🚀 Generate Music from Poem / Prompt</span>
                 </button>
               </div>
             </div>
@@ -388,6 +400,51 @@ Acoustic strings and tender souls forever intertwined.</textarea>
           </section>
 
           <!-- ============================================================ -->
+          <!-- INTERACTIVE UNIQUE ALBUM STUDIO WORKSPACE                    -->
+          <!-- ============================================================ -->
+          <section class="album-workspace-card hidden" id="album-workspace-section" aria-labelledby="album-view-title">
+            <div class="album-workspace-header">
+              <div class="album-cover-box" id="album-view-cover-wrap">
+                <img id="album-view-cover-img" class="album-cover-img hidden" src="" alt="Album cover art">
+                <span id="album-view-cover-fallback" class="album-cover-fallback" aria-hidden="true">💿</span>
+              </div>
+              <div class="album-header-meta">
+                <div class="album-badge-row">
+                  <span class="album-unique-pill">UNIQUE ALBUM</span>
+                  <span class="album-track-count-pill" id="album-view-count">0 songs</span>
+                </div>
+                <h2 class="album-view-title" id="album-view-title">My Poem Album</h2>
+                <div class="album-view-artist" id="album-view-artist">Original Poems &amp; Studio Vocalist</div>
+                <p class="album-view-desc" id="album-view-desc"></p>
+                <div class="album-disk-path-row">
+                  <span>Saved on disk:</span>
+                  <code id="album-view-disk-path">D:\music\Albums</code>
+                </div>
+              </div>
+              <div class="album-header-actions">
+                <button type="button" class="btn-album-primary" id="btn-album-play-all">▶ Play Full Album</button>
+                <button type="button" class="btn-album-accent" id="btn-album-add-poem-song">➕ Add Poem Song to Album</button>
+                <button type="button" class="btn-album-secondary" id="btn-album-edit-meta">✏️ Edit Album</button>
+                <a href="#" id="btn-album-export-zip" class="btn-album-secondary" download>⬇ Download Album (.zip)</a>
+                <button type="button" class="btn-album-secondary" id="btn-album-delete">🗑️ Delete Album</button>
+                <button type="button" class="btn-album-secondary" id="btn-album-close-view" aria-label="Close album studio view">✕ Close</button>
+              </div>
+            </div>
+
+            <!-- Quick Add Existing Song Bar -->
+            <div class="album-add-existing-bar" id="album-add-existing-bar">
+              <label for="album-existing-song-picker" class="album-add-existing-label">Add an existing studio song to this album:</label>
+              <div class="album-add-existing-controls">
+                <select id="album-existing-song-picker" name="song_to_add" class="version-select"></select>
+                <button type="button" class="btn-album-secondary" id="btn-album-add-existing">📥 Move Song into Album</button>
+              </div>
+            </div>
+
+            <!-- Ordered Album Tracklist -->
+            <ol class="album-tracklist" id="album-view-tracklist" role="list"></ol>
+          </section>
+
+          <!-- ============================================================ -->
           <!-- REFERENCE WAV IMPORTER & RL GENERATION SECTION (MILESTONE 8) -->
           <!-- ============================================================ -->
           <section class="reference-wav-importer-card" id="reference-wav-importer-section" aria-label="Reference WAV Importer & RL Generation">
@@ -395,16 +452,18 @@ Acoustic strings and tender souls forever intertwined.</textarea>
               <div class="ref-header-title-group">
                 <span class="ref-icon">📁</span>
                 <div>
-                  <h3 class="ref-title">Reference WAV Importer &amp; Style Ensemble Blend</h3>
-                  <p class="ref-subtitle">Import 1 to 20 reference audio files (.WAV) or convert streaming URLs to shape production style, tempo, chroma &amp; vocal timbre with RL.</p>
+                  <h3 class="ref-title">Reference WAV Importer &amp; Style Ensemble Blend (Optional)</h3>
+                  <p class="ref-subtitle">Expand to import 1 to 20 reference .WAV files or convert streaming URLs to blend production style with RL.</p>
                 </div>
               </div>
               <div class="ref-header-badges">
                 <span class="ref-counter-badge" id="ref-wav-counter">0 / 20 reference WAVs</span>
+                <button type="button" class="btn-toggle-ref-panel" id="btn-toggle-ref-importer" aria-expanded="false" aria-controls="ref-importer-collapsible-body">▸ Show Importer</button>
                 <button type="button" class="btn-clear-ref-wavs" id="btn-clear-all-ref-wavs" title="Clear all reference WAVs">🗑️ Clear All</button>
               </div>
             </div>
 
+            <div id="ref-importer-collapsible-body" class="hidden">
             <!-- Over-Capacity Warning Banner -->
             <div class="ref-warning-banner hidden" id="ref-wav-cap-warning" role="alert">
               ⚠️ <strong>Maximum Capacity Reached:</strong> The studio supports up to 20 reference WAV files. Please remove a track before adding more.
@@ -577,7 +636,10 @@ Acoustic strings and tender souls forever intertwined.</textarea>
                 <span class="dpo-status-msg" id="dpo-status-msg"></span>
               </div>
             </div>
+            </div>
           </section>
+
+          <div id="studio-polite-announcer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 
           <!-- User Message Bubble -->
           <div class="message-bubble user-bubble">
@@ -610,6 +672,12 @@ Acoustic strings and tender souls forever intertwined.</textarea>
                 </div>
                 <div class="song-card-actions" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                   <span class="version-tag" id="card-version-tag">v1 Master</span>
+                  <button type="button" class="card-like-btn" id="btn-card-like-song" aria-pressed="false">
+                    ♡ Like
+                  </button>
+                  <button type="button" class="card-album-btn" id="btn-card-move-to-album">
+                    💿 Move to Album...
+                  </button>
                   <button type="button" class="card-download-btn" id="btn-card-load-local" title="Load and play a local .WAV or audio file from your computer">
                     📂 Load Local WAV
                   </button>
@@ -1133,8 +1201,10 @@ One love... One heart... Forever.</pre>
           </button>
 
           <!-- Genre Quick Dropdown -->
-          <select id="capsule-genre-select" class="capsule-genre-dropdown" title="Select Genre">
-            <option value="Roots Reggae" selected>Roots Reggae</option>
+          <label for="capsule-genre-select" class="visually-hidden">Musical Style</label>
+          <select id="capsule-genre-select" class="capsule-genre-dropdown" title="Select Musical Style">
+            <option value="Acoustic Folk &amp; Poem Ballad" selected>Folk / Poem</option>
+            <option value="Roots Reggae">Roots Reggae</option>
             <option value="Afrobeats">Afrobeats</option>
             <option value="Amapiano">Amapiano</option>
             <option value="Soul / Gospel">Soul / Gospel</option>
@@ -1561,6 +1631,78 @@ One love... One heart... Forever.</pre>
       </div>
     </div>
   </div>
+
+  <!-- ============================================================ -->
+  <!-- ACCESSIBLE NATIVE MODAL DIALOG: CREATE OR MOVE TO ALBUM      -->
+  <!-- ============================================================ -->
+  <dialog id="album-move-dialog" class="studio-native-dialog" aria-labelledby="album-dialog-title" closedby="any">
+    <div class="album-dialog-header">
+      <h2 id="album-dialog-title" class="album-dialog-heading">Like &amp; Move Song to a Unique Album</h2>
+      <button type="button" id="btn-album-dialog-close" class="album-dialog-close-btn" aria-label="Close">✕</button>
+    </div>
+
+    <form id="album-move-form" action="/api/albums" method="post" class="album-dialog-form">
+      <div id="album-dialog-song-banner" class="album-dialog-song-banner">
+        <span class="song-banner-icon" aria-hidden="true">🎵</span>
+        <div>
+          <div class="song-banner-label">Selected Track</div>
+          <div id="album-dialog-song-name" class="song-banner-title">Song Title</div>
+        </div>
+      </div>
+
+      <fieldset id="album-mode-fieldset" class="album-mode-fieldset">
+        <legend class="album-fieldset-legend">Album Destination</legend>
+        <div class="album-radio-options">
+          <div class="album-radio-option">
+            <input type="radio" id="radio-album-create-new" name="album_destination_mode" value="create_new" checked>
+            <label for="radio-album-create-new">Create a New Unique Album</label>
+          </div>
+          <div class="album-radio-option">
+            <input type="radio" id="radio-album-existing" name="album_destination_mode" value="existing">
+            <label for="radio-album-existing">Move into an Existing Album</label>
+          </div>
+        </div>
+      </fieldset>
+
+      <div id="album-existing-group" class="album-form-group hidden">
+        <label for="album-existing-select" class="album-form-label">Choose Existing Unique Album</label>
+        <span id="album-existing-hint" class="album-form-hint">Pick the album where this song and future songs will live together.</span>
+        <select id="album-existing-select" name="existing_album_id" class="album-form-control" aria-describedby="album-existing-hint"></select>
+      </div>
+
+      <div id="album-new-fields-group" class="album-new-fields-wrap">
+        <div class="album-form-group">
+          <label for="album-title-input" class="album-form-label">Unique Album Title (Required)</label>
+          <span id="album-title-hint" class="album-form-hint">Must be unique across your studio. Creates numbered 48 kHz WAVs in D:\music\Albums\.</span>
+          <span id="album-title-error" class="album-form-error hidden" role="alert"></span>
+          <input type="text" id="album-title-input" name="album_title" class="album-form-control" maxlength="80" required autofocus aria-describedby="album-title-hint album-title-error" placeholder="e.g. Portraits of Nettles &amp; Grasslands">
+        </div>
+
+        <div class="album-form-group">
+          <label for="album-artist-input" class="album-form-label">Artist / Poet Name</label>
+          <input type="text" id="album-artist-input" name="album_artist" class="album-form-control" maxlength="80" autocomplete="name" value="Original Poems &amp; Studio Vocalist">
+        </div>
+
+        <div class="album-form-group">
+          <label for="album-desc-input" class="album-form-label">Album Theme &amp; Liner Notes (Optional)</label>
+          <textarea id="album-desc-input" name="album_description" class="album-form-control album-form-textarea" rows="2" maxlength="500" placeholder="Original poems set to acoustic folk and studio vocals..."></textarea>
+        </div>
+
+        <div class="album-form-group">
+          <label for="album-cover-input" class="album-form-label">Album Cover Image (Optional)</label>
+          <span id="album-cover-hint" class="album-form-hint">Select a PNG, JPG, or WebP cover image from your computer.</span>
+          <input type="file" id="album-cover-input" name="album_cover" class="album-form-file" accept="image/*" aria-describedby="album-cover-hint">
+        </div>
+      </div>
+
+      <div id="album-form-submit-error" class="album-form-error hidden" role="alert"></div>
+
+      <div class="album-dialog-footer">
+        <button type="button" id="btn-album-dialog-cancel" class="btn-album-secondary">Cancel</button>
+        <button type="submit" id="btn-album-dialog-submit" class="btn-album-primary">♥ Like &amp; Move to Unique Album</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Application Script -->
   <script src="app.js"></script>

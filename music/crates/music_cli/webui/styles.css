@@ -960,7 +960,10 @@ html, body {
 .top-nav-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .sidebar-open-btn {
@@ -972,6 +975,7 @@ html, body {
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   display: none;
+  flex-shrink: 0;
 }
 .sidebar-open-btn:hover {
   background: var(--bg-hover);
@@ -981,14 +985,20 @@ html, body {
 .active-track-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+  max-width: 440px;
 }
 
 .header-track-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.25px;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
 }
 
 .header-genre-badge {
@@ -997,8 +1007,13 @@ html, body {
   border: 1px solid rgba(245, 158, 11, 0.35);
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 2px 9px;
   border-radius: var(--radius-full);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 175px;
+  flex-shrink: 0;
 }
 
 .version-select {
@@ -1010,9 +1025,14 @@ html, body {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  outline: none;
+  max-width: 225px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.version-select:focus {
+.version-select:focus-visible {
+  outline: 3px solid var(--border-focus);
+  outline-offset: 2px;
   border-color: var(--accent-color);
 }
 
@@ -3346,4 +3366,671 @@ input.visually-hidden:focus-visible + .lyria-photo-pill {
   background: rgba(16, 163, 127, 0.12);
   white-space: nowrap;
 }
+
+.btn-toggle-ref-panel {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-toggle-ref-panel:hover {
+  background: var(--bg-active);
+}
+.btn-toggle-ref-panel:focus-visible {
+  outline: 3px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* Native accessible indeterminate <progress> bar for Gemini Lyria 3.5 synthesis */
+progress.studio-gen-progress {
+  appearance: none;
+  border: 0 solid;
+  overflow: clip;
+  display: block;
+  inline-size: 100%;
+  block-size: 8px;
+  margin: 10px 0 6px 0;
+  --progress-bar-radius: 9999px;
+  border-radius: var(--progress-bar-radius);
+  background: var(--bg-hover);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.12);
+  container-type: inline-size;
+  --progress-bar-fill: #10a37f;
+  --progress-bar-indeterminate-size: 32%;
+  --progress-bar-indeterminate-animation-duration: 1.5s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  progress.studio-gen-progress {
+    --progress-bar-indeterminate-animation-duration: 10s;
+  }
+}
+
+progress.studio-gen-progress:dir(rtl) {
+  --progress-bar-indeterminate-animation: studio-progress-indeterminate var(--progress-bar-indeterminate-animation-duration) infinite linear reverse;
+}
+
+progress.studio-gen-progress:indeterminate {
+  --progress-bar-animation: var(
+    --progress-bar-indeterminate-animation,
+    studio-progress-indeterminate var(--progress-bar-indeterminate-animation-duration) infinite linear
+  );
+}
+
+progress.studio-gen-progress::-webkit-progress-bar {
+  background: transparent;
+}
+
+progress.studio-gen-progress::-webkit-progress-value {
+  background: var(--progress-bar-fill, #10a37f);
+  border-radius: var(--progress-bar-radius);
+  transition: inline-size 0.3s;
+  animation: var(--progress-bar-animation, revert-rule);
+}
+
+progress.studio-gen-progress::-moz-progress-bar {
+  background: var(--progress-bar-fill, #10a37f);
+  border-radius: var(--progress-bar-radius);
+  transition: inline-size 0.3s;
+  animation: var(--progress-bar-animation, revert-rule);
+}
+
+@keyframes studio-progress-indeterminate {
+  from, to {
+    inline-size: var(--progress-bar-indeterminate-size);
+    margin-right: auto;
+  }
+  from { translate: -100%; }
+  to { translate: 100cqi; }
+}
+
+.created-song-inline-card {
+  margin-top: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--bg-card-subtle);
+  border: 1.5px solid #10a37f;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.created-song-lyrics-details {
+  margin-top: 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  font-size: 12.5px;
+}
+.created-song-lyrics-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   UNIQUE ALBUM STUDIO, LIKE/MOVE CONTROLS & NATIVE MODAL <dialog>
+   ========================================================================== */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgb(15 23 42 / 0.58);
+  backdrop-filter: blur(3px);
+}
+
+dialog.studio-native-dialog {
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 0;
+  inline-size: min(560px, calc(100vw - 24px));
+  max-block-size: min(88vh, 780px);
+  margin: auto;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.28);
+}
+
+dialog.studio-native-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.album-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.album-dialog-heading {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.album-dialog-close-btn {
+  min-inline-size: 36px;
+  min-block-size: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.album-dialog-form {
+  padding: 18px 20px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.album-dialog-song-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-block-end: 1rem;
+  border-radius: 12px;
+  background: rgba(16, 163, 127, 0.1);
+  border: 1px solid rgba(16, 163, 127, 0.35);
+}
+
+.song-banner-icon {
+  font-size: 18px;
+}
+
+.song-banner-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #10a37f;
+}
+
+.song-banner-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.album-mode-fieldset {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 10px 14px 12px;
+  margin: 0 0 1.15rem 0;
+}
+
+.album-fieldset-legend {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding: 0 6px;
+}
+
+.album-radio-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.album-radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 36px;
+}
+
+.album-radio-option input[type="radio"] {
+  accent-color: #10a37f;
+  inline-size: 18px;
+  block-size: 18px;
+  cursor: pointer;
+}
+
+.album-radio-option label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+/* Gestalt Proximity Rule: tighter label-to-input margin (4px) than group margin (1.15rem) */
+.album-form-group {
+  display: flex;
+  flex-direction: column;
+  margin-block-end: 1.15rem;
+}
+
+.album-form-label {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-block-end: 3px;
+}
+
+.album-form-hint {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  margin-block-end: 6px;
+}
+
+.album-form-error {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #dc2626;
+  margin-block-end: 6px;
+}
+
+.album-form-control {
+  font-size: 1rem;
+  line-height: 1.4;
+  padding: 0.65rem 0.8rem;
+  min-block-size: 48px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1.5px solid var(--border-color);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  inline-size: 100%;
+}
+
+.album-form-textarea {
+  min-block-size: 76px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.album-form-control:invalid:user-invalid,
+.album-form-control[aria-invalid="true"] {
+  border-color: #dc2626;
+}
+
+.album-form-file {
+  font-size: 0.92rem;
+  padding: 8px;
+  min-block-size: 44px;
+  border-radius: 10px;
+  border: 1px dashed var(--border-color);
+  background: var(--bg-card-subtle);
+  color: var(--text-primary);
+}
+
+.album-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Sidebar Unique Albums & Mini Action Buttons */
+.sidebar-mini-action-btn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  min-block-size: 24px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.sidebar-mini-action-btn:hover {
+  border-color: #10a37f;
+  color: #10a37f;
+}
+
+.sidebar-albums-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 6px 8px;
+}
+
+.sidebar-albums-empty {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--bg-card-subtle);
+  border: 1px dashed var(--border-color);
+}
+
+.sidebar-album-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.sidebar-album-item:hover {
+  border-color: #10a37f;
+  background: var(--bg-hover);
+}
+.sidebar-album-item.active {
+  border-color: #10a37f;
+  background: rgba(16, 163, 127, 0.12);
+}
+.sidebar-album-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-album-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.sidebar-album-count {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(16, 163, 127, 0.14);
+  color: #10a37f;
+  white-space: nowrap;
+}
+
+/* Like & Move to Album Buttons across Cards, Deck, and Sidebar */
+.card-like-btn,
+.btn-inline-like {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-block-size: 32px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.card-like-btn[aria-pressed="true"],
+.btn-inline-like[aria-pressed="true"] {
+  background: rgba(225, 29, 72, 0.12);
+  border-color: #e11d48;
+  color: #e11d48;
+}
+
+.card-album-btn,
+.btn-inline-album {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-block-size: 32px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1.5px solid #10a37f;
+  background: rgba(16, 163, 127, 0.12);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.card-album-btn:hover,
+.btn-inline-album:hover {
+  background: #10a37f;
+  color: #ffffff;
+}
+
+.album-target-pill {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(16, 163, 127, 0.16);
+  color: #10a37f;
+  border: 1px solid #10a37f;
+}
+
+/* Interactive Album Workspace Section */
+.album-workspace-card {
+  margin-bottom: 16px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 2px solid #10a37f;
+  background: var(--bg-card);
+  box-shadow: 0 8px 28px rgb(16 163 127 / 0.1);
+}
+
+.album-workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.album-cover-box {
+  inline-size: 84px;
+  block-size: 84px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(16, 163, 127, 0.22), rgba(59, 130, 246, 0.18));
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.album-cover-img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+.album-cover-fallback {
+  font-size: 36px;
+}
+
+.album-header-meta {
+  flex: 1 1 260px;
+  min-inline-size: 0;
+}
+.album-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.album-unique-pill {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #10a37f;
+  color: #ffffff;
+}
+.album-track-count-pill {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.album-view-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0 0 2px 0;
+}
+.album-view-artist {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.album-view-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin: 6px 0;
+  line-height: 1.45;
+}
+.album-disk-path-row {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.album-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-album-primary,
+.btn-album-accent,
+.btn-album-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-block-size: 38px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn-album-primary {
+  background: #10a37f;
+  border: 1px solid #10a37f;
+  color: #ffffff;
+}
+.btn-album-accent {
+  background: #2563eb;
+  border: 1px solid #2563eb;
+  color: #ffffff;
+}
+.btn-album-secondary {
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.album-add-existing-bar {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.album-add-existing-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.album-add-existing-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1 1 260px;
+}
+.album-add-existing-controls select {
+  flex: 1 1 200px;
+  max-width: 100%;
+  min-block-size: 36px;
+}
+
+.album-tracklist {
+  list-style: none;
+  margin: 14px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.album-track-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+  flex-wrap: wrap;
+}
+.album-track-row.playing {
+  border-color: #10a37f;
+  background: rgba(16, 163, 127, 0.12);
+}
+.album-track-num {
+  font-family: var(--mono-font);
+  font-size: 12px;
+  font-weight: 800;
+  color: #10a37f;
+  min-inline-size: 28px;
+}
+.album-track-info {
+  flex: 1 1 200px;
+  min-inline-size: 0;
+}
+.album-track-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.album-track-meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.album-track-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+:where(
+  .studio-native-dialog button,
+  .studio-native-dialog input,
+  .studio-native-dialog select,
+  .studio-native-dialog textarea,
+  .sidebar-album-item,
+  .sidebar-mini-action-btn,
+  .card-like-btn,
+  .card-album-btn,
+  .btn-inline-like,
+  .btn-inline-album,
+  .btn-album-primary,
+  .btn-album-accent,
+  .btn-album-secondary
+):focus-visible {
+  outline: 3px solid #10a37f;
+  outline-offset: 2px;
+}
+
 
