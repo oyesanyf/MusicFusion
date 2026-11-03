@@ -16,10 +16,17 @@ jobs:
       pull-requests: write
       statuses: write
     steps:
-      - name: Checkout base repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
+      - name: Checkout commit (repo has gitlinks without .gitmodules)
+        shell: bash
+        working-directory: .
+        env:
+          REPO_URL: https://github.com/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote add origin "$REPO_URL"
+          git -c protocol.version=2 fetch --no-tags --depth 1 origin "$SHA"
+          git checkout -q FETCH_HEAD
 
       - name: Verify QuorumRAG PR Invariants & Approve
         if: github.event_name == 'pull_request_target'
