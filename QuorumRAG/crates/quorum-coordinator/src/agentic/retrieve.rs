@@ -43,6 +43,11 @@ const STOPWORDS: &[&str] = &[
     "file", "files", "document", "documents", "doc", "docs", "docx", "pdf", "txt",
     "folder", "folders", "content", "contents", "text", "exist", "exists", "existing",
     "find", "check", "list", "located", "location", "explain", "describe", "give", "please",
+    "know", "knows", "knew", "known", "think", "thinks", "thought", "mean", "means", "meant",
+    "say", "says", "said", "talk", "talks", "talked", "need", "needs", "want", "wants",
+    "like", "likes", "make", "makes", "made", "take", "takes", "took", "come", "comes",
+    "came", "look", "looks", "looked", "summarize", "detail", "details", "info", "information",
+    "anything", "everything", "something", "nothing", "someone", "anyone", "all", "any", "some",
 ];
 
 pub struct RetrieveMeshNode;
@@ -280,6 +285,11 @@ impl RetrieveMeshNode {
                     || text_l.contains("np.loadtxt(")
                     || text_l.contains("import numpy as np")
                 {
+                    return false;
+                }
+                if crate::offline_engine::DeterministicOfflineSynthesisEngine::is_corrupt_or_binary_chunk(
+                    &c.chunk.text_content,
+                ) {
                     return false;
                 }
                 !EXCLUDED_EXTS.iter().any(|ext| file_l.ends_with(ext))
@@ -589,16 +599,23 @@ impl RetrieveMeshNode {
                 .collect();
 
             let any_lexical_match = paired.iter().any(|(_, crit)| crit.weighted_hits > 0);
+            let required_prompt_hits = if prompt_only_entities.len() == 2 {
+                2
+            } else if prompt_only_entities.len() > 2 {
+                ((prompt_only_entities.len() + 1) / 2).max(2)
+            } else {
+                prompt_only_entities.len()
+            };
             let any_prompt_entity_match = !prompt_only_entities.is_empty()
                 && paired
                     .iter()
-                    .any(|(_, crit)| crit.is_relevant && crit.prompt_entity_hits > 0);
+                    .any(|(_, crit)| crit.is_relevant && crit.prompt_entity_hits >= required_prompt_hits);
             if any_lexical_match {
                 paired.retain(|(_, crit)| {
                     crit.is_relevant
                         && crit.weighted_hits > 0
                         && crit.intent_bonus > -100
-                        && (!any_prompt_entity_match || crit.prompt_entity_hits > 0)
+                        && (!any_prompt_entity_match || crit.prompt_entity_hits >= required_prompt_hits)
                 });
 
                 // Zero string allocation comparator: sorts using precomputed total_score

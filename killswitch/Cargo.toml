@@ -124,3 +124,9 @@ codegen-units = 1
 panic = "abort"
 strip = true
 overflow-checks = true
+
+[profile.release.build-override]
+opt-level = 0
+debug = true
+strip = false
+

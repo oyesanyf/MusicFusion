@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -27,12 +28,29 @@ pub struct QuarantineLease {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JournalRecord {
+    pub seq: u64,
+    pub prev_hash: String,
+    pub record_hash: String,
+    pub action: String, // "QUARANTINE", "RELEASE", "ADVANCE_EPOCH"
+    pub workload_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_pid: Option<u32>,
+    pub timestamp_utc: DateTime<Utc>,
+    pub payload_digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JournalData {
     pub version: u32,
+    #[serde(default)]
+    pub seq: u64,
+    #[serde(default)]
+    pub prev_hash: String,
     pub active_leases: HashMap<String, QuarantineLease>,
     pub generation_epochs: HashMap<String, u64>,
-    pub cbf_dose_accumulators: HashMap<String, f64>,
-    pub cbf_exposure_accumulators: HashMap<String, f64>,
+    #[serde(default)]
+    pub records: Vec<JournalRecord>,
     pub last_updated_utc: DateTime<Utc>,
 }
 
@@ -40,12 +58,57 @@ impl Default for JournalData {
     fn default() -> Self {
         Self {
             version: 1,
+            seq: 0,
+            prev_hash: String::new(),
             active_leases: HashMap::new(),
             generation_epochs: HashMap::new(),
-            cbf_dose_accumulators: HashMap::new(),
-            cbf_exposure_accumulators: HashMap::new(),
+            records: Vec::new(),
             last_updated_utc: Utc::now(),
         }
+    }
+}
+
+impl JournalData {
+    pub fn append_record(
+        &mut self,
+        action: &str,
+        workload_id: &str,
+        target_pid: Option<u32>,
+        payload_digest: &str,
+    ) -> JournalRecord {
+        let seq = self.seq + 1;
+        let prev_hash = self.prev_hash.clone();
+        let timestamp_utc = Utc::now();
+
+        let preimage = format!(
+            "{}|{}|{}|{}|{:?}|{}|{}",
+            seq,
+            prev_hash,
+            action,
+            workload_id,
+            target_pid,
+            timestamp_utc.to_rfc3339(),
+            payload_digest
+        );
+        let mut hasher = Sha256::new();
+        hasher.update(preimage.as_bytes());
+        let record_hash = hex::encode(hasher.finalize());
+
+        let record = JournalRecord {
+            seq,
+            prev_hash: prev_hash.clone(),
+            record_hash: record_hash.clone(),
+            action: action.to_string(),
+            workload_id: workload_id.to_string(),
+            target_pid,
+            timestamp_utc,
+            payload_digest: payload_digest.to_string(),
+        };
+
+        self.seq = seq;
+        self.prev_hash = record_hash;
+        self.records.push(record.clone());
+        record
     }
 }
 
@@ -166,21 +229,37 @@ impl QuarantineJournal {
         Ok(())
     }
 
-    /// Records an active quarantine lease and seals journal.
+    /// Records an active quarantine lease, appends a hash-chained record, and seals journal.
     pub fn record_quarantine(&self, lease: QuarantineLease) -> Result<(), String> {
         {
             let mut guard = self.data.write();
+            let mut hasher = Sha256::new();
+            hasher.update(lease.workload_id.as_bytes());
+            hasher.update(lease.trigger_reason.as_bytes());
+            hasher.update(lease.rule_id.as_bytes());
+            hasher.update(lease.nonce.as_bytes());
+            let payload_digest = hex::encode(hasher.finalize());
+
+            guard.append_record(
+                "QUARANTINE",
+                &lease.workload_id,
+                lease.target_pid,
+                &payload_digest,
+            );
             guard.active_leases.insert(lease.workload_id.clone(), lease);
             guard.last_updated_utc = Utc::now();
         }
         self.flush_to_disk()
     }
 
-    /// Releases a quarantine lease and seals journal.
+    /// Releases a quarantine lease, appends a hash-chained release record, and seals journal.
     pub fn release_quarantine(&self, workload_id: &str) -> Result<Option<QuarantineLease>, String> {
         let removed = {
             let mut guard = self.data.write();
             let res = guard.active_leases.remove(workload_id);
+            if res.is_some() {
+                guard.append_record("RELEASE", workload_id, None, "QUARANTINE_RELEASED");
+            }
             guard.last_updated_utc = Utc::now();
             res
         };
@@ -195,18 +274,77 @@ impl QuarantineJournal {
         self.data.read().generation_epochs.get(workload_id).copied().unwrap_or(1)
     }
 
-    /// Monotonically advances generation epoch `Gen N -> Gen N + 1` for a workload and seals journal.
+    /// Monotonically advances generation epoch `Gen N -> Gen N + 1`, appends record, and seals journal.
     pub fn advance_generation_epoch(&self, workload_id: &str) -> Result<(u64, u64), String> {
         let (before, after) = {
             let mut guard = self.data.write();
             let current = guard.generation_epochs.get(workload_id).copied().unwrap_or(1);
             let next = current + 1;
             guard.generation_epochs.insert(workload_id.to_string(), next);
+            let payload_digest = format!("epoch:{}->{}", current, next);
+            guard.append_record("ADVANCE_EPOCH", workload_id, None, &payload_digest);
             guard.last_updated_utc = Utc::now();
             (current, next)
         };
         self.flush_to_disk()?;
         Ok((before, after))
+    }
+
+    /// Returns the current monotonic sequence number of the journal.
+    pub fn current_seq(&self) -> u64 {
+        self.data.read().seq
+    }
+
+    /// Returns the latest previous record hash.
+    pub fn latest_prev_hash(&self) -> String {
+        self.data.read().prev_hash.clone()
+    }
+
+    /// Returns all journal records.
+    pub fn records(&self) -> Vec<JournalRecord> {
+        self.data.read().records.clone()
+    }
+
+    /// Verifies the cryptographic hash chaining and sequence monotonicity across all records.
+    pub fn verify_hash_chain(&self) -> Result<bool, String> {
+        let guard = self.data.read();
+        let mut expected_prev_hash = String::new();
+        for (i, rec) in guard.records.iter().enumerate() {
+            let expected_seq = (i as u64) + 1;
+            if rec.seq != expected_seq {
+                return Err(format!(
+                    "Monotonic sequence broken at index {}: expected {}, found {}",
+                    i, expected_seq, rec.seq
+                ));
+            }
+            if rec.prev_hash != expected_prev_hash {
+                return Err(format!(
+                    "Prev hash chain broken at seq {}: expected '{}', found '{}'",
+                    rec.seq, expected_prev_hash, rec.prev_hash
+                ));
+            }
+            let preimage = format!(
+                "{}|{}|{}|{}|{:?}|{}|{}",
+                rec.seq,
+                rec.prev_hash,
+                rec.action,
+                rec.workload_id,
+                rec.target_pid,
+                rec.timestamp_utc.to_rfc3339(),
+                rec.payload_digest
+            );
+            let mut hasher = Sha256::new();
+            hasher.update(preimage.as_bytes());
+            let computed = hex::encode(hasher.finalize());
+            if rec.record_hash != computed {
+                return Err(format!(
+                    "Record hash mismatch at seq {}: stored '{}', recomputed '{}'",
+                    rec.seq, rec.record_hash, computed
+                ));
+            }
+            expected_prev_hash = rec.record_hash.clone();
+        }
+        Ok(true)
     }
 
     /// Checks if any unexpired quarantine leases exist.
@@ -303,5 +441,21 @@ mod tests {
         // 5. Release quarantine
         journal2.release_quarantine("agent-1").unwrap();
         assert_eq!(journal2.unexpired_leases().len(), 0);
+
+        // 6. Verify monotonic sequence numbers and hash chain integrity
+        assert_eq!(journal2.current_seq(), 3);
+        assert!(!journal2.latest_prev_hash().is_empty());
+        let recs = journal2.records();
+        assert_eq!(recs.len(), 3);
+        assert_eq!(recs[0].seq, 1);
+        assert_eq!(recs[0].prev_hash, "");
+        assert_eq!(recs[0].action, "ADVANCE_EPOCH");
+        assert_eq!(recs[1].seq, 2);
+        assert_eq!(recs[1].prev_hash, recs[0].record_hash);
+        assert_eq!(recs[1].action, "QUARANTINE");
+        assert_eq!(recs[2].seq, 3);
+        assert_eq!(recs[2].prev_hash, recs[1].record_hash);
+        assert_eq!(recs[2].action, "RELEASE");
+        assert!(journal2.verify_hash_chain().unwrap());
     }
 }
