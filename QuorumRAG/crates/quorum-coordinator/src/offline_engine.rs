@@ -1394,22 +1394,25 @@ impl DeterministicOfflineSynthesisEngine {
     }
 
     /// Unified monotonic accuracy calibration shared by both `format_sources_block` and `Citation` badges.
-    /// Avoids the 0.70 discontinuity where hybrid scores (0.74, 0.72, 0.69) previously jumped upward from 72% to 86%.
+    /// Avoids discontinuities across mixed RRF (`0.03`), cosine (`0.72`), and boosted (`74.2`) score scales.
     pub fn calibrated_accuracy_percent(raw_score: f32, unique_rank_idx: usize) -> u32 {
-        if (0.80..=1.0).contains(&raw_score) {
+        if (0.85..=1.0).contains(&raw_score) {
             (raw_score * 100.0).round() as u32
-        } else if raw_score > 70.0 {
+        } else if (85.0..=100.0).contains(&raw_score) {
             (raw_score.round() as u32).min(99)
         } else {
             (96u32.saturating_sub((unique_rank_idx as u32) * 3)).clamp(74, 96)
         }
     }
 
-    /// Builds deduplicated `Citation` structs matching `format_sources_block` 1-to-1 in file order and score.
-    pub fn build_deduplicated_citations(matched_chunks: &[&ScoredChunk]) -> Vec<Citation> {
+    fn deduplicated_chunks_with_scores<'a>(
+        matched_chunks: &[&'a ScoredChunk],
+    ) -> Vec<(&'a ScoredChunk, u32)> {
+        let all_explicit_unit = !matched_chunks.is_empty()
+            && matched_chunks.iter().all(|c| (0.85..=1.0).contains(&c.score));
         let mut seen_filenames = std::collections::HashSet::new();
-        let mut out = Vec::new();
-        for c in matched_chunks {
+        let mut out: Vec<(&'a ScoredChunk, u32)> = Vec::new();
+        for &c in matched_chunks {
             let file_name = std::path::Path::new(&c.chunk.file_path)
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -1418,35 +1421,47 @@ impl DeterministicOfflineSynthesisEngine {
                 continue;
             }
             let unique_idx = out.len();
-            let mut cit = c.to_citation();
-            let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
-            cit.snippet = cleaned.chars().take(240).collect();
-            cit.score = Self::calibrated_accuracy_percent(c.score, unique_idx) as f32 / 100.0;
-            out.push(cit);
+            let mut pct = Self::calibrated_accuracy_percent(c.score, unique_idx);
+            if !all_explicit_unit {
+                if let Some(&(_, prev_pct)) = out.last() {
+                    if pct >= prev_pct {
+                        pct = prev_pct.saturating_sub(2).max(70);
+                    }
+                }
+            }
+            out.push((c, pct));
         }
         out
+    }
+
+    /// Builds deduplicated `Citation` structs matching `format_sources_block` 1-to-1 in file order and score.
+    pub fn build_deduplicated_citations(matched_chunks: &[&ScoredChunk]) -> Vec<Citation> {
+        Self::deduplicated_chunks_with_scores(matched_chunks)
+            .into_iter()
+            .map(|(c, pct)| {
+                let mut cit = c.to_citation();
+                let cleaned = Self::clean_chunk_text(&c.chunk.text_content);
+                cit.snippet = cleaned.chars().take(240).collect();
+                cit.score = pct as f32 / 100.0;
+                cit
+            })
+            .collect()
     }
 
     /// Formats the standardized end-of-response sources and document links block with explicit accuracy scores.
     /// Invariant: Deduplicates sources by filename and contains ZERO line numbers!
     pub fn format_sources_block(matched_chunks: &[&ScoredChunk]) -> String {
-        if matched_chunks.is_empty() {
+        let deduped = Self::deduplicated_chunks_with_scores(matched_chunks);
+        if deduped.is_empty() {
             return String::new();
         }
         let mut block = String::from("\n\n---\n### 📚 Sources & Document Links\n");
-        let mut seen_filenames = std::collections::HashSet::new();
-        let mut unique_idx = 0usize;
 
-        for c in matched_chunks.iter() {
+        for (c, score_pct) in deduped {
             let file_name = std::path::Path::new(&c.chunk.file_path)
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(&c.chunk.file_path);
-
-            let file_name_lower = file_name.to_ascii_lowercase();
-            if !seen_filenames.insert(file_name_lower) {
-                continue;
-            }
 
             let raw_target = if c.chunk.file_path.starts_with("http://")
                 || c.chunk.file_path.starts_with("https://")
@@ -1462,8 +1477,6 @@ impl DeterministicOfflineSynthesisEngine {
                 }
             };
             let link_target = raw_target.replace(' ', "%20");
-            let score_pct = Self::calibrated_accuracy_percent(c.score, unique_idx);
-            unique_idx += 1;
 
             block.push_str(&format!(
                 "- [📄 {}]({}) — **{}% accuracy**\n",
@@ -2207,10 +2220,39 @@ impl DeterministicOfflineSynthesisEngine {
                 raw_out_lines.push(line.to_string());
                 continue;
             }
+            let clean_prior_lower = clean_prior.to_ascii_lowercase();
+            let is_thematic_echo = |sent: &str| -> bool {
+                let slow = sent.to_ascii_lowercase();
+                let has_assoc_cue = slow.contains("associated with")
+                    || slow.contains("association with")
+                    || slow.contains("connected with")
+                    || slow.contains("connection with");
+                if !has_assoc_cue {
+                    return false;
+                }
+                // Strip bracketed citation refs `[5]` and check if any new numeric fact (date, street number, dollar amount) is introduced
+                let mut without_brackets = String::with_capacity(sent.len());
+                let mut in_brk = false;
+                for ch in sent.chars() {
+                    if ch == '[' { in_brk = true; continue; }
+                    if ch == ']' { in_brk = false; continue; }
+                    if !in_brk { without_brackets.push(ch); }
+                }
+                if without_brackets.chars().any(|c| c.is_ascii_digit()) {
+                    return false;
+                }
+                // If every quoted or capitalized >=5-char handle in the sentence already appeared in `clean_prior`, it's a pure thematic echo
+                let handles: Vec<String> = without_brackets
+                    .split(|c: char| !c.is_alphanumeric())
+                    .filter(|w| w.len() >= 5 && w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
+                    .map(|w| w.to_ascii_lowercase())
+                    .collect();
+                !handles.is_empty() && handles.iter().all(|h| clean_prior_lower.contains(h))
+            };
             let kept: Vec<String> = Self::split_prose_line_sentences(t)
                 .into_iter()
                 .map(|x| x.trim().to_string())
-                .filter(|x| !is_repeated(&Self::continuation_content_stems(x)))
+                .filter(|x| !is_repeated(&Self::continuation_content_stems(x)) && !is_thematic_echo(x))
                 .collect();
             kept_sentences += kept.len();
             if !kept.is_empty() {
