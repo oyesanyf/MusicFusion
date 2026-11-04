@@ -9,22 +9,56 @@ pub mod handlers;
 pub mod server;
 pub mod shutdown;
 pub mod state;
+#[cfg(windows)]
+pub mod win_service;
 
 use cli::{Cli, Commands};
 use state::DaemonState;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "quorumrag=info,quorum_daemon=info,quorum_coordinator=info,quorum_storage=info".into()),
-        )
-        .init();
+const DEFAULT_LOG_FILTER: &str = "quorumrag=info,quorum_daemon=info,quorum_coordinator=info,quorum_storage=info";
 
+/// Console logging normally; with `--service`, append to `<data-dir>/logs/quorumrag-service.log`
+/// because a service has no console.
+fn init_tracing(cli: &Cli) {
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| DEFAULT_LOG_FILTER.into())
+    };
+    if cli.service {
+        let log_dir = cli.data_dir.join("logs");
+        let opened = std::fs::create_dir_all(&log_dir).and_then(|_| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_dir.join("quorumrag-service.log"))
+        });
+        if let Ok(file) = opened {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter())
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(file))
+                .init();
+            return;
+        }
+    }
+    tracing_subscriber::fmt().with_env_filter(filter()).init();
+}
+
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    init_tracing(&cli);
 
+    #[cfg(windows)]
+    if cli.service && cli.command.is_none() {
+        return win_service::run(cli);
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main(cli))
+}
+
+async fn async_main(cli: Cli) -> anyhow::Result<()> {
     match &cli.command {
         Some(Commands::Reindex {
             path,

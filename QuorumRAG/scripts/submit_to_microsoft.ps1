@@ -3,7 +3,9 @@ param(
     [switch]$OpenBrowser = $false,
     [switch]$SkipDefenderScan = $false,
     [string]$CertThumbprint = "9A6D3B509500813058EC63183476464FAC8F015B",
-    [string]$TimestampServer = "http://timestamp.digicert.com"
+    [string]$TimestampServer = "http://timestamp.digicert.com",
+    # Explicit list of files to sign/scan. When empty, defaults to the release exe + MSI.
+    [string[]]$Files = @()
 )
 
 # QuorumRAG Microsoft WDSI & Defender Pre-Flight Automation
@@ -17,8 +19,12 @@ $ReleaseExe = Join-Path $ProjectRoot "target\release\quorumrag.exe"
 $DeployMsi = Join-Path $ProjectRoot "deploy\windows\QuorumRAG-$Version-x86_64.msi"
 
 $FilesToSign = @()
-if (Test-Path $ReleaseExe) { $FilesToSign += $ReleaseExe }
-if (Test-Path $DeployMsi) { $FilesToSign += $DeployMsi }
+if ($Files -and $Files.Count -gt 0) {
+    foreach ($f in $Files) { if ($f -and (Test-Path $f)) { $FilesToSign += (Get-Item $f).FullName } }
+} else {
+    if (Test-Path $ReleaseExe) { $FilesToSign += $ReleaseExe }
+    if (Test-Path $DeployMsi) { $FilesToSign += $DeployMsi }
+}
 
 if ($FilesToSign.Count -eq 0) {
     throw "No release artifacts found to sign or scan."
@@ -33,15 +39,47 @@ if (-not $Cert) {
     $Cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue | Select-Object -First 1
 }
 
+# Prefer signtool.exe (single, deterministic SHA256 signature + RFC3161 timestamp).
+# Every file is signed EXACTLY ONCE: files already carrying a signature from this
+# certificate are skipped, so repeated packaging steps never stack/rewrite signatures.
+$SignTool = $null
+$FoundSignTool = Get-Command "signtool.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($FoundSignTool) {
+    $SignTool = $FoundSignTool.Source
+} else {
+    $SignTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+        Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
+}
+
 if ($Cert) {
     Write-Host "  Signing release artifacts with certificate: $($Cert.Subject) ($($Cert.Thumbprint))" -ForegroundColor Green
     foreach ($f in $FilesToSign) {
-        try {
-            $sig = Set-AuthenticodeSignature -FilePath $f -Certificate $Cert -TimestampServer $TimestampServer -HashAlgorithm SHA256
-            Write-Host "    -> $($sig.Status): $f" -ForegroundColor Green
-        } catch {
-            Write-Warning "    Signing notice for ${f}: $_"
+        $existing = Get-AuthenticodeSignature -FilePath $f
+        if ($existing.SignerCertificate -and ($existing.SignerCertificate.Thumbprint -eq $Cert.Thumbprint)) {
+            Write-Host "    -> already signed by $($Cert.Thumbprint); skipping: $f" -ForegroundColor Gray
+            continue
         }
+        $signed = $false
+        if ($SignTool) {
+            & $SignTool sign /sha1 $Cert.Thumbprint /fd SHA256 /tr $TimestampServer /td SHA256 /q $f
+            if ($LASTEXITCODE -eq 0) {
+                $signed = $true
+            } else {
+                Write-Warning "    signtool timestamped signing failed ($LASTEXITCODE); retrying without timestamp: $f"
+                & $SignTool sign /sha1 $Cert.Thumbprint /fd SHA256 /q $f
+                if ($LASTEXITCODE -eq 0) { $signed = $true }
+            }
+        }
+        if (-not $signed) {
+            try {
+                $null = Set-AuthenticodeSignature -FilePath $f -Certificate $Cert -TimestampServer $TimestampServer -HashAlgorithm SHA256
+                $signed = $true
+            } catch {
+                Write-Warning "    Signing notice for ${f}: $_"
+            }
+        }
+        $after = Get-AuthenticodeSignature -FilePath $f
+        Write-Host "    -> signed=$signed status=$($after.Status): $f" -ForegroundColor Green
     }
 } else {
     Write-Host "  No local Authenticode certificate present in CurrentUser/LocalMachine store; skipping local code-signing." -ForegroundColor Gray
