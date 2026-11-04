@@ -1,7 +1,0 @@
-/target
-*.pdb
-data/
-.quorumrag-live-data/
-.quorumrag-rag-index/
-/deploy/
-/.witness/

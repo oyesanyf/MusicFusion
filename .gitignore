@@ -128,3 +128,5 @@ audit_trail.json
 uploads/
 reports/webui_logs/
 
+# QuorumRAG lives in its own repository: https://github.com/oyesanyf/QuorumRAG
+/QuorumRAG/
