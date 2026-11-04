@@ -139,7 +139,7 @@ if ($hlOut -and ($hlOut.Count -gt 1)) {
 # Pre-sign target\release\quorumrag.exe before embedding into MSI & ZIP so installed binary carries Authenticode signature
 $SubmitScript = Join-Path $ProjectRoot "scripts\submit_to_microsoft.ps1"
 if (Test-Path $SubmitScript) {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $SubmitScript -Version $Version -SkipDefenderScan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $SubmitScript -Version $Version -SkipDefenderScan -Files $ReleaseExe
 }
 
 # Step 2: Stage deploy\windows Portable Bundle (.zip)
@@ -153,6 +153,8 @@ New-Item -ItemType Directory -Force -Path $PortableStage | Out-Null
 Copy-Item -Path $ReleaseExe -Destination (Join-Path $PortableStage "quorumrag.exe") -Force
 Copy-Item -Path (Join-Path $ProjectRoot "packaging\windows\quorumrag-launch.cmd") -Destination (Join-Path $PortableStage "quorumrag-launch.cmd") -Force
 Copy-Item -Path (Join-Path $ProjectRoot "packaging\windows\README_INSTALL.txt") -Destination (Join-Path $PortableStage "README_INSTALL.txt") -Force
+Copy-Item -Path (Join-Path $ProjectRoot "packaging\windows\quorumrag-open-ui.cmd") -Destination (Join-Path $PortableStage "quorumrag-open-ui.cmd") -Force
+Copy-Item -Path (Join-Path $ProjectRoot "packaging\windows\quorumrag-uninstall.cmd") -Destination (Join-Path $PortableStage "quorumrag-uninstall.cmd") -Force
 
 $ZipOut = Join-Path $WinDeployDir "QuorumRAG-$Version-windows-x86_64.zip"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -227,7 +229,8 @@ Write-Host "  -> MSI tables verified ($($TableNames -join ', ')); 'Environment' 
 # Step 5: Authenticode Signing of MSI, Defender Pre-Flight Scan & WDSI Manifest
 Write-Host "[5/5] Running Authenticode MSI signing, Defender scan & SHA256SUMS generation..." -ForegroundColor Cyan
 if (Test-Path $SubmitScript) {
-    $subArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SubmitScript, "-Version", $Version)
+    # Sign ONLY the MSI here; the exe was signed exactly once before being embedded.
+    $subArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $SubmitScript, "-Version", $Version, "-Files", $MsiOut)
     if ($SkipDefenderScan) { $subArgs += "-SkipDefenderScan" }
     & powershell @subArgs
 }

@@ -77,8 +77,22 @@ chmod 755 "${APP_BUNDLE}/Contents/MacOS/quorumrag-bin"
 
 cat <<'EOF' > "${APP_BUNDLE}/Contents/MacOS/QuorumRAG"
 #!/usr/bin/env bash
+# If the QuorumRAG LaunchDaemon is installed (pkg / install.sh), just open the Web UI.
+# Otherwise (drag-installed from the .dmg) run a per-user instance, which opens the browser itself.
 set -euo pipefail
 APP_MACOS_DIR="$(cd "$(dirname "$0")" && pwd)"
+URL="http://127.0.0.1:3031/"
+HEALTH="http://127.0.0.1:3031/api/health"
+if curl -fsS -m 2 "${HEALTH}" >/dev/null 2>&1; then
+    exec open "${URL}"
+fi
+if [ -f /Library/LaunchDaemons/dev.quorumrag.daemon.plist ]; then
+    for _ in $(seq 1 60); do
+        curl -fsS -m 2 "${HEALTH}" >/dev/null 2>&1 && break
+        sleep 1
+    done
+    exec open "${URL}"
+fi
 DATA_DIR="${HOME}/Library/Application Support/QuorumRAG/data"
 mkdir -p "${DATA_DIR}"
 exec "${APP_MACOS_DIR}/quorumrag-bin" --host 0.0.0.0 --port 3031 --p2p-port 3032 --data-dir "${DATA_DIR}"
@@ -123,20 +137,53 @@ if [ "$(uname -s)" = "Darwin" ] && command -v pkgbuild >/dev/null 2>&1; then
     PKG_ROOT="${PKG_TMP}/root"
     PKG_SCRIPTS="${PKG_TMP}/scripts"
     mkdir -p "${PKG_ROOT}/usr/local/bin" \
+             "${PKG_ROOT}/usr/local/share/quorumrag" \
              "${PKG_ROOT}/Library/LaunchDaemons" \
              "${PKG_ROOT}/Applications" \
              "${PKG_SCRIPTS}"
 
     install -m 755 "${BINARY_PATH}" "${PKG_ROOT}/usr/local/bin/quorumrag"
     install -m 644 "${PLIST_FILE}" "${PKG_ROOT}/Library/LaunchDaemons/dev.quorumrag.daemon.plist"
+    install -m 755 "${UNINSTALL_SH}" "${PKG_ROOT}/usr/local/share/quorumrag/uninstall.sh"
     cp -R "${APP_BUNDLE}" "${PKG_ROOT}/Applications/QuorumRAG.app"
+
+    cat <<'EOF' > "${PKG_SCRIPTS}/preinstall"
+#!/bin/sh
+# Stop a running daemon before the payload replaces the binary (upgrade).
+launchctl bootout system/dev.quorumrag.daemon 2>/dev/null || true
+exit 0
+EOF
+    chmod 755 "${PKG_SCRIPTS}/preinstall"
 
     cat <<'EOF' > "${PKG_SCRIPTS}/postinstall"
 #!/bin/sh
+# Register + start the always-on LaunchDaemon, then open the Web UI for the console user.
+LABEL="dev.quorumrag.daemon"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+URL="http://127.0.0.1:3031/"
+HEALTH="http://127.0.0.1:3031/api/health"
 mkdir -p "/Library/Application Support/QuorumRAG/data" \
          "/Library/Application Support/QuorumRAG/docs" \
          "/Library/Logs/QuorumRAG"
 chmod 755 "/Library/Application Support/QuorumRAG" "/Library/Logs/QuorumRAG"
+chown root:wheel "${PLIST}"
+chmod 644 "${PLIST}"
+launchctl enable "system/${LABEL}" 2>/dev/null || true
+launchctl bootstrap system "${PLIST}" 2>/dev/null || true
+launchctl kickstart -k "system/${LABEL}" 2>/dev/null || true
+if [ "${COMMAND_LINE_INSTALL:-0}" != "1" ] || [ "${QUORUMRAG_OPEN_BROWSER:-0}" = "1" ]; then
+    (
+        i=0
+        while [ $i -lt 90 ]; do
+            curl -fsS -m 2 "${HEALTH}" >/dev/null 2>&1 && break
+            i=$((i + 1)); sleep 1
+        done
+        CONSOLE_USER="$(stat -f%Su /dev/console 2>/dev/null)"
+        if [ -n "${CONSOLE_USER}" ] && [ "${CONSOLE_USER}" != "root" ] && [ "${CONSOLE_USER}" != "loginwindow" ]; then
+            launchctl asuser "$(id -u "${CONSOLE_USER}")" sudo -u "${CONSOLE_USER}" open "${URL}" 2>/dev/null || true
+        fi
+    ) >/dev/null 2>&1 &
+fi
 exit 0
 EOF
     chmod 755 "${PKG_SCRIPTS}/postinstall"

@@ -46,6 +46,11 @@ pub struct Cli {
     /// Maximum number of remote peer responses to collect/fuse per query (default: 8)
     #[arg(long, default_value_t = 8)]
     pub max_peer_responses: usize,
+
+    /// Run under the Windows Service Control Manager (used by the installed QuorumRAGDaemon service).
+    /// Logs go to <data-dir>/logs/quorumrag-service.log. On Linux/macOS this flag only enables file logging.
+    #[arg(long, default_value_t = false)]
+    pub service: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]

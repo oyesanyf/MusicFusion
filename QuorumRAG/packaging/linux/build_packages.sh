@@ -40,6 +40,8 @@ DIST_DIR="$(cd "${DIST_DIR}" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SERVICE_FILE="${SCRIPT_DIR}/quorumrag.service"
+CTL_FILE="${SCRIPT_DIR}/quorumrag-ctl.sh"
+DESKTOP_FILE="${SCRIPT_DIR}/quorumrag.desktop"
 
 # Prune stale duplicate format artifacts for this architecture
 rm -f "${DIST_DIR}/${PACKAGE_NAME}_"*"_${DEB_ARCH}.deb"* \
@@ -58,23 +60,46 @@ cp -f "${BINARY_PATH}" "${TAR_STAGING}/quorumrag"
 chmod 755 "${TAR_STAGING}/quorumrag"
 cp -f "${SERVICE_FILE}" "${TAR_STAGING}/quorumrag.service"
 chmod 644 "${TAR_STAGING}/quorumrag.service"
+cp -f "${CTL_FILE}" "${TAR_STAGING}/quorumrag-ctl"
+chmod 755 "${TAR_STAGING}/quorumrag-ctl"
+cp -f "${DESKTOP_FILE}" "${TAR_STAGING}/quorumrag.desktop"
+chmod 644 "${TAR_STAGING}/quorumrag.desktop"
 
 cat <<'EOF' > "${TAR_STAGING}/install.sh"
 #!/usr/bin/env bash
+# Installs QuorumRAG as an always-on systemd service and opens the Web UI.
 set -euo pipefail
 if [ "$(id -u)" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-mkdir -p /usr/bin /lib/systemd/system /var/lib/quorumrag/data /var/lib/quorumrag/docs /var/log/quorumrag
+mkdir -p /usr/bin /lib/systemd/system /usr/lib/quorumrag /usr/share/applications \
+         /var/lib/quorumrag/data /var/lib/quorumrag/docs /var/log/quorumrag
 install -m 755 "${SCRIPT_DIR}/quorumrag" /usr/bin/quorumrag
 install -m 644 "${SCRIPT_DIR}/quorumrag.service" /lib/systemd/system/quorumrag.service
-if command -v systemctl >/dev/null 2>&1; then
-    systemctl daemon-reload || true
-fi
+install -m 755 "${SCRIPT_DIR}/quorumrag-ctl" /usr/lib/quorumrag/quorumrag-ctl
+install -m 644 "${SCRIPT_DIR}/quorumrag.desktop" /usr/share/applications/quorumrag.desktop
+/usr/lib/quorumrag/quorumrag-ctl post-install
 echo "[+] Installed /usr/bin/quorumrag and quorumrag.service (Zero-Touch PATH)."
+echo "    Uninstall completely: sudo ./uninstall.sh [--purge]"
 EOF
 chmod 755 "${TAR_STAGING}/install.sh"
+
+cat <<'EOF' > "${TAR_STAGING}/uninstall.sh"
+#!/usr/bin/env bash
+# Stops and deletes quorumrag.service and removes all installed files.
+#   --purge   also delete /var/lib/quorumrag (index) and /var/log/quorumrag
+set -euo pipefail
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo "$0" "$@"
+fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -x /usr/lib/quorumrag/quorumrag-ctl ]; then
+    exec sh /usr/lib/quorumrag/quorumrag-ctl uninstall "$@"
+fi
+exec sh "${SCRIPT_DIR}/quorumrag-ctl" uninstall "$@"
+EOF
+chmod 755 "${TAR_STAGING}/uninstall.sh"
 
 TAR_OUT="${DIST_DIR}/${PACKAGE_NAME}-${VERSION}-linux-${RPM_ARCH}.tar.gz"
 tar -czf "${TAR_OUT}" -C "${TAR_TMP}" "$(basename "${TAR_STAGING}")"
@@ -90,6 +115,8 @@ DEB_STAGING="${DEB_TMP}/deb_build"
 mkdir -p "${DEB_STAGING}/DEBIAN"
 mkdir -p "${DEB_STAGING}/usr/bin"
 mkdir -p "${DEB_STAGING}/lib/systemd/system"
+mkdir -p "${DEB_STAGING}/usr/lib/quorumrag"
+mkdir -p "${DEB_STAGING}/usr/share/applications"
 mkdir -p "${DEB_STAGING}/var/lib/quorumrag/data"
 mkdir -p "${DEB_STAGING}/var/lib/quorumrag/docs"
 
@@ -101,6 +128,7 @@ Priority: optional
 Architecture: ${DEB_ARCH}
 Maintainer: Oshoosi Security Team <security@oshoosiclaw.dev>
 Homepage: https://github.com/oyesanyf/MusicFusion
+Recommends: curl, xdg-utils
 Description: QuorumRAG Local-First P2P Agentic RAG Daemon and Web UI
  Self-contained local-first peer-to-peer Retrieval-Augmented Generation
  daemon with embedded LanceDB/Tantivy hybrid search, Ed25519 mesh auth,
@@ -109,13 +137,10 @@ EOF
 
 cat <<'EOF' > "${DEB_STAGING}/DEBIAN/postinst"
 #!/bin/sh
+# Enable + start quorumrag.service at boot and now, then open the Web UI for the desktop user.
 set -e
 if [ "$1" = "configure" ]; then
-    mkdir -p /var/lib/quorumrag/data /var/lib/quorumrag/docs /var/log/quorumrag
-    chmod 750 /var/lib/quorumrag /var/log/quorumrag
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl daemon-reload || true
-    fi
+    sh /usr/lib/quorumrag/quorumrag-ctl post-install || true
 fi
 exit 0
 EOF
@@ -123,21 +148,46 @@ chmod 755 "${DEB_STAGING}/DEBIAN/postinst"
 
 cat <<'EOF' > "${DEB_STAGING}/DEBIAN/prerm"
 #!/bin/sh
+# Stop the service before removal or upgrade; disable it on removal.
 set -e
-if [ "$1" = "remove" ]; then
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl stop quorumrag.service || true
-        systemctl disable quorumrag.service || true
-    fi
-fi
+case "$1" in
+    remove|deconfigure)
+        sh /usr/lib/quorumrag/quorumrag-ctl pre-remove || true ;;
+    upgrade|failed-upgrade)
+        if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+            systemctl stop quorumrag.service >/dev/null 2>&1 || true
+        fi ;;
+esac
 exit 0
 EOF
 chmod 755 "${DEB_STAGING}/DEBIAN/prerm"
+
+cat <<'EOF' > "${DEB_STAGING}/DEBIAN/postrm"
+#!/bin/sh
+# remove: unit file is gone -> reload systemd. purge: also delete index data and logs.
+set -e
+case "$1" in
+    remove|purge)
+        if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            systemctl reset-failed quorumrag.service >/dev/null 2>&1 || true
+        fi ;;
+esac
+if [ "$1" = "purge" ]; then
+    rm -rf /var/lib/quorumrag /var/log/quorumrag
+fi
+exit 0
+EOF
+chmod 755 "${DEB_STAGING}/DEBIAN/postrm"
 
 cp -f "${BINARY_PATH}" "${DEB_STAGING}/usr/bin/quorumrag"
 chmod 755 "${DEB_STAGING}/usr/bin/quorumrag"
 cp -f "${SERVICE_FILE}" "${DEB_STAGING}/lib/systemd/system/quorumrag.service"
 chmod 644 "${DEB_STAGING}/lib/systemd/system/quorumrag.service"
+cp -f "${CTL_FILE}" "${DEB_STAGING}/usr/lib/quorumrag/quorumrag-ctl"
+chmod 755 "${DEB_STAGING}/usr/lib/quorumrag/quorumrag-ctl"
+cp -f "${DESKTOP_FILE}" "${DEB_STAGING}/usr/share/applications/quorumrag.desktop"
+chmod 644 "${DEB_STAGING}/usr/share/applications/quorumrag.desktop"
 
 DEB_OUT="${DIST_DIR}/${PACKAGE_NAME}_${VERSION}_${DEB_ARCH}.deb"
 if command -v dpkg-deb >/dev/null 2>&1; then
@@ -148,7 +198,7 @@ else
     (
         cd "${DEB_STAGING}"
         printf "2.0\n" > debian-binary
-        tar -czf control.tar.gz -C DEBIAN control postinst prerm
+        tar -czf control.tar.gz -C DEBIAN control postinst prerm postrm
         tar -czf data.tar.gz usr lib var
         if command -v ar >/dev/null 2>&1; then
             ar -rc "${DEB_OUT}" debian-binary control.tar.gz data.tar.gz
@@ -214,25 +264,44 @@ daemon with embedded LanceDB/Tantivy hybrid search and Web UI.
 %install
 mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/lib/systemd/system
+mkdir -p %{buildroot}/usr/lib/quorumrag
+mkdir -p %{buildroot}/usr/share/applications
 mkdir -p %{buildroot}/var/lib/quorumrag/data
 mkdir -p %{buildroot}/var/lib/quorumrag/docs
 
 install -m 755 "${BINARY_PATH}" %{buildroot}/usr/bin/quorumrag
 install -m 644 "${SERVICE_FILE}" %{buildroot}/usr/lib/systemd/system/quorumrag.service
+install -m 755 "${CTL_FILE}" %{buildroot}/usr/lib/quorumrag/quorumrag-ctl
+install -m 644 "${DESKTOP_FILE}" %{buildroot}/usr/share/applications/quorumrag.desktop
 
 %post
-if [ \$1 -eq 1 ]; then
-    systemctl daemon-reload >/dev/null 2>&1 || :
-fi
+# Fresh install and upgrade: enable + (re)start the service, then open the Web UI.
+sh /usr/lib/quorumrag/quorumrag-ctl post-install || :
 
 %preun
+# Final erase (not upgrade): stop + disable the service.
 if [ \$1 -eq 0 ]; then
-    systemctl --no-reload disable --now quorumrag.service >/dev/null 2>&1 || :
+    sh /usr/lib/quorumrag/quorumrag-ctl pre-remove || :
+fi
+
+%postun
+systemctl daemon-reload >/dev/null 2>&1 || :
+if [ \$1 -eq 0 ]; then
+    systemctl reset-failed quorumrag.service >/dev/null 2>&1 || :
+    # Logs are always removed on erase; the index is removed only when QUORUMRAG_PURGE=1
+    # (or use: /usr/lib/quorumrag/quorumrag-ctl uninstall --purge before erasing).
+    rm -rf /var/log/quorumrag
+    if [ "\${QUORUMRAG_PURGE:-0}" = "1" ]; then
+        rm -rf /var/lib/quorumrag
+    fi
 fi
 
 %files
 /usr/bin/quorumrag
 /usr/lib/systemd/system/quorumrag.service
+%dir /usr/lib/quorumrag
+/usr/lib/quorumrag/quorumrag-ctl
+/usr/share/applications/quorumrag.desktop
 %dir /var/lib/quorumrag
 %dir /var/lib/quorumrag/data
 %dir /var/lib/quorumrag/docs

@@ -1,14 +1,27 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tracing::{error, info, warn};
 use crate::state::DaemonState;
+
+/// Process-wide stop request used by the Windows service control handler.
+fn external_stop() -> &'static tokio::sync::Notify {
+    static STOP: OnceLock<tokio::sync::Notify> = OnceLock::new();
+    STOP.get_or_init(tokio::sync::Notify::new)
+}
+
+/// Ask the running daemon to shut down gracefully (safe to call from any thread).
+pub fn request_external_stop() {
+    // notify_one stores a permit, so a stop requested before the server awaits is not lost.
+    external_stop().notify_one();
+}
 
 /// Installs OS signal listeners (Ctrl+C / SIGINT on all platforms, SIGTERM on unix)
 /// and listens for internal shutdown notification.
 pub async fn shutdown_signal(notify: Arc<tokio::sync::Notify>) {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C signal handler");
+        // A Windows service has no console; if the handler cannot be installed, wait for other signals.
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
     };
 
     #[cfg(unix)]
@@ -31,6 +44,9 @@ pub async fn shutdown_signal(notify: Arc<tokio::sync::Notify>) {
         },
         _ = notify.notified() => {
             info!("Received internal shutdown notification (/api/shutdown). Initiating graceful shutdown...");
+        },
+        _ = external_stop().notified() => {
+            info!("Received service stop request. Initiating graceful shutdown...");
         },
     }
 }
