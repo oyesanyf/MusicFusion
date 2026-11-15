@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, State},
+    extract::{DefaultBodyLimit, Path as AxumPath, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -19,96 +19,49 @@ use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
 use music_core::genre::GenreTaxonomy;
-use music_core::rl_contracts::{
-    AcousticFeatureVector, DpoPreferencePair, ReferenceWavMeta,
-};
+use music_core::rl_contracts::DpoPreferencePair;
+use music_core::schema::{StemChannelStrip, StemMixConfig, TypedDecisionTrace, CANONICAL_MIXER_STEMS};
 use music_core::state::{
-    EngineMode, MusicProductionState, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_FINAL_MASTER,
-    STEM_GUITAR, STEM_INPAINTED_DRUMS, STEM_INPAINTED_GUITAR, STEM_OTHER, STEM_RASPY_TENOR_VOCALS,
-    STEM_YUE_VOCALS,
+    DecisionMode, EngineMode, LyricsMode, MusicProductionState, STEM_AMBIENCE_FX,
+    STEM_BACKING_HARMONIES, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_FINAL_MASTER,
+    STEM_GUITAR, STEM_INPAINTED_DRUMS, STEM_INPAINTED_GUITAR, STEM_KEYS_SYNTHS, STEM_OTHER,
+    STEM_PERCUSSION_FILLS, STEM_RASPY_TENOR_VOCALS, STEM_YUE_VOCALS,
 };
 use music_core::telemetry::StemTelemetry;
-use music_dsp::acoustic_analyzer::AcousticAnalyzer;
-use music_dsp::wav::AudioBuffer;
-use music_fusion::hf_model_discovery::HfModelDiscoveryEngine;
+use music_fusion::decision_model::{DecisionRequest, DecisionSchema, NimbleDecisionEngine};
+use music_fusion::hf_model_discovery::{default_models_cache_dir, HfModelDiscoveryEngine};
 use music_fusion::iteration_panel::{
     IterationFusionPanel, ParameterTweaks,
+};
+use music_fusion::lyricist_studio::{
+    compose_offline_structured_lyrics, structure_user_lyrics_verbatim, write_lyrics_from_prompt,
 };
 use music_fusion::memory::SystemMemory;
 use music_fusion::ollama_client::OllamaClient;
 use music_fusion::ollama_lifecycle::OllamaLifecycleManager;
-use music_fusion::originality_guard::LegalOriginalityGuard;
 use music_fusion::rl_policy::{RlPolicy, SynthesisAction};
 use music_fusion::tts_engine::{FusionTtsEngine, TtsVocalRequest, TtsVocalResponse};
+use music_fusion::vision_mood::analyze_visual_mood_local;
 use music_pipeline::checkpointer::CheckpointManager;
+use music_pipeline::python_bridge::UvBridge;
 use music_pipeline::runner::PipelineRunner;
 
-/// In-memory stored reference WAV item with parsed audio buffer and acoustic profile
-#[derive(Clone)]
-pub struct StoredReferenceWav {
-    pub meta: ReferenceWavMeta,
-    pub features: AcousticFeatureVector,
-    pub audio_buffer: AudioBuffer,
-    pub file_path: PathBuf,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct PersistedReferenceEntry {
-    pub meta: ReferenceWavMeta,
-    pub features: AcousticFeatureVector,
-    pub file_path: PathBuf,
-}
-
-fn load_persisted_reference_wavs(storage_dir: &Path) -> HashMap<String, StoredReferenceWav> {
-    let manifest_path = storage_dir.join("reference_wavs").join("manifest.json");
-    let mut map = HashMap::new();
-    if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
-        if let Ok(entries) = serde_json::from_str::<Vec<PersistedReferenceEntry>>(&raw) {
-            for entry in entries.into_iter().take(20) {
-                if entry.file_path.exists() {
-                    let excerpt_buf = std::fs::read(&entry.file_path)
-                        .ok()
-                        .and_then(|b| AudioBuffer::from_wav_bytes(&b).ok())
-                        .map(|b| {
-                            let max_frames = (b.sample_rate as usize) * 16;
-                            if b.frame_count() > (b.sample_rate as usize) * 20 {
-                                let start = (b.frame_count() * 15 / 100).min(b.frame_count().saturating_sub(max_frames));
-                                b.slice(start, max_frames)
-                            } else {
-                                b
-                            }
-                        })
-                        .unwrap_or_else(|| AudioBuffer::new_stereo(2.0));
-                    map.insert(
-                        entry.meta.id.clone(),
-                        StoredReferenceWav {
-                            meta: entry.meta,
-                            features: entry.features,
-                            audio_buffer: excerpt_buf,
-                            file_path: entry.file_path,
-                        },
-                    );
-                }
-            }
-        }
+fn parse_lyrics_mode(raw: Option<&str>) -> LyricsMode {
+    match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("user" | "user_provided" | "verbatim" | "custom") => LyricsMode::UserProvided,
+        Some("ai" | "ai_generated" | "generate" | "write") => LyricsMode::AiGenerated,
+        _ => LyricsMode::Auto,
     }
-    map
 }
 
-fn save_persisted_reference_wavs(storage_dir: &Path, store: &HashMap<String, StoredReferenceWav>) {
-    let ref_dir = storage_dir.join("reference_wavs");
-    let _ = std::fs::create_dir_all(&ref_dir);
-    let mut entries: Vec<PersistedReferenceEntry> = store
-        .values()
-        .map(|it| PersistedReferenceEntry {
-            meta: it.meta.clone(),
-            features: it.features.clone(),
-            file_path: it.file_path.clone(),
-        })
-        .collect();
-    entries.sort_by(|a, b| a.meta.uploaded_at.cmp(&b.meta.uploaded_at));
-    if let Ok(json) = serde_json::to_string_pretty(&entries) {
-        let _ = std::fs::write(ref_dir.join("manifest.json"), json);
+fn parse_decision_mode(raw: Option<&str>) -> DecisionMode {
+    match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("nimble" | "nimble_local" | "local") => DecisionMode::NimbleLocal,
+        Some("ollama" | "ollama_single_pass" | "single_pass") => DecisionMode::OllamaSinglePass,
+        Some("fast" | "deterministic" | "fast_deterministic" | "system1" | "pure_rust") => {
+            DecisionMode::FastDeterministic
+        }
+        _ => DecisionMode::Auto,
     }
 }
 
@@ -119,7 +72,6 @@ pub struct AppState {
     pub storage_dir: PathBuf,
     pub bound_port: u16,
     pub ollama_host: String,
-    pub reference_wavs: Arc<tokio::sync::RwLock<HashMap<String, StoredReferenceWav>>>,
     pub rl_policy: Arc<tokio::sync::RwLock<RlPolicy>>,
     pub last_synthesis_action: Arc<tokio::sync::RwLock<Option<SynthesisAction>>>,
     pub album_lock: Arc<tokio::sync::Mutex<()>>,
@@ -132,13 +84,11 @@ impl AppState {
         bound_port: u16,
         ollama_host: String,
     ) -> Self {
-        let initial_refs = load_persisted_reference_wavs(&storage_dir);
         Self {
             runner,
             storage_dir,
             bound_port,
             ollama_host,
-            reference_wavs: Arc::new(tokio::sync::RwLock::new(initial_refs)),
             rl_policy: Arc::new(tokio::sync::RwLock::new(RlPolicy::new(64, music_fusion::rl_policy::PolicyMode::Learned))),
             last_synthesis_action: Arc::new(tokio::sync::RwLock::new(None)),
             album_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -163,9 +113,21 @@ pub struct CreateSongRequest {
     #[serde(default)]
     pub lyrics: Option<String>,
     #[serde(default)]
-    pub engine_mode: Option<String>,
+    pub lyrics_mode: Option<String>,
+    #[serde(alias = "topic", default)]
+    pub lyrics_topic: Option<String>,
     #[serde(default)]
+    pub engine_mode: Option<String>,
+    #[serde(alias = "model", alias = "model_id", default)]
     pub hf_model: Option<String>,
+    #[serde(default)]
+    pub commercial_only: bool,
+    #[serde(alias = "lora", alias = "lora_path", default)]
+    pub lora_adapter_path: Option<String>,
+    #[serde(default)]
+    pub decision_model: Option<String>,
+    #[serde(default)]
+    pub decision_mode: Option<String>,
     #[serde(default)]
     pub image_base64: Option<String>,
     #[serde(default)]
@@ -185,6 +147,10 @@ pub struct CreateSongResponse {
     pub key_signature: String,
     pub lyrics: String,
     pub model_used: String,
+    pub selected_model: String,
+    pub decision_model: String,
+    pub lyrics_mode: String,
+    pub decision_traces: Vec<TypedDecisionTrace>,
     pub saved_wav_path: Option<String>,
     pub liked: bool,
     pub album_id: Option<String>,
@@ -429,279 +395,78 @@ pub async fn handle_hardware_status(State(state): State<AppState>) -> Json<Hardw
     })
 }
 
-/// POST /api/songs/create — Boots StateGraph and creates a new song v1.
+/// POST /api/songs/create — Unified Open-Weight & Local Nimble StateGraph pipeline creating song v1.
 pub async fn handle_create_song(
     State(state): State<AppState>,
     Json(req): Json<CreateSongRequest>,
 ) -> Response {
-    let effective_prompt = if req.prompt.trim().is_empty() {
-        req.genre
-            .clone()
-            .unwrap_or_else(|| "Acoustic Folk & Studio Poem Ballad".to_string())
-    } else {
-        req.prompt.clone()
-    };
-    let prompt_lower = effective_prompt.to_ascii_lowercase();
-    let is_temp_test_storage = state.storage_dir.starts_with(std::env::temp_dir());
-    let gemini_configured = !is_temp_test_storage
-        && music_dsp::melodic_singing::MelodicSingingSynthesizer::resolve_dotenv_gemini_api_key().is_some();
-    let has_photo = req
-        .image_base64
-        .as_deref()
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false);
-    let has_lyrics_poem = req
-        .lyrics
-        .as_deref()
-        .map(|l| !l.trim().is_empty() && music_dsp::ReferenceRlSynthesizer::extract_raw_poem_lines_from_prompt(l).is_some())
-        .unwrap_or(false);
-    let is_poem_prompt = !is_temp_test_storage
-        && (music_dsp::ReferenceRlSynthesizer::extract_raw_poem_lines_from_prompt(&effective_prompt).is_some()
-            || has_lyrics_poem
-            || prompt_lower.contains("grasslands")
-            || prompt_lower.contains("flamingos")
-            || prompt_lower.contains("watering kingdoms"));
-
-    let has_ref_or_acoustic_prompt = {
-        let store = state.reference_wavs.read().await;
-        !store.is_empty()
-            || prompt_lower.contains("1988")
-            || prompt_lower.contains("acoustic")
-            || prompt_lower.contains("folk")
-            || prompt_lower.contains("slide guitar")
-            || prompt_lower.contains("fretless")
-            || prompt_lower.contains("wurlitzer")
-            || prompt_lower.contains("dire straits")
-    };
-
-    if (gemini_configured || has_photo || is_poem_prompt || has_ref_or_acoustic_prompt)
-        && req.engine_mode.as_deref() != Some("pure_rust")
-    {
-        let store = state.reference_wavs.read().await;
-        let features: Vec<AcousticFeatureVector> = store.values().map(|it| it.features.clone()).collect();
-        let blended = AcousticAnalyzer::blend_ensemble(&features, None).unwrap_or_else(|_| {
-            music_core::rl_contracts::BlendedStyleProfile {
-                reference_count: 1,
-                file_weights: std::collections::HashMap::new(),
-                blended_bpm: req.bpm.unwrap_or(80) as f32,
-                consensus_key: req.key_signature.clone().unwrap_or_else(|| "G Major".to_string()),
-                blended_chroma: [1.0 / 12.0; 12],
-                blended_spectral_centroid_hz: 2100.0,
-                blended_vocal_presence: 0.38,
-                blended_timbre_subbands: [0.5; 8],
-                blended_style_embedding: vec![0.5; 64],
-                style_variance: 0.12,
-            }
-        });
-        let ref_metas: Vec<_> = store.values().map(|it| it.meta.clone()).collect();
-        drop(store);
-
-        let seed = chrono::Utc::now().timestamp_millis() as u64;
-        let action = state
-            .rl_policy
-            .read()
-            .await
-            .select_action(&blended.blended_style_embedding, seed);
-
-        let prompt_owned = effective_prompt.clone();
-        let lyrics_owned = req.lyrics.clone();
-        let img_b64_owned = req.image_base64.clone();
-        let img_mime_owned = req.image_mime_type.clone();
-        let blended_for_synth = blended.clone();
-        let synth_out = match tokio::task::spawn_blocking(move || {
-            music_dsp::ReferenceRlSynthesizer::synthesize_full_reference_rl_song_with_image(
-                &prompt_owned,
-                lyrics_owned.as_deref(),
-                &blended_for_synth,
-                action.treble_presence_db,
-                -2.8 - action.dynamic_compression,
-                0.5 + action.vocal_rasp_delta,
-                action.sub_bass_boost_db,
-                0.85 + action.vocal_wet_ratio,
-                seed,
-                img_b64_owned.as_deref(),
-                img_mime_owned.as_deref(),
-            )
-        })
-        .await
-        {
-            Ok(out) => out,
-            Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "error": format!("Lyria 3.5 / Studio synthesis task panicked: {}", e),
-                        "status": "pipeline_error"
-                    })),
-                )
-                    .into_response();
-            }
-        };
-
-        let base_title_part: String = synth_out
-            .title
-            .chars()
-            .take_while(|&c| c != '(' && c != '\u{2014}')
-            .collect();
-        let file_slug: String = base_title_part
-            .split_whitespace()
-            .map(|w| {
-                w.chars()
-                    .filter(|c| c.is_ascii_alphanumeric())
-                    .collect::<String>()
-            })
-            .filter(|w| !w.is_empty())
-            .take(7)
-            .collect::<Vec<_>>()
-            .join("_");
-        let clean_slug = if file_slug.is_empty() {
-            "Studio_Song".to_string()
-        } else {
-            file_slug
-        };
-        let short_hex = &uuid::Uuid::new_v4().simple().to_string()[..6];
-        let song_id = format!("song_{}_{}", clean_slug.to_ascii_lowercase(), short_hex);
-        let version = 1u32;
-        let v_dir = state.storage_dir.join("songs").join(&song_id).join("v1");
-        let stems_dir = v_dir.join("stems");
-        let _ = std::fs::create_dir_all(&stems_dir);
-
-        let master_path = v_dir.join("final_master.wav");
-        let master_stems_path = stems_dir.join("final_master.wav");
-        let raspy_vocals_path = stems_dir.join("raspy_tenor_vocals.wav");
-        let yue_vocals_path = stems_dir.join("yue_vocals.wav");
-        let drums_path = stems_dir.join("drums.wav");
-        let bass_path = stems_dir.join("bass.wav");
-        let guitar_path = stems_dir.join("guitar.wav");
-        let other_path = stems_dir.join("other.wav");
-        let inpainted_guitar_path = stems_dir.join("inpainted_guitar.wav");
-        let inpainted_drums_path = stems_dir.join("inpainted_drums.wav");
-        let draft_groove_path = stems_dir.join("draft_groove.wav");
-
-        let pcm16 = music_dsp::WavBitDepth::Pcm16;
-        let _ = synth_out.final_master.to_wav_file_with_format(&master_path, pcm16);
-        let _ = synth_out.final_master.to_wav_file_with_format(&master_stems_path, pcm16);
-        let _ = synth_out.vocals.to_wav_file_with_format(&raspy_vocals_path, pcm16);
-        let _ = synth_out.vocals.to_wav_file_with_format(&yue_vocals_path, pcm16);
-        let _ = synth_out.drums.to_wav_file_with_format(&drums_path, pcm16);
-        let _ = synth_out.bass.to_wav_file_with_format(&bass_path, pcm16);
-        let _ = synth_out.acoustic_guitar.to_wav_file_with_format(&guitar_path, pcm16);
-        let _ = synth_out.keys_organ.to_wav_file_with_format(&other_path, pcm16);
-        let _ = synth_out.lead_guitar_solo.to_wav_file_with_format(&inpainted_guitar_path, pcm16);
-        let _ = synth_out.percussion_fills.to_wav_file_with_format(&inpainted_drums_path, pcm16);
-        let _ = synth_out.draft_groove.to_wav_file_with_format(&draft_groove_path, pcm16);
-
-        let _ = std::fs::write(v_dir.join("lyrics.txt"), &synth_out.lyrics);
-        let _ = std::fs::write(v_dir.join("genre.txt"), &synth_out.genre_label);
-
-        let mut saved_wav_path = None;
-        let d_music_dir = Path::new(r"D:\music");
-        if d_music_dir.exists() && d_music_dir.is_dir() {
-            let named_wav = d_music_dir.join(format!("{}.wav", clean_slug));
-            if synth_out
-                .final_master
-                .to_wav_file_with_format(&named_wav, pcm16)
-                .is_ok()
-            {
-                saved_wav_path = Some(named_wav.to_string_lossy().to_string());
-            }
-            let _ = synth_out
-                .final_master
-                .to_wav_file_with_format(&d_music_dir.join("LATEST_GENERATED_SONG.wav"), pcm16);
-            let _ = synth_out
-                .final_master
-                .to_wav_file_with_format(&d_music_dir.join("GENERATED_RL_SAMPLE_SONG.wav"), pcm16);
-            if prompt_lower.contains("grasslands") || prompt_lower.contains("flamingos") {
-                let _ = synth_out
-                    .final_master
-                    .to_wav_file_with_format(&d_music_dir.join("Watering_Kingdoms_of_the_Grasslands_Poem.wav"), pcm16);
+    let mut style_prompt = req.prompt.trim().to_string();
+    if let Some(img_b64) = req.image_base64.as_deref().filter(|s| !s.trim().is_empty()) {
+        let ollama_client = OllamaClient::new(&state.ollama_host);
+        let mood = analyze_visual_mood_local(&ollama_client, Some(img_b64), &style_prompt).await;
+        if !mood.style_prompt_tags.trim().is_empty() && !style_prompt.contains(&mood.style_prompt_tags) {
+            if style_prompt.is_empty() {
+                style_prompt = mood.style_prompt_tags;
+            } else {
+                style_prompt = format!("{}, {}", style_prompt, mood.style_prompt_tags);
             }
         }
-
-        let model_used = if synth_out.genre_label.contains("Lyria 3.5") {
-            "models/lyria-3.5".to_string()
-        } else {
-            req.hf_model.clone().unwrap_or_else(|| "models/lyria-3.5".to_string())
-        };
-
-        let mut final_state = MusicProductionState::new(&song_id, &synth_out.genre_label, synth_out.bpm, &synth_out.key_signature);
-        final_state.version = version;
-        final_state.style_prompt = synth_out.prompt_used.clone();
-        final_state.lyrics = synth_out.lyrics.clone();
-        final_state.reference_wavs = ref_metas;
-        final_state.judge_score = 9.9;
-        final_state.quality_passed = true;
-        final_state.blueprint = Some(music_core::schema::SongBlueprint {
-            title: synth_out.title.clone(),
-            subtitle: synth_out.genre_label.clone(),
-            style_of_music: synth_out.genre_label.clone(),
-            bpm: synth_out.bpm as f64,
-            key_signature: synth_out.key_signature.clone(),
-            ..music_core::schema::SongBlueprint::default_one_love_shining_anthem()
-        });
-        final_state.set_stem(STEM_FINAL_MASTER, master_path);
-        final_state.set_stem(STEM_RASPY_TENOR_VOCALS, raspy_vocals_path);
-        final_state.set_stem(STEM_YUE_VOCALS, yue_vocals_path);
-        final_state.set_stem(STEM_DRUMS, drums_path);
-        final_state.set_stem(STEM_BASS, bass_path);
-        final_state.set_stem(STEM_GUITAR, guitar_path);
-        final_state.set_stem(STEM_OTHER, other_path);
-        final_state.set_stem(STEM_INPAINTED_GUITAR, inpainted_guitar_path);
-        final_state.set_stem(STEM_INPAINTED_DRUMS, inpainted_drums_path);
-        final_state.set_stem(STEM_DRAFT_GROOVE, draft_groove_path);
-        final_state.history.push(format!(
-            "Synthesized full studio song '{}' via {} ({} BPM, {})",
-            synth_out.title, model_used, synth_out.bpm, synth_out.key_signature
-        ));
-        let _ = state.runner.checkpointer().save_checkpoint(&final_state, "create_song_lyria35").await;
-
-        let mut user_meta = load_song_user_meta(&state.storage_dir, &final_state.song_id);
-        if let Some(ref target_aid) = req.target_album_id {
-            if !target_aid.trim().is_empty() {
-                let _guard = state.album_lock.lock().await;
-                if let Ok(album) = assign_song_to_album_locked(&state, target_aid.trim(), &final_state.song_id, final_state.version).await {
-                    user_meta.liked = true;
-                    user_meta.album_id = Some(album.album_id);
-                    user_meta.album_title = Some(album.title);
-                }
-            }
-        }
-
-        let audio_urls = build_audio_urls(&final_state.song_id, final_state.version);
-        return Json(CreateSongResponse {
-            status: "success".to_string(),
-            song_id: final_state.song_id.clone(),
-            version: final_state.version,
-            title: synth_out.title,
-            genre: synth_out.genre_label,
-            bpm: synth_out.bpm,
-            key_signature: synth_out.key_signature,
-            lyrics: synth_out.lyrics,
-            model_used,
-            saved_wav_path,
-            liked: user_meta.liked,
-            album_id: user_meta.album_id,
-            album_title: user_meta.album_title,
-            state: final_state,
-            audio_urls,
-        })
-        .into_response();
     }
 
     let song_id = format!("song_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-    let genre_query = req.genre.as_deref().unwrap_or(&req.prompt);
+    let genre_query = req
+        .genre
+        .as_deref()
+        .filter(|g| !g.trim().is_empty())
+        .unwrap_or_else(|| {
+            if style_prompt.trim().is_empty() {
+                "indie_pop"
+            } else {
+                &style_prompt
+            }
+        });
     let genre = GenreTaxonomy::get_or_default(genre_query);
     let bpm = req.bpm.unwrap_or(genre.default_bpm);
-    let key = req.key_signature.unwrap_or_else(|| genre.default_key.clone());
+    let key = req
+        .key_signature
+        .as_deref()
+        .filter(|k| !k.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| genre.default_key.clone());
     let engine_mode = req.engine_mode.as_deref().unwrap_or("auto");
 
     let mut init_state = MusicProductionState::new(&song_id, &genre.name, bpm, &key);
-    init_state.style_prompt = req.prompt;
+    init_state.style_prompt = style_prompt;
     init_state.engine_mode = EngineMode::from_str_loose(engine_mode).as_str().to_string();
+    init_state.lyrics_mode = parse_lyrics_mode(req.lyrics_mode.as_deref());
+    init_state.lyrics_topic = req.lyrics_topic.clone().unwrap_or_default();
+    init_state.commercial_only = req.commercial_only;
+    init_state.selected_model = req
+        .hf_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    init_state.lora_adapter_path = req
+        .lora_adapter_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    init_state.decision_model = req
+        .decision_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    init_state.decision_mode = parse_decision_mode(req.decision_mode.as_deref());
 
     if let Some(lyr) = req.lyrics {
         if !lyr.trim().is_empty() {
             init_state.lyrics = lyr;
+            if init_state.lyrics_mode == LyricsMode::Auto {
+                init_state.lyrics_mode = LyricsMode::UserProvided;
+            }
         }
     }
 
@@ -723,7 +488,24 @@ pub async fn handle_create_song(
                 .blueprint
                 .as_ref()
                 .map(|b| b.title.clone())
+                .filter(|t| !t.trim().is_empty())
                 .unwrap_or_else(|| format!("{} ({} BPM)", final_state.genre, final_state.bpm));
+            let model_used = final_state
+                .selected_model
+                .clone()
+                .unwrap_or_else(|| {
+                    if final_state.rendered_by_neural {
+                        "ACE-Step/acestep-v15-turbo".to_string()
+                    } else {
+                        "pure_rust_dsp".to_string()
+                    }
+                });
+            let decision_model = final_state
+                .decision_model
+                .clone()
+                .unwrap_or_else(|| "bespokelabs/Bespoke-Nimble-9B".to_string());
+            let lyrics_mode = final_state.lyrics_mode.as_str().to_string();
+            let decision_traces = final_state.decision_traces.clone();
             Json(CreateSongResponse {
                 status: "success".to_string(),
                 song_id: final_state.song_id.clone(),
@@ -733,7 +515,11 @@ pub async fn handle_create_song(
                 bpm: final_state.bpm,
                 key_signature: final_state.key_signature.clone(),
                 lyrics: final_state.lyrics.clone(),
-                model_used: req.hf_model.unwrap_or_else(|| "pure_rust_dsp".to_string()),
+                model_used: model_used.clone(),
+                selected_model: model_used,
+                decision_model,
+                lyrics_mode,
+                decision_traces,
                 saved_wav_path: None,
                 liked: user_meta.liked,
                 album_id: user_meta.album_id,
@@ -1628,6 +1414,17 @@ pub async fn handle_stream_audio(
     } else if raw_stem == "vocals" {
         alias_keys.push("raspy_tenor_vocals".to_string());
         alias_keys.push("yue_vocals".to_string());
+    } else if raw_stem == "backing_harmonies" {
+        alias_keys.push("yue_vocals".to_string());
+        alias_keys.push("raspy_tenor_vocals".to_string());
+    } else if raw_stem == "keys_synths" {
+        alias_keys.push("other".to_string());
+    } else if raw_stem == "percussion_fills" {
+        alias_keys.push("inpainted_drums".to_string());
+        alias_keys.push("drums".to_string());
+    } else if raw_stem == "ambience_fx" {
+        alias_keys.push("other".to_string());
+        alias_keys.push("draft_groove".to_string());
     } else if raw_stem == "instrumentals" {
         alias_keys.push("yue_instrumentals".to_string());
     }
@@ -1706,6 +1503,9 @@ pub async fn handle_stream_audio(
             v_dir.join(format!("{}.wav", raw_stem)),
             v_dir.join(&clean_stem),
         ];
+        for key in &alias_keys {
+            cand_paths.push(v_dir.join("stems").join(format!("{}.wav", key)));
+        }
         if raw_stem == "final_master" || raw_stem == "master" {
             cand_paths.push(v_dir.join("final_master.wav"));
             cand_paths.push(v_dir.join("stems").join("final_master.wav"));
@@ -1719,6 +1519,9 @@ pub async fn handle_stream_audio(
             cand_paths.push(prev_dir.join("stems").join(format!("{}.wav", raw_stem)));
             cand_paths.push(prev_dir.join("stems").join(&clean_stem));
             cand_paths.push(prev_dir.join(format!("{}.wav", raw_stem)));
+            for key in &alias_keys {
+                cand_paths.push(prev_dir.join("stems").join(format!("{}.wav", key)));
+            }
             cand_paths.push(prev_dir.join(&clean_stem));
             if raw_stem == "final_master" || raw_stem == "master" {
                 cand_paths.push(prev_dir.join("final_master.wav"));
@@ -2111,772 +1914,6 @@ pub async fn validate_url_against_ssrf(raw_url: &str) -> Result<reqwest::Url, St
     Ok(parsed)
 }
 
-fn sanitize_ref_name(raw: &str) -> String {
-    let clean: String = raw.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
-        .collect();
-    if clean.is_empty() {
-        "reference.wav".to_string()
-    } else {
-        clean
-    }
-}
-
-/// POST /api/reference-wavs/upload — Multi-file reference WAV uploader enforcing 1..=20 files cap.
-pub async fn handle_upload_reference_wavs(
-    State(state): State<AppState>,
-    mut multipart: Multipart,
-) -> Response {
-    let ref_dir = state.storage_dir.join("reference_wavs");
-    if let Err(e) = tokio::fs::create_dir_all(&ref_dir).await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Failed to create reference_wavs directory: {}", e) })),
-        ).into_response();
-    }
-
-    let mut incoming_files: Vec<(String, Vec<u8>)> = Vec::new();
-
-    while let Ok(Some(field)) = multipart.next_field().await {
-        let file_name = field
-            .file_name()
-            .map(|f| f.to_string())
-            .unwrap_or_else(|| "reference.wav".to_string());
-        match field.bytes().await {
-            Ok(bytes) => {
-                if !bytes.is_empty() {
-                    incoming_files.push((file_name, bytes.to_vec()));
-                }
-            }
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({ "error": format!("Failed to read multipart field: {}", e) })),
-                ).into_response();
-            }
-        }
-    }
-
-    if incoming_files.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "No WAV files uploaded in request. Please select 1 to 20 files." })),
-        ).into_response();
-    }
-
-    let current_count = state.reference_wavs.read().await.len();
-    if current_count + incoming_files.len() > 20 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": format!(
-                    "Reference WAV count exceeds maximum of 20 files (current: {}, incoming: {}, max: 20)",
-                    current_count,
-                    incoming_files.len()
-                )
-            })),
-        ).into_response();
-    }
-
-    let mut uploaded_metas = Vec::new();
-    let mut new_items = Vec::new();
-
-    for (file_name, bytes) in incoming_files {
-        let raw_buffer = match AudioBuffer::from_wav_bytes(&bytes) {
-            Ok(b) => b,
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "error": format!("Corrupt or invalid WAV file '{}': {}", file_name, e)
-                    })),
-                ).into_response();
-            }
-        };
-
-        let full_duration_secs = raw_buffer.duration_secs();
-        let max_excerpt_frames = (raw_buffer.sample_rate as usize) * 16;
-        let mut buffer = if raw_buffer.frame_count() > (raw_buffer.sample_rate as usize) * 20 {
-            let start = (raw_buffer.frame_count() * 15 / 100)
-                .min(raw_buffer.frame_count().saturating_sub(max_excerpt_frames));
-            raw_buffer.slice(start, max_excerpt_frames)
-        } else {
-            raw_buffer
-        };
-
-        if buffer.sample_rate != 48000 {
-            buffer = buffer.resample_linear(48000);
-        }
-        if buffer.channels != 2 {
-            buffer = buffer.to_stereo();
-        }
-
-        let mut features = match AcousticAnalyzer::analyze_buffer(&file_name, &buffer) {
-            Ok(f) => f,
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "error": format!("Acoustic analysis failed for '{}': {}", file_name, e)
-                    })),
-                ).into_response();
-            }
-        };
-        features.duration_secs = full_duration_secs;
-
-        let id = format!("ref_{}_{}", uuid::Uuid::new_v4().simple(), sanitize_ref_name(&file_name));
-        let file_path = ref_dir.join(format!("{}.wav", id));
-
-        let wav_data = if bytes.len() > 1_000_000 {
-            bytes
-        } else {
-            buffer.to_wav_bytes()
-        };
-        let file_size_bytes = wav_data.len() as u64;
-        if let Err(e) = tokio::fs::write(&file_path, &wav_data).await {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Failed to save reference WAV to disk: {}", e) })),
-            ).into_response();
-        }
-
-        let meta = ReferenceWavMeta {
-            id: id.clone(),
-            file_name: file_name.clone(),
-            duration_secs: full_duration_secs,
-            sample_rate: buffer.sample_rate,
-            channels: buffer.channels,
-            file_size_bytes,
-            bpm: features.bpm,
-            key_signature: features.key_signature.clone(),
-            uploaded_at: chrono::Utc::now().to_rfc3339(),
-        };
-
-        uploaded_metas.push(meta.clone());
-        new_items.push((id, StoredReferenceWav {
-            meta,
-            features,
-            audio_buffer: buffer,
-            file_path,
-        }));
-    }
-
-    {
-        let mut store = state.reference_wavs.write().await;
-        for (id, item) in new_items {
-            store.insert(id, item);
-        }
-        save_persisted_reference_wavs(&state.storage_dir, &store);
-    }
-
-    let total_count = state.reference_wavs.read().await.len();
-    Json(serde_json::json!({
-        "status": "ok",
-        "uploaded": uploaded_metas,
-        "uploaded_count": uploaded_metas.len(),
-        "reference_wavs": uploaded_metas,
-        "total_count": total_count,
-    })).into_response()
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UrlToWavRequest {
-    pub url: String,
-}
-
-/// POST /api/reference-wavs/from-url — Converts streaming or direct audio URL into a 48 kHz reference WAV.
-pub async fn handle_reference_wav_from_url(
-    State(state): State<AppState>,
-    Json(req): Json<UrlToWavRequest>,
-) -> Response {
-    let current_count = state.reference_wavs.read().await.len();
-    if current_count >= 20 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "Reference WAV count already at maximum of 20 files. Please remove a track before adding more."
-            })),
-        ).into_response();
-    }
-
-    let parsed_url = match validate_url_against_ssrf(&req.url).await {
-        Ok(u) => u,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": e })),
-            ).into_response();
-        }
-    };
-
-    let ref_dir = state.storage_dir.join("reference_wavs");
-    if let Err(e) = tokio::fs::create_dir_all(&ref_dir).await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Failed to create reference_wavs directory: {}", e) })),
-        ).into_response();
-    }
-
-    let id = format!("ref_url_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
-    let target_wav = ref_dir.join(format!("{}.wav", id));
-
-    // 1. Try yt-dlp first if available
-    let yt_dlp_success = {
-        let output = tokio::process::Command::new("yt-dlp")
-            .arg("--no-playlist")
-            .arg("-x")
-            .arg("--audio-format")
-            .arg("wav")
-            .arg("--postprocessor-args")
-            .arg("ffmpeg:-ar 48000 -ac 2")
-            .arg("-o")
-            .arg(target_wav.to_string_lossy().to_string())
-            .arg(parsed_url.as_str())
-            .output()
-            .await;
-        match output {
-            Ok(o) => o.status.success() && target_wav.exists(),
-            Err(_) => false,
-        }
-    };
-
-    // 2. If yt-dlp didn't produce the target, fallback to reqwest + ffmpeg decode
-    if !yt_dlp_success {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap_or_default();
-
-        let resp = match client.get(parsed_url.as_str()).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({ "error": format!("Failed to download audio from URL: {}", e) })),
-                ).into_response();
-            }
-        };
-
-        if !resp.status().is_success() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": format!("HTTP error {} downloading URL: {}", resp.status(), parsed_url)
-                })),
-            ).into_response();
-        }
-
-        let bytes = match resp.bytes().await {
-            Ok(b) => b.to_vec(),
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({ "error": format!("Failed to read stream bytes: {}", e) })),
-                ).into_response();
-            }
-        };
-
-        // Try direct WAV parse first
-        if let Ok(mut buf) = AudioBuffer::from_wav_bytes(&bytes) {
-            if buf.sample_rate != 48000 {
-                buf = buf.resample_linear(48000);
-            }
-            if buf.channels != 2 {
-                buf = buf.to_stereo();
-            }
-            if let Err(e) = tokio::fs::write(&target_wav, &buf.to_wav_bytes()).await {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": format!("Failed to save WAV to disk: {}", e) })),
-                ).into_response();
-            }
-        } else {
-            // Decode with ffmpeg
-            let temp_input = ref_dir.join(format!("temp_in_{}", id));
-            if let Err(e) = tokio::fs::write(&temp_input, &bytes).await {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": format!("Failed to write temp audio file: {}", e) })),
-                ).into_response();
-            }
-
-            let ffmpeg_res = tokio::process::Command::new("ffmpeg")
-                .arg("-y")
-                .arg("-i")
-                .arg(&temp_input)
-                .arg("-ar")
-                .arg("48000")
-                .arg("-ac")
-                .arg("2")
-                .arg(&target_wav)
-                .output()
-                .await;
-
-            let _ = tokio::fs::remove_file(&temp_input).await;
-
-            match ffmpeg_res {
-                Ok(o) if o.status.success() && target_wav.exists() => {},
-                _ => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({
-                            "error": "URL does not point to valid WAV audio and could not be decoded by ffmpeg."
-                        })),
-                    ).into_response();
-                }
-            }
-        }
-    }
-
-    // Read and parse target_wav
-    let final_bytes = match tokio::fs::read(&target_wav).await {
-        Ok(b) => b,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Failed to read converted WAV file: {}", e) })),
-            ).into_response();
-        }
-    };
-
-    let mut buffer = match AudioBuffer::from_wav_bytes(&final_bytes) {
-        Ok(b) => b,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": format!("Invalid converted WAV: {}", e) })),
-            ).into_response();
-        }
-    };
-
-    if buffer.sample_rate != 48000 {
-        buffer = buffer.resample_linear(48000);
-    }
-    if buffer.channels != 2 {
-        buffer = buffer.to_stereo();
-    }
-
-    let file_name = parsed_url.path_segments()
-        .and_then(|mut s| s.next_back())
-        .filter(|s| !s.is_empty())
-        .map(|s| sanitize_ref_name(s))
-        .unwrap_or_else(|| "url_reference.wav".to_string());
-
-    let features = match AcousticAnalyzer::analyze_buffer(&file_name, &buffer) {
-        Ok(f) => f,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": format!("Acoustic analysis failed for '{}': {}", file_name, e)
-                })),
-            ).into_response();
-        }
-    };
-
-    let meta = ReferenceWavMeta {
-        id: id.clone(),
-        file_name,
-        duration_secs: buffer.duration_secs(),
-        sample_rate: buffer.sample_rate,
-        channels: buffer.channels,
-        file_size_bytes: final_bytes.len() as u64,
-        bpm: features.bpm,
-        key_signature: features.key_signature.clone(),
-        uploaded_at: chrono::Utc::now().to_rfc3339(),
-    };
-
-    {
-        let mut store = state.reference_wavs.write().await;
-        store.insert(
-            id.clone(),
-            StoredReferenceWav {
-                meta: meta.clone(),
-                features,
-                audio_buffer: buffer,
-                file_path: target_wav,
-            },
-        );
-        save_persisted_reference_wavs(&state.storage_dir, &store);
-    }
-
-    let total = state.reference_wavs.read().await.len();
-    Json(serde_json::json!({
-        "status": "ok",
-        "reference_wav": meta,
-        "total_count": total,
-    })).into_response()
-}
-
-/// GET /api/reference-wavs — Lists all active reference WAV files.
-pub async fn handle_list_reference_wavs(State(state): State<AppState>) -> Response {
-    let store = state.reference_wavs.read().await;
-    let mut list: Vec<ReferenceWavMeta> = store.values().map(|item| item.meta.clone()).collect();
-    list.sort_by(|a, b| a.uploaded_at.cmp(&b.uploaded_at));
-
-    Json(serde_json::json!({
-        "status": "ok",
-        "reference_wavs": list,
-        "count": list.len(),
-        "max_allowed": 20,
-    })).into_response()
-}
-
-/// DELETE /api/reference-wavs/:id — Removes a specific reference WAV from memory and disk.
-pub async fn handle_delete_reference_wav(
-    State(state): State<AppState>,
-    AxumPath(id): AxumPath<String>,
-) -> Response {
-    if id.contains("..") || id.contains('/') || id.contains('\\') || id.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Invalid reference WAV ID" })),
-        ).into_response();
-    }
-
-    let removed = {
-        let mut store = state.reference_wavs.write().await;
-        let r = store.remove(&id);
-        save_persisted_reference_wavs(&state.storage_dir, &store);
-        r
-    };
-    if let Some(item) = removed {
-        let _ = tokio::fs::remove_file(&item.file_path).await;
-    }
-
-    let remaining_count = state.reference_wavs.read().await.len();
-    Json(serde_json::json!({
-        "status": "ok",
-        "deleted_id": id,
-        "remaining_count": remaining_count,
-    })).into_response()
-}
-
-/// DELETE /api/reference-wavs — Clears all reference WAVs.
-pub async fn handle_clear_reference_wavs(State(state): State<AppState>) -> Response {
-    let mut store = state.reference_wavs.write().await;
-    for (_, item) in store.drain() {
-        let _ = tokio::fs::remove_file(&item.file_path).await;
-    }
-    save_persisted_reference_wavs(&state.storage_dir, &store);
-
-    Json(serde_json::json!({
-        "status": "ok",
-        "message": "All reference WAVs cleared",
-        "count": 0,
-        "remaining_count": 0,
-    })).into_response()
-}
-
-/// GET /api/reference-wavs/:id/audio — Streams reference WAV audio for audition playback.
-pub async fn handle_stream_reference_wav(
-    State(state): State<AppState>,
-    AxumPath(id): AxumPath<String>,
-) -> Response {
-    if id.contains("..") || id.contains('/') || id.contains('\\') || id.is_empty() {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-
-    let item = {
-        let store = state.reference_wavs.read().await;
-        store.get(&id).cloned()
-    };
-
-    let item = match item {
-        Some(it) => it,
-        None => return StatusCode::NOT_FOUND.into_response(),
-    };
-
-    let bytes = if item.file_path.exists() {
-        tokio::fs::read(&item.file_path).await.unwrap_or_else(|_| item.audio_buffer.to_wav_bytes())
-    } else {
-        item.audio_buffer.to_wav_bytes()
-    };
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "audio/wav")
-        .header(header::CONTENT_LENGTH, bytes.len().to_string())
-        .body(Body::from(bytes))
-        .unwrap()
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct GenerateRlRequest {
-    #[serde(default)]
-    pub song_id: Option<String>,
-    #[serde(default)]
-    pub prompt: Option<String>,
-    #[serde(default)]
-    pub genre: Option<String>,
-    #[serde(default)]
-    pub lyrics: Option<String>,
-    #[serde(default)]
-    pub image_base64: Option<String>,
-    #[serde(default)]
-    pub image_mime_type: Option<String>,
-}
-
-/// POST /api/reference-wavs/generate-rl — Synthesizes song using anti-monopoly blended style, audits originality, and applies RL policy.
-pub async fn handle_generate_rl(
-    State(state): State<AppState>,
-    Json(req): Json<GenerateRlRequest>,
-) -> Response {
-    let store = state.reference_wavs.read().await;
-    if store.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "No reference WAVs uploaded. Please import 1 to 20 reference WAVs before generating."
-            })),
-        ).into_response();
-    }
-
-    let features: Vec<AcousticFeatureVector> = store.values().map(|it| it.features.clone()).collect();
-    let blended = match AcousticAnalyzer::blend_ensemble(&features, None) {
-        Ok(b) => b,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": format!("Ensemble blending failed: {}", e) })),
-            ).into_response();
-        }
-    };
-
-    let song_id = req
-        .song_id
-        .as_deref()
-        .and_then(|s| CheckpointManager::sanitize_path_component(s).ok())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "rl_ensemble_showcase".to_string());
-
-    let prompt_str = req
-        .prompt
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("Warm acoustic & roots groove with clear upfront lead vocals and soaring Dire Straits-style guitar solo")
-        .to_string();
-
-    let bpm = blended.blended_bpm.round().clamp(68.0, 165.0) as u32;
-    let key = if blended.consensus_key.is_empty() {
-        "A Minor".to_string()
-    } else {
-        blended.consensus_key.clone()
-    };
-
-    // 1. Sample RL policy action conditioned on the reference ensemble's 64-D style embedding
-    let seed = chrono::Utc::now().timestamp_millis() as u64;
-    let action = state
-        .rl_policy
-        .read()
-        .await
-        .select_action(&blended.blended_style_embedding, seed);
-
-    // 2. Synthesize 100% brand-new multi-stem song conditioned on prompt + reference ensemble + RL action (via Lyria 3.5 when configured)
-    let prompt_for_synth = prompt_str.clone();
-    let lyrics_for_synth = req.lyrics.clone();
-    let img_b64_for_synth = req.image_base64.clone();
-    let img_mime_for_synth = req.image_mime_type.clone();
-    let blended_for_synth = blended.clone();
-    let action_for_synth = action.clone();
-    let synth_out = match tokio::task::spawn_blocking(move || {
-        music_dsp::ReferenceRlSynthesizer::synthesize_full_reference_rl_song_with_image(
-            &prompt_for_synth,
-            lyrics_for_synth.as_deref(),
-            &blended_for_synth,
-            action_for_synth.treble_presence_db,
-            -2.8 - action_for_synth.dynamic_compression,
-            0.5 + action_for_synth.vocal_rasp_delta,
-            action_for_synth.sub_bass_boost_db,
-            0.85 + action_for_synth.vocal_wet_ratio,
-            seed,
-            img_b64_for_synth.as_deref(),
-            img_mime_for_synth.as_deref(),
-        )
-    })
-    .await
-    {
-        Ok(out) => out,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Synthesis task panicked: {}", e) })),
-            )
-                .into_response();
-        }
-    };
-
-    // 3. Remove any stale old rl_song_* directories so only the active song remains clean
-    let songs_root = state.storage_dir.join("songs");
-    if let Ok(entries) = std::fs::read_dir(&songs_root) {
-        for entry in entries.flatten() {
-            if let Some(dir_name) = entry.file_name().to_str() {
-                if dir_name != song_id && dir_name.starts_with("rl_song_") {
-                    let _ = std::fs::remove_dir_all(entry.path());
-                }
-            }
-        }
-    }
-
-    // 4. Write all 8 isolated studio stems + final_master.wav + lyrics.txt + checkpoint manifest
-    let version = 1u32;
-    let v_dir = songs_root.join(&song_id).join("v1");
-    let stems_dir = v_dir.join("stems");
-    let _ = std::fs::create_dir_all(&stems_dir);
-
-    let master_path = v_dir.join("final_master.wav");
-    let master_stems_path = stems_dir.join("final_master.wav");
-    let raspy_vocals_path = stems_dir.join("raspy_tenor_vocals.wav");
-    let yue_vocals_path = stems_dir.join("yue_vocals.wav");
-    let drums_path = stems_dir.join("drums.wav");
-    let bass_path = stems_dir.join("bass.wav");
-    let guitar_path = stems_dir.join("guitar.wav");
-    let other_path = stems_dir.join("other.wav");
-    let inpainted_guitar_path = stems_dir.join("inpainted_guitar.wav");
-    let inpainted_drums_path = stems_dir.join("inpainted_drums.wav");
-    let draft_groove_path = stems_dir.join("draft_groove.wav");
-
-    let pcm16 = music_dsp::WavBitDepth::Pcm16;
-    let _ = synth_out.final_master.to_wav_file_with_format(&master_path, pcm16);
-    let _ = synth_out.final_master.to_wav_file_with_format(&master_stems_path, pcm16);
-    let _ = synth_out.vocals.to_wav_file_with_format(&raspy_vocals_path, pcm16);
-    let _ = synth_out.vocals.to_wav_file_with_format(&yue_vocals_path, pcm16);
-    let _ = synth_out.drums.to_wav_file_with_format(&drums_path, pcm16);
-    let _ = synth_out.bass.to_wav_file_with_format(&bass_path, pcm16);
-    let _ = synth_out.acoustic_guitar.to_wav_file_with_format(&guitar_path, pcm16);
-    let _ = synth_out.keys_organ.to_wav_file_with_format(&other_path, pcm16);
-    let _ = synth_out.lead_guitar_solo.to_wav_file_with_format(&inpainted_guitar_path, pcm16);
-    let _ = synth_out.percussion_fills.to_wav_file_with_format(&inpainted_drums_path, pcm16);
-    let _ = synth_out.draft_groove.to_wav_file_with_format(&draft_groove_path, pcm16);
-
-    let _ = std::fs::write(v_dir.join("lyrics.txt"), &synth_out.lyrics);
-    let _ = std::fs::write(v_dir.join("genre.txt"), &synth_out.genre_label);
-
-    // Also export directly to D:\music\GENERATED_RL_SAMPLE_SONG.wav and Watering_Kingdoms_of_the_Grasslands_Poem.wav if D:\music exists
-    let d_music_dir = Path::new(r"D:\music");
-    if d_music_dir.exists() && d_music_dir.is_dir() {
-        let _ = synth_out
-            .final_master
-            .to_wav_file_with_format(&d_music_dir.join("GENERATED_RL_SAMPLE_SONG.wav"), pcm16);
-        let _ = synth_out
-            .final_master
-            .to_wav_file_with_format(&d_music_dir.join("Watering_Kingdoms_of_the_Grasslands_Poem.wav"), pcm16);
-    }
-
-    // Save checkpoint state so /api/songs and stem streaming serve the new song metadata & lyrics
-    let mut prod_state = MusicProductionState::new(&song_id, &synth_out.genre_label, synth_out.bpm, &synth_out.key_signature);
-    prod_state.version = version;
-    prod_state.style_prompt = synth_out.prompt_used.clone();
-    prod_state.lyrics = synth_out.lyrics.clone();
-    prod_state.reference_wavs = store.values().map(|it| it.meta.clone()).collect();
-    prod_state.judge_score = 9.8;
-    prod_state.quality_passed = true;
-    prod_state.blueprint = Some(music_core::schema::SongBlueprint {
-        title: synth_out.title.clone(),
-        subtitle: synth_out.genre_label.clone(),
-        style_of_music: synth_out.genre_label.clone(),
-        bpm: synth_out.bpm as f64,
-        key_signature: synth_out.key_signature.clone(),
-        ..music_core::schema::SongBlueprint::default_one_love_shining_anthem()
-    });
-    prod_state.set_stem(STEM_FINAL_MASTER, master_path.clone());
-    prod_state.set_stem(STEM_RASPY_TENOR_VOCALS, raspy_vocals_path);
-    prod_state.set_stem(STEM_YUE_VOCALS, yue_vocals_path);
-    prod_state.set_stem(STEM_DRUMS, drums_path);
-    prod_state.set_stem(STEM_BASS, bass_path);
-    prod_state.set_stem(STEM_GUITAR, guitar_path);
-    prod_state.set_stem(STEM_OTHER, other_path);
-    prod_state.set_stem(STEM_INPAINTED_GUITAR, inpainted_guitar_path);
-    prod_state.set_stem(STEM_INPAINTED_DRUMS, inpainted_drums_path);
-    prod_state.set_stem(STEM_DRAFT_GROOVE, draft_groove_path);
-    prod_state.history.push(format!(
-        "Synthesized brand-new RL + Reference Ensemble song '{}' ({} BPM, {})",
-        synth_out.title, synth_out.bpm, synth_out.key_signature
-    ));
-    let _ = state
-        .runner
-        .checkpointer()
-        .save_checkpoint(&prod_state, "rl_reference_ensemble_synthesis")
-        .await;
-
-    let master_buffer = synth_out.final_master;
-
-    let candidate_features = AcousticAnalyzer::analyze_buffer("final_master.wav", &master_buffer)
-        .unwrap_or_else(|_| AcousticFeatureVector {
-            file_name: "final_master.wav".to_string(),
-            duration_secs: master_buffer.duration_secs(),
-            sample_rate: master_buffer.sample_rate,
-            channels: master_buffer.channels,
-            bpm: bpm as f32,
-            chroma_12bin: [0.0; 12],
-            key_signature: key.clone(),
-            key_confidence: 0.9,
-            spectral_centroid_hz: 2000.0,
-            crest_factor_db: 12.0,
-            dynamic_range_db: 14.0,
-            vocal_presence_ratio: 0.35,
-            vocal_activity_ratio: 0.40,
-            timbre_subbands: [0.5; 8],
-            style_embedding: vec![0.0; 64],
-            pitch_token_sequence: Vec::new(),
-        });
-
-    // Prepare references for LegalOriginalityGuard audit
-    let ref_tuples: Vec<(&str, &AudioBuffer, &[[f32; 12]], &[u8])> = store.values()
-        .map(|it| (
-            it.meta.file_name.as_str(),
-            &it.audio_buffer,
-            std::slice::from_ref(&it.features.chroma_12bin),
-            it.features.pitch_token_sequence.as_slice(),
-        ))
-        .collect();
-
-    let candidate_chroma = std::slice::from_ref(&candidate_features.chroma_12bin);
-    let originality_report = LegalOriginalityGuard::audit_candidate(
-        "candidate_master",
-        &master_buffer,
-        candidate_chroma,
-        &candidate_features.pitch_token_sequence,
-        &ref_tuples,
-    );
-    let legal_compliance = originality_report.legal_compliance.clone();
-
-    let reward_breakdown = RlPolicy::evaluate_composite_reward(
-        &candidate_features.style_embedding,
-        &candidate_features.chroma_12bin,
-        candidate_features.bpm,
-        0.98,
-        false,
-        candidate_features.vocal_presence_ratio,
-        24.0,
-        candidate_features.dynamic_range_db,
-        &blended,
-        &originality_report,
-        Some(1.0),
-    );
-
-    *state.last_synthesis_action.write().await = Some(action.clone());
-
-    let audio_urls = build_audio_urls(&song_id, version);
-
-    Json(serde_json::json!({
-        "status": "ok",
-        "song_id": song_id,
-        "version": version,
-        "title": synth_out.title,
-        "genre": synth_out.genre_label,
-        "prompt": synth_out.prompt_used,
-        "lyrics": synth_out.lyrics,
-        "bpm": synth_out.bpm,
-        "key_signature": synth_out.key_signature,
-        "audio_urls": audio_urls,
-        "blended_style": blended,
-        "originality_report": originality_report,
-        "legal_compliance": legal_compliance,
-        "composite_reward": reward_breakdown,
-    })).into_response()
-}
-
 #[derive(Debug, Deserialize)]
 pub struct DpoPreferenceRequest {
     pub preference: String, // "keep" or "revert"
@@ -2929,6 +1966,515 @@ pub async fn handle_dpo_preference(
         "preference": req.preference,
         "dpo_update_count": 1,
     })).into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct GenerateLyricsRequest {
+    #[serde(alias = "lyrics_mode", default)]
+    pub mode: Option<String>,
+    #[serde(alias = "user_lyrics", default)]
+    pub lyrics: Option<String>,
+    #[serde(alias = "lyrics_topic", default)]
+    pub topic: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub style_prompt: Option<String>,
+    #[serde(default)]
+    pub preferred_model: Option<String>,
+    #[serde(default)]
+    pub use_llm: Option<bool>,
+}
+
+/// POST /api/lyrics/generate — Dual-mode Lyrics Studio: preserves user lyrics verbatim or writes structured AI lyrics locally.
+pub async fn handle_generate_lyrics(
+    State(state): State<AppState>,
+    Json(req): Json<GenerateLyricsRequest>,
+) -> Response {
+    let parsed_mode = parse_lyrics_mode(req.mode.as_deref());
+    let raw_lyrics = req.lyrics.clone().unwrap_or_default();
+    let style_parts: Vec<&str> = [req.genre.as_deref(), req.style_prompt.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let style_str = style_parts.join(", ");
+    let topic = req
+        .topic
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| style_str.clone());
+
+    let use_verbatim = parsed_mode == LyricsMode::UserProvided
+        || (parsed_mode == LyricsMode::Auto && !raw_lyrics.trim().is_empty());
+
+    let result = if use_verbatim {
+        if raw_lyrics.trim().is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "status": "bad_request",
+                    "error": "Lyrics cannot be empty when lyrics mode is set to 'user_provided'."
+                })),
+            )
+                .into_response();
+        }
+        structure_user_lyrics_verbatim(&raw_lyrics)
+    } else if req.use_llm == Some(false) {
+        compose_offline_structured_lyrics(&topic, &style_str)
+    } else {
+        let client = OllamaClient::new(&state.ollama_host);
+        let mem = SystemMemory::detect_live();
+        write_lyrics_from_prompt(
+            &client,
+            &mem,
+            &topic,
+            &style_str,
+            req.preferred_model.as_deref(),
+        )
+        .await
+    };
+
+    let line_count = result
+        .formatted_lyrics
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim().starts_with('['))
+        .count();
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "mode": result.mode_used,
+        "model_used": result.model_used,
+        "title": result.title,
+        "full_lyrics": result.formatted_lyrics,
+        "sections": result.sections,
+        "line_count": line_count,
+        "preserved_verbatim": result.preserved_verbatim,
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct MixSongRequest {
+    pub song_id: String,
+    #[serde(alias = "version", alias = "base_version", default = "default_version_one")]
+    pub from_version: u32,
+    #[serde(default)]
+    pub stem_mix: Option<StemMixConfig>,
+    #[serde(default)]
+    pub channels: Option<HashMap<String, StemChannelStrip>>,
+    #[serde(default)]
+    pub master_gain_db: Option<f32>,
+    #[serde(default)]
+    pub analog_tape_warmth: Option<f32>,
+    #[serde(default)]
+    pub tape_echo_wet: Option<f32>,
+    #[serde(default)]
+    pub stereo_width: Option<f32>,
+    #[serde(default)]
+    pub target_lufs: Option<f32>,
+}
+
+/// POST /api/songs/mix — Non-destructive 8-channel DAW console bounce producing v(N+1) without re-synthesizing Stage 2.
+pub async fn handle_mix_song(
+    State(state): State<AppState>,
+    Json(req): Json<MixSongRequest>,
+) -> Response {
+    let raw_clean_id = match CheckpointManager::sanitize_path_component(&req.song_id) {
+        Ok(id) => id,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"status": "bad_request", "error": e.to_string()})),
+            )
+                .into_response()
+        }
+    };
+    let clean_id = resolve_song_alias(&state.storage_dir, &raw_clean_id);
+    let from_v = req.from_version.max(1);
+
+    let prev = match state.runner.checkpointer().load_checkpoint(&clean_id, from_v).await {
+        Ok(st) => st,
+        Err(e) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "status": "not_found",
+                    "error": format!("Song '{}' v{} not found: {}", clean_id, from_v, e)
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    let mut mix = req.stem_mix.unwrap_or_else(|| {
+        prev.blueprint
+            .as_ref()
+            .map(|b| b.stem_mix.clone())
+            .unwrap_or_default()
+    });
+    if let Some(channels) = req.channels {
+        for (stem_id, strip) in channels {
+            mix.set_channel(&stem_id, strip);
+        }
+    }
+    if let Some(gain_shift) = req.master_gain_db {
+        if gain_shift.is_finite() && gain_shift.abs() > 1e-4 {
+            for stem in CANONICAL_MIXER_STEMS {
+                let mut strip = mix.resolve_channel(stem);
+                strip.gain_db = (strip.gain_db + gain_shift).clamp(-24.0, 12.0);
+                mix.set_channel(stem, strip);
+            }
+        }
+    }
+    if let Some(w) = req.analog_tape_warmth {
+        mix.analog_tape_warmth = w.clamp(0.0, 1.0);
+    }
+    if let Some(echo) = req.tape_echo_wet {
+        mix.tape_echo_wet = echo.clamp(0.0, 1.0);
+    }
+    if let Some(width) = req.stereo_width {
+        mix.stereo_width = width.clamp(0.5, 2.0);
+    }
+    if let Some(lufs) = req.target_lufs {
+        mix.target_lufs = lufs.clamp(-24.0, -6.0);
+    }
+    mix.sync_legacy_from_channels();
+
+    match state
+        .runner
+        .mix_and_master_song(&clean_id, from_v, mix)
+        .await
+    {
+        Ok(final_state) => {
+            let audio_urls = build_audio_urls(&final_state.song_id, final_state.version);
+            let stem_mix = final_state
+                .blueprint
+                .as_ref()
+                .map(|b| b.stem_mix.clone())
+                .unwrap_or_default();
+            Json(serde_json::json!({
+                "status": "success",
+                "song_id": final_state.song_id,
+                "from_version": from_v,
+                "to_version": final_state.version,
+                "version": final_state.version,
+                "stem_mix": stem_mix,
+                "audio_urls": audio_urls,
+                "state": final_state,
+            }))
+            .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "error",
+                "error": format!("Mix bounce failed: {}", e)
+            })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct RecommendMixRequest {
+    #[serde(default)]
+    pub song_id: Option<String>,
+    #[serde(default)]
+    pub version: Option<u32>,
+    #[serde(default)]
+    pub style_prompt: Option<String>,
+    #[serde(alias = "goal", alias = "critique", default)]
+    pub focus_request: String,
+    #[serde(default)]
+    pub current_mix: Option<StemMixConfig>,
+    #[serde(default)]
+    pub commercial_only: bool,
+    #[serde(default)]
+    pub decision_mode: Option<String>,
+    #[serde(default)]
+    pub decision_model: Option<String>,
+}
+
+fn build_nimble_engine(state: &AppState) -> NimbleDecisionEngine {
+    let worker_script = [
+        PathBuf::from("workers/nimble_decide.py"),
+        PathBuf::from("music/workers/nimble_decide.py"),
+    ]
+    .into_iter()
+    .find(|p| p.is_file())
+    .unwrap_or_else(|| PathBuf::from("workers/nimble_decide.py"));
+    NimbleDecisionEngine::new(
+        OllamaClient::new(&state.ollama_host),
+        default_models_cache_dir(),
+        worker_script,
+        SystemMemory::detect_live(),
+    )
+}
+
+/// POST /api/mix/recommend — Nimble Gate 4 AI Mix Copilot recommending non-destructive DAW fader/EQ/pan deltas.
+pub async fn handle_recommend_mix(
+    State(state): State<AppState>,
+    Json(req): Json<RecommendMixRequest>,
+) -> Response {
+    let mut style_prompt = req.style_prompt.clone().unwrap_or_default();
+    let mut current_mix = req.current_mix.clone().unwrap_or_default();
+
+    if let Some(raw_id) = req.song_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Ok(sanitized) = CheckpointManager::sanitize_path_component(raw_id) {
+            let clean_id = resolve_song_alias(&state.storage_dir, &sanitized);
+            let target_v = req.version.unwrap_or_else(|| {
+                state
+                    .runner
+                    .checkpointer()
+                    .list_versions(&clean_id)
+                    .ok()
+                    .and_then(|vs| vs.into_iter().max())
+                    .unwrap_or(1)
+            });
+            if let Ok(st) = state.runner.checkpointer().load_checkpoint(&clean_id, target_v).await {
+                if style_prompt.is_empty() {
+                    style_prompt = st.style_prompt.clone();
+                }
+                if req.current_mix.is_none() {
+                    if let Some(bp) = st.blueprint {
+                        current_mix = bp.stem_mix;
+                    }
+                }
+            }
+        }
+    }
+
+    let mode = parse_decision_mode(req.decision_mode.as_deref());
+    let engine = build_nimble_engine(&state);
+    let res = engine
+        .gate4_recommend_mix_adjustments(
+            &style_prompt,
+            &current_mix,
+            &req.focus_request,
+            req.commercial_only,
+            mode,
+            req.decision_model.as_deref(),
+        )
+        .await;
+    let rec_mix = res.recommended_action.get("recommended_mix").cloned();
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "selected_choice": res.selected_choice,
+        "confidence": res.confidence,
+        "hitl_gate_triggered": res.hitl_gate_triggered,
+        "hitl_reason": res.hitl_reason,
+        "rationale": res.rationale,
+        "recommended_stem_mix": rec_mix,
+        "trace": res.trace,
+        "decision": res,
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct NimbleDecisionHttpRequest {
+    #[serde(default)]
+    pub gate_name: Option<String>,
+    #[serde(default)]
+    pub schema: Option<serde_json::Value>,
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub bands: Vec<String>,
+    #[serde(default)]
+    pub question: String,
+    #[serde(default)]
+    pub context: serde_json::Value,
+    #[serde(default)]
+    pub commercial_only: bool,
+    #[serde(default)]
+    pub preferred_model: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub feature_logits: Option<Vec<f64>>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+}
+
+fn resolve_decision_schema(req: &NimbleDecisionHttpRequest) -> DecisionSchema {
+    if !req.options.is_empty() {
+        return DecisionSchema::Categorical {
+            options: req.options.clone(),
+        };
+    }
+    if !req.bands.is_empty() {
+        return DecisionSchema::NumericBand {
+            bands: req.bands.clone(),
+        };
+    }
+    match &req.schema {
+        Some(serde_json::Value::String(s)) => match s.trim().to_ascii_lowercase().as_str() {
+            "likert5" => DecisionSchema::Likert5,
+            "numeric_band" | "numericband" => DecisionSchema::NumericBand { bands: Vec::new() },
+            _ => DecisionSchema::Binary,
+        },
+        Some(val) => serde_json::from_value::<DecisionSchema>(val.clone()).unwrap_or(DecisionSchema::Binary),
+        None => DecisionSchema::Binary,
+    }
+}
+
+/// POST /api/decision — Executes a local Nimble typed decision pass returning calibrated distribution, Shannon entropy & HITL gate.
+pub async fn handle_nimble_decision(
+    State(state): State<AppState>,
+    Json(req): Json<NimbleDecisionHttpRequest>,
+) -> Response {
+    let schema = resolve_decision_schema(&req);
+    let mut dec_req = DecisionRequest::new(
+        req.gate_name
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "custom_decision".to_string()),
+        schema,
+        if req.question.trim().is_empty() {
+            "Select optimal production action".to_string()
+        } else {
+            req.question.clone()
+        },
+    );
+    dec_req.context = req.context;
+    dec_req.commercial_only = req.commercial_only;
+    dec_req.preferred_model = req.preferred_model;
+    dec_req.mode = parse_decision_mode(req.mode.as_deref());
+    dec_req.feature_logits = req.feature_logits;
+    if let Some(t) = req.temperature {
+        if t.is_finite() && t > 0.05 {
+            dec_req.temperature = t;
+        }
+    }
+
+    let engine = build_nimble_engine(&state);
+    let res = engine.decide(&dec_req).await;
+    Json(res).into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct DecisionStatusQuery {
+    #[serde(default)]
+    pub commercial_only: Option<bool>,
+    #[serde(default)]
+    pub preferred_model: Option<String>,
+}
+
+/// GET /api/decision/status — Reports active local Nimble decision model tier, HF cache status, and Ollama readiness.
+pub async fn handle_decision_status(
+    State(state): State<AppState>,
+    Query(q): Query<DecisionStatusQuery>,
+) -> Response {
+    let engine = build_nimble_engine(&state);
+    let snap = engine
+        .status(
+            q.preferred_model.as_deref(),
+            q.commercial_only.unwrap_or(false),
+        )
+        .await;
+    Json(snap).into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenWeightCatalogQuery {
+    #[serde(default)]
+    pub commercial_only: Option<bool>,
+}
+
+/// GET /api/models/open-weight — Returns the 100% open-weight synthesis + Nimble decision catalog with hardware/cache flags.
+pub async fn handle_open_weight_catalog(Query(q): Query<OpenWeightCatalogQuery>) -> Response {
+    let commercial_only = q.commercial_only.unwrap_or(false);
+    let mem = SystemMemory::detect_live();
+    let models_dir = default_models_cache_dir();
+    let models = HfModelDiscoveryEngine::list_open_weight_catalog(&mem, commercial_only, &models_dir);
+    Json(serde_json::json!({
+        "status": "ok",
+        "commercial_only": commercial_only,
+        "models_dir": models_dir,
+        "hardware": {
+            "total_ram_gb": mem.total_ram_gb,
+            "free_ram_gb": mem.free_ram_gb,
+            "gpu_name": mem.gpu_name,
+            "gpu_vram_total_gb": mem.gpu_vram_total_gb,
+            "gpu_vram_free_gb": mem.gpu_vram_free_gb,
+        },
+        "models": models,
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct PullOpenWeightModelRequest {
+    #[serde(alias = "hf_model", alias = "repo_id")]
+    pub model: String,
+    #[serde(default)]
+    pub commercial_only: bool,
+}
+
+/// POST /api/models/pull — Pulls an open-weight Hugging Face snapshot into local `HF_HOME` (`D:\music\models`).
+pub async fn handle_pull_open_weight_model(
+    Json(req): Json<PullOpenWeightModelRequest>,
+) -> Response {
+    let query = req.model.trim();
+    if query.is_empty() || query.contains("..") || query.to_ascii_lowercase().contains("lyria") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "status": "bad_request",
+                "error": format!("Invalid or unsupported model identifier '{}'", req.model)
+            })),
+        )
+            .into_response();
+    }
+
+    let resolved_id = if let Some(entry) = HfModelDiscoveryEngine::resolve_model_entry(query) {
+        if req.commercial_only && !entry.commercial_allowed {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "status": "blocked_license_conflict",
+                    "error": format!(
+                        "Model '{}' carries non-commercial license '{:?}' and is blocked when commercial_only=true.",
+                        entry.id, entry.license_tier
+                    ),
+                    "safe_alternative": "ACE-Step/acestep-v15-turbo"
+                })),
+            )
+                .into_response();
+        }
+        entry.id
+    } else {
+        query.to_string()
+    };
+
+    let bridge = UvBridge::new();
+    match bridge
+        .pull_hf_checkpoint(&PathBuf::from(".venv"), &resolved_id, 1800)
+        .await
+    {
+        Ok(path) => Json(serde_json::json!({
+            "status": "ok",
+            "model": resolved_id,
+            "downloaded_path": path,
+            "cached_on_disk": true,
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "status": "pull_error",
+                "model": resolved_id,
+                "error": e.to_string(),
+            })),
+        )
+            .into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2991,58 +2537,6 @@ pub async fn handle_app_js() -> Response {
         .unwrap()
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UpdateGeminiEnvRequest {
-    pub api_key: String,
-}
-
-/// GET /api/gemini-env — Returns the current .env `GEMINI_API_KEY` status (masked, never exposing raw secrets).
-pub async fn handle_get_gemini_env() -> Json<serde_json::Value> {
-    let real_key = music_dsp::melodic_singing::MelodicSingingSynthesizer::resolve_dotenv_gemini_api_key();
-    let configured = real_key.is_some();
-    let masked = match &real_key {
-        Some(k) if k.len() >= 10 => format!("{}...{}", &k[..6], &k[k.len() - 4..]),
-        Some(_) => "AIzaSy...(configured)".to_string(),
-        None => "Placeholder (AIzaSyUnit...Test) — paste your real AIzaSy... key in d:\\harfile\\music\\.env".to_string(),
-    };
-    Json(serde_json::json!({
-        "status": "ok",
-        "gemini_api_key_valid": configured,
-        "masked_key": masked,
-        "env_file": r"d:\harfile\music\.env",
-        "active_model": "models/lyria-3.5"
-    }))
-}
-
-/// POST /api/gemini-env — Updates `GEMINI_API_KEY` in `d:\harfile\music\.env` and process-scoped memory.
-pub async fn handle_set_gemini_env(
-    Json(req): Json<UpdateGeminiEnvRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let clean = req.api_key.trim().trim_matches('"').trim_matches('\'').to_string();
-    let valid_prefix = clean.starts_with("AIzaSy") || clean.starts_with("AQ.");
-    if !valid_prefix || clean.len() < 25 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "status": "error",
-                "message": "Invalid Gemini API key format. Expected a key starting with 'AIzaSy' or 'AQ.' (at least 25 characters)."
-            })),
-        ));
-    }
-    // Process-scoped env update + workspace .env file persistence (strictly complying with environment_safety.md)
-    std::env::set_var("GEMINI_API_KEY", &clean);
-    let env_content = format!("GEMINI_API_KEY={}\n", clean);
-    let _ = std::fs::write(".env", &env_content);
-    let _ = std::fs::write(r"d:\harfile\music\.env", &env_content);
-
-    Ok(Json(serde_json::json!({
-        "status": "ok",
-        "gemini_api_key_valid": true,
-        "masked_key": format!("{}...{}", &clean[..6], &clean[clean.len() - 4..]),
-        "env_file": r"d:\harfile\music\.env",
-        "active_model": "models/lyria-3.5"
-    })))
-}
 
 // ---------------------------------------------------------------------------
 // Unique Album Studio & Liked Song Persistence + Disk Export + ZIP Archive
@@ -4003,14 +3497,20 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         // API Routes
         .route("/api/health", get(handle_health))
-        .route("/api/gemini-env", get(handle_get_gemini_env).post(handle_set_gemini_env))
         .route("/api/hardware", get(handle_hardware_status))
         .route("/api/audio-devices", get(handle_audio_devices))
         .route("/api/models/registry", get(handle_models_registry))
         .route("/api/models/discover-upgrade", post(handle_models_discover_upgrade))
+        .route("/api/models/open-weight", get(handle_open_weight_catalog))
+        .route("/api/models/pull", post(handle_pull_open_weight_model))
         .route("/api/ollama/bootstrap", post(handle_ollama_bootstrap))
+        .route("/api/lyrics/generate", post(handle_generate_lyrics))
+        .route("/api/decision", post(handle_nimble_decision))
+        .route("/api/decision/status", get(handle_decision_status))
+        .route("/api/mix/recommend", post(handle_recommend_mix))
         .route("/api/songs", get(handle_list_songs))
         .route("/api/songs/create", post(handle_create_song))
+        .route("/api/songs/mix", post(handle_mix_song))
         .route("/api/songs/iterate", post(handle_iterate_song))
         .route("/api/songs/regenerate-stem", post(handle_regenerate_stem))
         .route("/api/songs/master", post(handle_master_song))
@@ -4031,13 +3531,6 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/songs/:id/download", get(handle_download_latest))
         .route("/api/songs/assist-iteration", post(handle_assist_iteration))
         .route("/api/songs/:id/assist", get(handle_assist_iteration_get).post(handle_assist_iteration))
-        // Milestone 8: Reference WAV Importer, URL Conversion, RL Generation & DPO Preference
-        .route("/api/reference-wavs/upload", post(handle_upload_reference_wavs))
-        .route("/api/reference-wavs/from-url", post(handle_reference_wav_from_url))
-        .route("/api/reference-wavs", get(handle_list_reference_wavs).delete(handle_clear_reference_wavs))
-        .route("/api/reference-wavs/:id", delete(handle_delete_reference_wav))
-        .route("/api/reference-wavs/:id/audio", get(handle_stream_reference_wav))
-        .route("/api/reference-wavs/generate-rl", post(handle_generate_rl))
         .route("/api/feedback/preference", post(handle_dpo_preference))
         // Web Studio UI Static Assets
         .route("/", get(handle_index))
@@ -4195,12 +3688,20 @@ pub async fn run_server_foreground(
 fn build_audio_urls(song_id: &str, version: u32) -> HashMap<String, String> {
     let stems = &[
         STEM_FINAL_MASTER,
+        "vocals",
+        STEM_BACKING_HARMONIES,
         STEM_DRUMS,
         STEM_BASS,
         STEM_GUITAR,
+        STEM_KEYS_SYNTHS,
+        STEM_PERCUSSION_FILLS,
+        STEM_AMBIENCE_FX,
+        STEM_OTHER,
+        STEM_INPAINTED_GUITAR,
+        STEM_INPAINTED_DRUMS,
         STEM_RASPY_TENOR_VOCALS,
     ];
-    let mut map = HashMap::new();
+    let mut map = HashMap::with_capacity(stems.len());
     for stem in stems {
         map.insert(
             stem.to_string(),
