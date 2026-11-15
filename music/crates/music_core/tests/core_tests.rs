@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use music_core::{
-    EngineMode, GenreCategory, GenreTaxonomy, ModalScale, MusicProductionState, RhythmGroove,
-    SongBlueprint, StemTelemetry, STEM_DRUMS, STEM_FINAL_MASTER,
+    DecisionMode, EngineMode, GenreCategory, GenreTaxonomy, LyricsMode, ModalScale,
+    MusicProductionState, RhythmGroove, SongBlueprint, StemChannelStrip, StemMixConfig,
+    StemTelemetry, TypedDecisionTrace, STEM_DRUMS, STEM_FINAL_MASTER,
 };
 
 #[test]
@@ -145,4 +146,57 @@ fn test_blueprint_schema_calculations() {
     assert!(lyrics_txt.contains("[verse]"));
     assert!(lyrics_txt.contains("[chorus]"));
     assert!(lyrics_txt.contains("[guitar solo]"));
+}
+
+#[test]
+fn test_stem_channel_strip_and_decision_trace_roundtrip() {
+    let mut state = MusicProductionState::new("nimble-mixer-01", "Jazz Fusion", 124, "Bb Major");
+    state.lyrics_mode = LyricsMode::AiGenerated;
+    state.lyrics_topic = "Rainy neon midnight train ride".to_string();
+    state.decision_mode = DecisionMode::FastDeterministic;
+    state.decision_model = Some("bespokelabs/Bespoke-Nimble-9B".to_string());
+    state.commercial_only = true;
+    state.record_decision_trace(TypedDecisionTrace {
+        gate_name: "gate1_preflight_router".to_string(),
+        schema_kind: "enum".to_string(),
+        backend_used: "fast_deterministic".to_string(),
+        selected_choice: "ACE-Step/acestep-v15-turbo".to_string(),
+        probabilities: vec![
+            ("ACE-Step/acestep-v15-turbo".to_string(), 0.84),
+            ("ASLP-lab/DiffRhythm2".to_string(), 0.16),
+        ],
+        confidence: 0.84,
+        entropy: 0.44,
+        hitl_gate_triggered: false,
+        latency_ms: 1,
+        license_tier: "MIT".to_string(),
+    });
+
+    let mut mix = StemMixConfig::default();
+    mix.set_channel(
+        "raspy_tenor_vocals",
+        StemChannelStrip {
+            gain_db: 3.5,
+            pan: -0.15,
+            mute: false,
+            solo: true,
+            eq_low_db: -2.0,
+            eq_mid_db: 3.0,
+            eq_high_db: 4.5,
+            reverb_send: 0.28,
+        },
+    );
+    let sanitized = mix.resolve_channel("vocals");
+    assert_eq!(sanitized.gain_db, 3.5);
+    assert_eq!(sanitized.pan, -0.15);
+    assert!(sanitized.solo);
+    assert!(mix.any_solo());
+    assert_eq!(mix.lead_vocal_db, 3.5);
+
+    let json = state.to_json().expect("serialize");
+    let restored = MusicProductionState::from_json(&json).expect("deserialize");
+    assert_eq!(restored.lyrics_mode, LyricsMode::AiGenerated);
+    assert_eq!(restored.decision_mode, DecisionMode::FastDeterministic);
+    assert_eq!(restored.decision_traces.len(), 1);
+    assert!(restored.commercial_only);
 }

@@ -1,48 +1,233 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
-/// The 6-stage sequential Hugging Face + Ollama ModelFusion stack for hit song production.
+/// Canonical 8 mixer channel IDs used by the interactive WebAudio & 48 kHz DSP console.
+pub const CANONICAL_MIXER_STEMS: [&str; 8] = [
+    "vocals",
+    "backing_harmonies",
+    "drums",
+    "bass",
+    "guitar",
+    "keys_synths",
+    "percussion_fills",
+    "ambience_fx",
+];
+
+/// Calibrated output record from a local Nimble typed decision gate (`sum(probabilities) == 1.0`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TypedDecisionTrace {
+    pub gate_name: String,
+    pub schema_kind: String,
+    pub backend_used: String,
+    pub selected_choice: String,
+    #[serde(default)]
+    pub probabilities: Vec<(String, f32)>,
+    pub confidence: f32,
+    pub entropy: f32,
+    pub hitl_gate_triggered: bool,
+    pub latency_ms: u64,
+    pub license_tier: String,
+}
+
+/// Full DAW channel strip configuration for a single audio stem.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StemChannelStrip {
+    /// Gain fader in dB (-24.0 to +6.0 dB, default 0.0)
+    #[serde(default)]
+    pub gain_db: f32,
+    /// Stereo pan position (-1.0 full Left to +1.0 full Right, default 0.0)
+    #[serde(default)]
+    pub pan: f32,
+    /// Channel mute state
+    #[serde(default)]
+    pub mute: bool,
+    /// Channel solo state (if any channel has solo=true, only soloed non-muted channels sum to master)
+    #[serde(default)]
+    pub solo: bool,
+    /// 100 Hz Low-Shelf EQ gain (-12.0 to +12.0 dB)
+    #[serde(default)]
+    pub eq_low_db: f32,
+    /// 1.0 kHz Peaking Mid EQ gain (-12.0 to +12.0 dB)
+    #[serde(default)]
+    pub eq_mid_db: f32,
+    /// 10.0 kHz High-Shelf EQ gain (-12.0 to +12.0 dB)
+    #[serde(default)]
+    pub eq_high_db: f32,
+    /// Wet plate/studio reverb send amount (0.0 to 1.0)
+    #[serde(default = "default_reverb_send")]
+    pub reverb_send: f32,
+}
+
+fn default_reverb_send() -> f32 {
+    0.12
+}
+
+impl Default for StemChannelStrip {
+    fn default() -> Self {
+        Self {
+            gain_db: 0.0,
+            pan: 0.0,
+            mute: false,
+            solo: false,
+            eq_low_db: 0.0,
+            eq_mid_db: 0.0,
+            eq_high_db: 0.0,
+            reverb_send: 0.12,
+        }
+    }
+}
+
+impl StemChannelStrip {
+    /// Returns a sanitized clone with finite clamped DSP bounds.
+    pub fn sanitized(&self) -> Self {
+        let clamp_finite = |v: f32, min: f32, max: f32, fallback: f32| -> f32 {
+            if v.is_finite() {
+                v.clamp(min, max)
+            } else {
+                fallback
+            }
+        };
+        Self {
+            gain_db: clamp_finite(self.gain_db, -24.0, 6.0, 0.0),
+            pan: clamp_finite(self.pan, -1.0, 1.0, 0.0),
+            mute: self.mute,
+            solo: self.solo,
+            eq_low_db: clamp_finite(self.eq_low_db, -12.0, 12.0, 0.0),
+            eq_mid_db: clamp_finite(self.eq_mid_db, -12.0, 12.0, 0.0),
+            eq_high_db: clamp_finite(self.eq_high_db, -12.0, 12.0, 0.0),
+            reverb_send: clamp_finite(self.reverb_send, 0.0, 1.0, 0.12),
+        }
+    }
+
+    /// Creates default studio mixer strips across all 8 canonical stems.
+    pub fn default_studio_channels() -> HashMap<String, StemChannelStrip> {
+        let mut map = HashMap::with_capacity(CANONICAL_MIXER_STEMS.len());
+        map.insert(
+            "vocals".to_string(),
+            StemChannelStrip {
+                gain_db: 1.5,
+                pan: 0.0,
+                reverb_send: 0.18,
+                ..Default::default()
+            },
+        );
+        map.insert(
+            "backing_harmonies".to_string(),
+            StemChannelStrip {
+                gain_db: -1.0,
+                pan: 0.0,
+                reverb_send: 0.25,
+                ..Default::default()
+            },
+        );
+        map.insert(
+            "drums".to_string(),
+            StemChannelStrip {
+                gain_db: 0.5,
+                pan: 0.0,
+                reverb_send: 0.10,
+                ..Default::default()
+            },
+        );
+        map.insert(
+            "bass".to_string(),
+            StemChannelStrip {
+                gain_db: 1.8,
+                pan: 0.0,
+                reverb_send: 0.02,
+                ..Default::default()
+            },
+        );
+        map.insert(
+            "guitar".to_string(),
+            StemChannelStrip {
+                gain_db: 1.2,
+                pan: -0.22,
+                reverb_send: 0.16,
+                ..Default::default()
+            },
+        );
+        map.insert(
+            "keys_synths".to_string(),
+            StemChannelStrip {
+                gain_db: -1.5,
+                pan: 0.24,
+                reverb_send: 0.20,
+                ..Default::default()
+            },
+        );
+        map.insert(
+            "percussion_fills".to_string(),
+            StemChannelStrip {
+                gain_db: 0.0,
+                pan: 0.30,
+                reverb_send: 0.14,
+                ..Default::default()
+            },
+        );
+        map.insert(
+            "ambience_fx".to_string(),
+            StemChannelStrip {
+                gain_db: -3.0,
+                pan: -0.25,
+                reverb_send: 0.30,
+                ..Default::default()
+            },
+        );
+        map
+    }
+}
+
+/// The 6-stage sequential Hugging Face + Ollama + Nimble open-weight stack for hit song production.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineModelStack {
     /// Stage 0: Multi-model Ollama songwriting, music theory, and arrangement panel
     pub stage0_ollama_panel: Vec<String>,
     pub stage0_judge_model: String,
     pub stage0_writer_model: String,
+    /// Stage 0b: Typed single-pass Nimble Decision Engine (100% local open-weight)
+    #[serde(default = "default_decision_engine")]
+    pub decision_engine: String,
     /// Stage 1: Rapid diffusion groove & song structure foundation
     pub stage1_groove_foundation: String,
-    /// Stage 2: Full-song dual-stem synthesis with 30s In-Context Learning (ICL)
+    /// Stage 2: Full-song dual-stem synthesis
     pub stage2_yue_semantic: String,
     pub stage2_yue_acoustic: String,
-    /// Stage 3: Zero-shot soulful raspy 1970s Jamaican tenor voice conversion
+    /// Stage 3: Zero-shot expressive open-weight vocal rendering
     pub stage3_voice_conversion: String,
-    /// Stage 4: 4-stem separation & virtuosic guitar solo / polyrhythmic drum regeneration
+    /// Stage 4: 4-stem separation & multi-stem isolation
     pub stage4_stem_separator: String,
     pub stage4_solo_regenerator: String,
     pub stage4_style_transfer: String,
-    /// Stage 5: 48 kHz super-resolution & 1977 analog tape reference mastering
+    /// Stage 5: 48 kHz studio summing & mastering
     pub stage5_super_resolution: String,
     pub stage5_reference_mastering: String,
+}
+
+fn default_decision_engine() -> String {
+    "bespokelabs/Bespoke-Nimble-9B".to_string()
 }
 
 impl Default for PipelineModelStack {
     fn default() -> Self {
         Self {
             stage0_ollama_panel: vec![
-                "flint:latest".to_string(),
-                "glm4:9b".to_string(),
-                "qwen2.5:7b".to_string(),
-                "mistral:latest".to_string(),
+                "qwen2.5:32b".to_string(),
+                "gemma4:31b".to_string(),
+                "deepseek-r1:32b".to_string(),
             ],
-            stage0_judge_model: "qwen2.5:7b".to_string(),
-            stage0_writer_model: "qwen2.5:7b".to_string(),
-            stage1_groove_foundation: "ACE-Step/ACE-Step-v1.5".to_string(),
-            stage2_yue_semantic: "m-a-p/YuE-s1-7B-anneal-en-icl".to_string(),
-            stage2_yue_acoustic: "m-a-p/YuE-s2-1B-general".to_string(),
-            stage3_voice_conversion: "Plachtaa/Seed-VC".to_string(),
-            stage4_stem_separator: "facebook/htdemucs_ft".to_string(),
-            stage4_solo_regenerator: "stabilityai/stable-audio-open-1.0".to_string(),
-            stage4_style_transfer: "facebook/musicgen-style".to_string(),
-            stage5_super_resolution: "haoheliu/versatile_audio_super_resolution".to_string(),
-            stage5_reference_mastering: "Matchering-2.0 (1977 Analog Tape Reference)".to_string(),
+            stage0_judge_model: "bespokelabs/Bespoke-Nimble-9B".to_string(),
+            stage0_writer_model: "qwen2.5:14b".to_string(),
+            decision_engine: default_decision_engine(),
+            stage1_groove_foundation: "ACE-Step/acestep-v15-turbo".to_string(),
+            stage2_yue_semantic: "ACE-Step/acestep-v15-turbo".to_string(),
+            stage2_yue_acoustic: "m-a-p/YuE2-3B".to_string(),
+            stage3_voice_conversion: "Kokoro-82M / F5-TTS".to_string(),
+            stage4_stem_separator: "htdemucs".to_string(),
+            stage4_solo_regenerator: "stabilityai/stable-audio-open-small".to_string(),
+            stage4_style_transfer: "google/magenta-realtime-2".to_string(),
+            stage5_super_resolution: "48kHz-Studer-Air-Shelf".to_string(),
+            stage5_reference_mastering: "Pure-Rust 48 kHz Analog Tape Master".to_string(),
         }
     }
 }
@@ -68,6 +253,9 @@ pub struct StemMixConfig {
     pub stereo_width: f32,
     /// Target integrated loudness in LUFS (e.g. -14.0)
     pub target_lufs: f32,
+    /// Full DAW channel strips keyed by canonical stem ID (vocals, backing_harmonies, drums, bass, guitar, keys_synths, percussion_fills, ambience_fx)
+    #[serde(default = "StemChannelStrip::default_studio_channels")]
+    pub channels: HashMap<String, StemChannelStrip>,
 }
 
 impl Default for StemMixConfig {
@@ -85,7 +273,76 @@ impl Default for StemMixConfig {
             vocal_rasp_intensity: 0.82,
             stereo_width: 1.22,
             target_lufs: -14.0,
+            channels: StemChannelStrip::default_studio_channels(),
         }
+    }
+}
+
+impl StemMixConfig {
+    /// Normalizes legacy or UI stem identifiers to canonical 8-channel mixer IDs.
+    pub fn canonical_channel_id(stem_id: &str) -> &'static str {
+        match stem_id.to_ascii_lowercase().trim() {
+            "vocals" | "vocal" | "lead_vocals" | "raspy_tenor_vocals" | "yue_vocals" => "vocals",
+            "backing_harmonies" | "backing_vocals" | "gospel_choir" | "choir" | "harmonies" => "backing_harmonies",
+            "drums" | "drum" | "one_drop_drums" => "drums",
+            "bass" | "sub_bass" | "dub_bass" => "bass",
+            "guitar" | "inpainted_guitar" | "guitar_solo" => "guitar",
+            "keys_synths" | "other" | "keys" | "organ" | "synth" | "piano" => "keys_synths",
+            "percussion_fills" | "inpainted_drums" | "percussion" | "fills" => "percussion_fills",
+            "ambience_fx" | "draft_groove" | "ambience" | "fx" | "strings" => "ambience_fx",
+            _ => "ambience_fx",
+        }
+    }
+
+    /// Returns true if any channel strip currently has Solo engaged.
+    pub fn any_solo(&self) -> bool {
+        self.channels.values().any(|ch| ch.solo)
+    }
+
+    /// Resolves a sanitized channel strip for any stem ID, bridging legacy dB fields if needed.
+    pub fn resolve_channel(&self, stem_id: &str) -> StemChannelStrip {
+        let canon = Self::canonical_channel_id(stem_id);
+        if let Some(strip) = self.channels.get(canon).or_else(|| self.channels.get(stem_id)) {
+            return strip.sanitized();
+        }
+        let default_map = StemChannelStrip::default_studio_channels();
+        let mut strip = default_map.get(canon).cloned().unwrap_or_default();
+        strip.gain_db = match canon {
+            "vocals" => self.lead_vocal_db,
+            "backing_harmonies" => self.gospel_choir_db,
+            "drums" => self.drums_db,
+            "bass" => self.dub_bass_db,
+            "guitar" => self.guitar_db,
+            "keys_synths" => self.organ_brass_db,
+            _ => strip.gain_db,
+        };
+        strip.sanitized()
+    }
+
+    /// Updates a channel strip and synchronizes legacy gain dB fields cleanly.
+    pub fn set_channel(&mut self, stem_id: &str, strip: StemChannelStrip) {
+        let canon = Self::canonical_channel_id(stem_id);
+        let clean = strip.sanitized();
+        match canon {
+            "vocals" => self.lead_vocal_db = clean.gain_db,
+            "backing_harmonies" => self.gospel_choir_db = clean.gain_db,
+            "drums" => self.drums_db = clean.gain_db,
+            "bass" => self.dub_bass_db = clean.gain_db,
+            "guitar" => self.guitar_db = clean.gain_db,
+            "keys_synths" => self.organ_brass_db = clean.gain_db,
+            _ => {}
+        }
+        self.channels.insert(canon.to_string(), clean);
+    }
+
+    /// Synchronizes all legacy scalar dB fields from `channels`.
+    pub fn sync_legacy_from_channels(&mut self) {
+        self.lead_vocal_db = self.resolve_channel("vocals").gain_db;
+        self.gospel_choir_db = self.resolve_channel("backing_harmonies").gain_db;
+        self.drums_db = self.resolve_channel("drums").gain_db;
+        self.dub_bass_db = self.resolve_channel("bass").gain_db;
+        self.guitar_db = self.resolve_channel("guitar").gain_db;
+        self.organ_brass_db = self.resolve_channel("keys_synths").gain_db;
     }
 }
 

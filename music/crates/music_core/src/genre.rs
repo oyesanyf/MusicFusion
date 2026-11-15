@@ -303,6 +303,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.20,
                 stereo_width: 1.15,
                 target_lufs: -12.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -348,6 +349,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.15,
                 stereo_width: 1.20,
                 target_lufs: -11.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -459,6 +461,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.50,
                 stereo_width: 1.30,
                 target_lufs: -14.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -504,6 +507,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.40,
                 stereo_width: 1.05,
                 target_lufs: -11.5,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -548,6 +552,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.10,
                 stereo_width: 1.25,
                 target_lufs: -9.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -626,6 +631,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.70,
                 stereo_width: 1.25,
                 target_lufs: -12.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -671,6 +677,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.85,
                 stereo_width: 1.30,
                 target_lufs: -10.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -716,6 +723,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.10,
                 stereo_width: 1.15,
                 target_lufs: -16.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -761,6 +769,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.10,
                 stereo_width: 1.40,
                 target_lufs: -15.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -805,6 +814,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.05,
                 stereo_width: 1.20,
                 target_lufs: -10.5,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -850,6 +860,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.10,
                 stereo_width: 1.25,
                 target_lufs: -9.5,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -927,6 +938,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.05,
                 stereo_width: 1.10,
                 target_lufs: -15.0,
+                ..StemMixConfig::default()
             },
         }
     }
@@ -1038,6 +1050,7 @@ impl GenreTaxonomy {
                 vocal_rasp_intensity: 0.0,
                 stereo_width: 1.45,
                 target_lufs: -18.0,
+                ..StemMixConfig::default()
             },
         }
     }

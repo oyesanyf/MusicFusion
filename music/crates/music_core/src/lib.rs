@@ -16,10 +16,14 @@ pub use rl_contracts::{
     CompositeRewardBreakdown, ConfidenceInterval95, DpoPreferencePair, LegalComplianceInfo,
     LegalOriginalityReport, ReferenceWavMeta, SingleFileOriginalityAudit,
 };
-pub use schema::{PipelineModelStack, SongBlueprint, SongSection, StemMixConfig};
+pub use schema::{
+    PipelineModelStack, SongBlueprint, SongSection, StemChannelStrip, StemMixConfig,
+    TypedDecisionTrace, CANONICAL_MIXER_STEMS,
+};
 pub use state::{
-    EngineMode, MusicProductionState, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_FINAL_MASTER,
-    STEM_GUITAR, STEM_INPAINTED_DRUMS, STEM_INPAINTED_GUITAR, STEM_OTHER, STEM_RASPY_TENOR_VOCALS,
-    STEM_YUE_INSTRUMENTALS, STEM_YUE_VOCALS,
+    DecisionMode, EngineMode, LyricsMode, MusicProductionState, STEM_AMBIENCE_FX,
+    STEM_BACKING_HARMONIES, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_FINAL_MASTER,
+    STEM_GUITAR, STEM_INPAINTED_DRUMS, STEM_INPAINTED_GUITAR, STEM_KEYS_SYNTHS, STEM_OTHER,
+    STEM_PERCUSSION_FILLS, STEM_RASPY_TENOR_VOCALS, STEM_YUE_INSTRUMENTALS, STEM_YUE_VOCALS,
 };
 pub use telemetry::StemTelemetry;

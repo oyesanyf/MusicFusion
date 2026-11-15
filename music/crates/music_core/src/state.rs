@@ -4,8 +4,67 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{MusicCoreError, Result};
 use crate::rl_contracts::{LegalOriginalityReport, ReferenceWavMeta};
-use crate::schema::SongBlueprint;
+use crate::schema::{SongBlueprint, TypedDecisionTrace};
 use crate::telemetry::StemTelemetry;
+
+/// Controls whether lyrics come verbatim from the user or are composed by the local AI Lyricist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LyricsMode {
+    #[default]
+    Auto,
+    UserProvided,
+    AiGenerated,
+}
+
+impl LyricsMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LyricsMode::Auto => "auto",
+            LyricsMode::UserProvided => "user",
+            LyricsMode::AiGenerated => "ai",
+        }
+    }
+
+    pub fn from_str_loose(s: &str) -> Self {
+        match s.to_ascii_lowercase().trim() {
+            "user" | "user_provided" | "user-provided" | "custom" | "verbatim" => LyricsMode::UserProvided,
+            "ai" | "ai_generated" | "ai-generated" | "generate" | "write" => LyricsMode::AiGenerated,
+            _ => LyricsMode::Auto,
+        }
+    }
+}
+
+/// Execution mode for the local Nimble Typed Decision Model Engine (100% offline, zero cloud APIs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionMode {
+    #[default]
+    Auto,
+    NimbleLocal,
+    OllamaSinglePass,
+    FastDeterministic,
+}
+
+impl DecisionMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DecisionMode::Auto => "auto",
+            DecisionMode::NimbleLocal => "nimble",
+            DecisionMode::OllamaSinglePass => "ollama_single_pass",
+            DecisionMode::FastDeterministic => "fast",
+        }
+    }
+
+    pub fn from_str_loose(s: &str) -> Self {
+        match s.to_ascii_lowercase().trim() {
+            "nimble" | "nimble_local" | "nimble-local" | "gguf" | "hf" => DecisionMode::NimbleLocal,
+            "ollama" | "ollama_single_pass" | "ollama-single-pass" => DecisionMode::OllamaSinglePass,
+            "fast" | "fast_deterministic" | "deterministic" | "system1" | "rust" => DecisionMode::FastDeterministic,
+            _ => DecisionMode::Auto,
+        }
+    }
+}
 
 /// Engine execution mode for song generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -47,6 +106,10 @@ pub const STEM_OTHER: &str = "other";
 pub const STEM_INPAINTED_GUITAR: &str = "inpainted_guitar";
 pub const STEM_INPAINTED_DRUMS: &str = "inpainted_drums";
 pub const STEM_FINAL_MASTER: &str = "final_master";
+pub const STEM_BACKING_HARMONIES: &str = "backing_harmonies";
+pub const STEM_KEYS_SYNTHS: &str = "keys_synths";
+pub const STEM_PERCUSSION_FILLS: &str = "percussion_fills";
+pub const STEM_AMBIENCE_FX: &str = "ambience_fx";
 
 /// Complete, versioned State container flowing through the 6-stage LangGraph StateGraph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,15 +128,17 @@ pub struct MusicProductionState {
     pub bpm: u32,
     /// 7. Musical key signature (e.g. "A Major", "G Minor", "C Major")
     pub key_signature: String,
-    /// 8. Optional path to vocal reference WAV for timbre cloning / Seed-VC conditioning
+    /// 8. Deprecated legacy field retained only for checkpoint JSON compatibility (zero audio sampling)
+    #[serde(default)]
     pub vocal_ref_wav: Option<PathBuf>,
-    /// 9. Optional path to master reference WAV for Matchering EQ profiling
+    /// 9. Deprecated legacy field retained only for checkpoint JSON compatibility (zero audio sampling)
+    #[serde(default)]
     pub master_ref_wav: Option<PathBuf>,
     /// 10. Map of isolated audio stem paths
     pub stem_paths: HashMap<String, PathBuf>,
     /// 11. Audio spectral and waveform telemetry inspection
     pub telemetry: StemTelemetry,
-    /// 12. Multi-LLM Ollama Judge composite score (0.0 to 10.0)
+    /// 12. Multi-LLM / Nimble Judge composite score (0.0 to 10.0)
     pub judge_score: f32,
     /// 13. Quality gate flag: true if Judge score >= threshold and telemetry clean
     pub quality_passed: bool,
@@ -95,12 +160,39 @@ pub struct MusicProductionState {
     pub created_at: String,
     /// 21. ISO 8601 last update timestamp
     pub updated_at: String,
-    /// 22. Reference WAVs imported for style guidance (up to 20 files)
+    /// 22. Deprecated legacy field retained only for checkpoint JSON compatibility
     #[serde(default)]
     pub reference_wavs: Vec<ReferenceWavMeta>,
     /// 23. Verifiable legal originality & compliance report
     #[serde(default)]
     pub originality_report: Option<LegalOriginalityReport>,
+    /// 24. Lyrics sourcing mode: user verbatim vs. local AI songwriter
+    #[serde(default)]
+    pub lyrics_mode: LyricsMode,
+    /// 25. Song topic/story prompt when asking local AI to write lyrics
+    #[serde(default)]
+    pub lyrics_topic: String,
+    /// 26. Selected 100% open-weight synthesis model repo ID or alias
+    #[serde(default)]
+    pub selected_model: Option<String>,
+    /// 27. Optional local LoRA adapter path for open-weight Muse / ACE-Step models
+    #[serde(default)]
+    pub lora_adapter_path: Option<PathBuf>,
+    /// 28. When true, blocks CC-BY-NC / NonCommercial synthesis & decision checkpoints
+    #[serde(default)]
+    pub commercial_only: bool,
+    /// 29. True when primary audio stems came from local open-weight neural inference
+    #[serde(default)]
+    pub rendered_by_neural: bool,
+    /// 30. Execution mode for the local Nimble Typed Decision Model Engine
+    #[serde(default)]
+    pub decision_mode: DecisionMode,
+    /// 31. Optional explicit Nimble decision checkpoint ID/tag
+    #[serde(default)]
+    pub decision_model: Option<String>,
+    /// 32. Calibrated decision probability & entropy traces across pipeline gates 1-5
+    #[serde(default)]
+    pub decision_traces: Vec<TypedDecisionTrace>,
 }
 
 impl Default for MusicProductionState {
@@ -137,6 +229,15 @@ impl MusicProductionState {
             updated_at: now,
             reference_wavs: Vec::new(),
             originality_report: None,
+            lyrics_mode: LyricsMode::Auto,
+            lyrics_topic: String::new(),
+            selected_model: Some("ACE-Step/acestep-v15-turbo".to_string()),
+            lora_adapter_path: None,
+            commercial_only: false,
+            rendered_by_neural: false,
+            decision_mode: DecisionMode::Auto,
+            decision_model: None,
+            decision_traces: Vec::new(),
         }
     }
 
@@ -171,6 +272,15 @@ impl MusicProductionState {
             updated_at: now,
             reference_wavs: Vec::new(),
             originality_report: None,
+            lyrics_mode: LyricsMode::Auto,
+            lyrics_topic: String::new(),
+            selected_model: Some("ACE-Step/acestep-v15-turbo".to_string()),
+            lora_adapter_path: None,
+            commercial_only: false,
+            rendered_by_neural: false,
+            decision_mode: DecisionMode::Auto,
+            decision_model: None,
+            decision_traces: Vec::new(),
         }
     }
 
@@ -201,7 +311,30 @@ impl MusicProductionState {
             updated_at: now,
             reference_wavs: Vec::new(),
             originality_report: None,
+            lyrics_mode: LyricsMode::Auto,
+            lyrics_topic: String::new(),
+            selected_model: Some("ACE-Step/acestep-v15-turbo".to_string()),
+            lora_adapter_path: None,
+            commercial_only: false,
+            rendered_by_neural: false,
+            decision_mode: DecisionMode::Auto,
+            decision_model: None,
+            decision_traces: Vec::new(),
         }
+    }
+
+    /// Appends a calibrated Nimble decision trace for auditing & HITL inspection.
+    pub fn record_decision_trace(&mut self, trace: TypedDecisionTrace) {
+        self.updated_at = chrono::Utc::now().to_rfc3339();
+        self.history.push(format!(
+            "Decision gate '{}' -> '{}' (conf {:.1}%, hitl={}, via {})",
+            trace.gate_name,
+            trace.selected_choice,
+            trace.confidence * 100.0,
+            trace.hitl_gate_triggered,
+            trace.backend_used
+        ));
+        self.decision_traces.push(trace);
     }
 
     /// Advances the song version number and refreshes timestamp.
