@@ -1492,10 +1492,9 @@ impl ReferenceRlSynthesizer {
         buf
     }
 
-    /// Cleans structured lyrics for Google Gemini `models/lyria-3.5` by removing parenthetical
-    /// stage directions while preserving section tags (`[Verse 1]`, `[Chorus]`, etc.) and repeating
-    /// the main `[Chorus]` before `[Outro]` if needed for a full ~3-minute song arc.
-    pub fn build_lyria_3_5_prompt(
+    /// Cleans structured lyrics for local open-weight song generation (ACE-Step 1.5, YuE2, DiffRhythm 2)
+    /// by removing parenthetical stage directions while preserving section tags (`[Verse 1]`, `[Chorus]`, etc.).
+    pub fn build_open_weight_prompt(
         prompt: &str,
         custom_lyrics: Option<&str>,
         bpm: u32,
@@ -1610,271 +1609,8 @@ impl ReferenceRlSynthesizer {
         format!("{style_header}\n\nLyrics:\n{clean_lyrics}")
     }
 
-    #[cfg(all(windows, not(test)))]
-    #[allow(clippy::too_many_arguments)]
-    fn try_synthesize_with_lyria_3_5(
-        prompt: &str,
-        custom_lyrics: Option<&str>,
-        title: &str,
-        genre_label: &str,
-        bpm: u32,
-        key_signature: &str,
-        structured_lyrics: &str,
-        melodic_seed: u64,
-        image_base64: Option<&str>,
-        image_mime_type: Option<&str>,
-    ) -> Option<ReferenceRlSongOutput> {
-        let is_cargo_test_runner = std::env::current_exe()
-            .ok()
-            .and_then(|p| {
-                p.parent()
-                    .and_then(|d| d.file_name())
-                    .map(|n| n.eq_ignore_ascii_case("deps"))
-            })
-            .unwrap_or(false)
-            || std::env::var("MUSIC_DISABLE_LIVE_LYRIA").as_deref() == Ok("1");
-        if is_cargo_test_runner && std::env::var("MUSIC_FORCE_LIVE_LYRIA").as_deref() != Ok("1") {
-            return None;
-        }
-
-        let gemini_key = MelodicSingingSynthesizer::resolve_dotenv_gemini_api_key()?;
-        let lyria_prompt = Self::build_lyria_3_5_prompt(
-            prompt,
-            custom_lyrics,
-            bpm,
-            key_signature,
-            structured_lyrics,
-        );
-
-        let pid = std::process::id();
-        let tag = format!("lyria35_{}_{}", pid, melodic_seed % 1_000_000);
-        let work_dir = std::env::temp_dir().join(&tag);
-        std::fs::create_dir_all(&work_dir).ok()?;
-
-        let mut parts_json = Vec::new();
-        if let Some(raw_b64) = image_base64 {
-            let trimmed = raw_b64.trim();
-            if !trimmed.is_empty() {
-                let clean_b64 = match trimmed.split_once(";base64,") {
-                    Some((_, data)) => data.trim(),
-                    None => trimmed,
-                };
-                let mime = image_mime_type
-                    .map(str::trim)
-                    .filter(|m| !m.is_empty())
-                    .unwrap_or("image/png");
-                parts_json.push(serde_json::json!({
-                    "inlineData": {
-                        "mimeType": mime,
-                        "data": clean_b64
-                    }
-                }));
-            }
-        }
-        parts_json.push(serde_json::json!({ "text": lyria_prompt }));
-
-        let req_payload = serde_json::json!({
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": parts_json
-                }
-            ]
-        });
-
-        let req_path = work_dir.join("request.json");
-        let py_path = work_dir.join("run_lyria35.py");
-        let lyrics_out_path = work_dir.join("returned_lyrics.txt");
-        let master_path = work_dir.join("master.wav");
-        let vocals_path = work_dir.join("vocals.wav");
-        let bass_path = work_dir.join("bass.wav");
-        let drums_path = work_dir.join("drums.wav");
-        let guitar_path = work_dir.join("guitar.wav");
-        let other_path = work_dir.join("other.wav");
-
-        if std::fs::write(&req_path, serde_json::to_vec(&req_payload).ok()?).is_err() {
-            let _ = std::fs::remove_dir_all(&work_dir);
-            return None;
-        }
-
-        let py_script = r#"import base64
-import glob
-import json
-import os
-import shutil
-import subprocess
-import sys
-import urllib.request
-
-work_dir = sys.argv[1]
-key = os.environ.get("GEMINI_API_KEY_LYRIA", "").strip()
-req_bytes = open(os.path.join(work_dir, "request.json"), "rb").read()
-
-data = None
-for model_id in ("models/lyria-3.5", "models/lyria-3-pro-preview"):
-    url = f"https://generativelanguage.googleapis.com/v1beta/{model_id}:generateContent?key={key}"
-    req = urllib.request.Request(
-        url,
-        data=req_bytes,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=240) as resp:
-            cand_data = json.loads(resp.read().decode("utf-8"))
-            parts = ((cand_data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
-            if any("inlineData" in p for p in parts):
-                data = cand_data
-                break
-    except Exception as exc:
-        sys.stderr.write(f"Lyria call failed on {model_id}: {exc}\n")
-
-if not data:
-    sys.exit(2)
-
-parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
-raw_audio_path = None
-returned_text = []
-for p in parts:
-    if "text" in p and p["text"]:
-        returned_text.append(p["text"])
-    if "inlineData" in p and not raw_audio_path:
-        mime = p["inlineData"].get("mimeType", "")
-        raw_bytes = base64.b64decode(p["inlineData"]["data"])
-        ext = "mp3" if ("mp3" in mime or "mpeg" in mime) else "wav"
-        raw_audio_path = os.path.join(work_dir, f"raw_lyria.{ext}")
-        with open(raw_audio_path, "wb") as af:
-            af.write(raw_bytes)
-
-if returned_text:
-    with open(os.path.join(work_dir, "returned_lyrics.txt"), "w", encoding="utf-8") as lf:
-        lf.write("\n".join(returned_text).strip())
-
-if not raw_audio_path or not os.path.exists(raw_audio_path):
-    sys.exit(3)
-
-ff = shutil.which("ffmpeg")
-if not ff:
-    cands = glob.glob(r"C:\Users\*\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg*\*\bin\ffmpeg.exe")
-    ff = cands[0] if cands else "ffmpeg"
-
-master_wav = os.path.join(work_dir, "master.wav")
-subprocess.run(
-    [ff, "-y", "-i", raw_audio_path, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", master_wav],
-    check=True,
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
-)
-
-stem_specs = [
-    ("vocals.wav", "pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1,highpass=f=185,lowpass=f=6800"),
-    ("bass.wav", "lowpass=f=190,volume=1.15"),
-    ("drums.wav", "highpass=f=50,bandreject=f=650:w=900"),
-    ("guitar.wav", "pan=stereo|c0=c0-0.45*c1|c1=c1-0.45*c0,highpass=f=140,lowpass=f=8500"),
-    ("other.wav", "pan=stereo|c0=c0-0.65*c1|c1=c1-0.65*c0,highpass=f=180"),
-]
-for fname, af in stem_specs:
-    out_p = os.path.join(work_dir, fname)
-    subprocess.run(
-        [ff, "-y", "-i", master_wav, "-af", af, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", out_p],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-"#;
-
-        if std::fs::write(&py_path, py_script).is_err() {
-            let _ = std::fs::remove_dir_all(&work_dir);
-            return None;
-        }
-
-        let mut cmd = std::process::Command::new("python");
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-        cmd.env("GEMINI_API_KEY_LYRIA", &gemini_key);
-        cmd.arg(&py_path).arg(&work_dir);
-
-        let status_ok = cmd.status().map(|s| s.success()).unwrap_or(false);
-        if !status_ok || !master_path.exists() {
-            let _ = std::fs::remove_dir_all(&work_dir);
-            return None;
-        }
-
-        let final_master = match AudioBuffer::from_wav_file(&master_path) {
-            Ok(b) if b.duration_secs() >= 25.0 => b,
-            _ => {
-                let _ = std::fs::remove_dir_all(&work_dir);
-                return None;
-            }
-        };
-
-        let load_or_clone = |p: &std::path::Path| -> AudioBuffer {
-            AudioBuffer::from_wav_file(p).unwrap_or_else(|_| final_master.clone())
-        };
-        let vocals = load_or_clone(&vocals_path);
-        let bass = load_or_clone(&bass_path);
-        let drums = load_or_clone(&drums_path);
-        let acoustic_guitar = load_or_clone(&guitar_path);
-        let keys_organ = load_or_clone(&other_path);
-        let lead_guitar_solo = acoustic_guitar.clone();
-        let percussion_fills = drums.clone();
-
-        let frames = final_master.frame_count();
-        let dur_secs = final_master.duration_secs();
-        let mut draft_groove = AudioBuffer::new(SAMPLE_RATE, 2, dur_secs);
-        let min_samples = draft_groove
-            .samples
-            .len()
-            .min(acoustic_guitar.samples.len())
-            .min(drums.samples.len())
-            .min(bass.samples.len());
-        for s_idx in 0..min_samples {
-            draft_groove.samples[s_idx] = (acoustic_guitar.samples[s_idx] * 0.45
-                + drums.samples[s_idx] * 0.35
-                + bass.samples[s_idx] * 0.35)
-                .clamp(-0.98, 0.98);
-        }
-        let _ = frames;
-
-        let resolved_lyrics = if custom_lyrics.map(|l| !l.trim().is_empty()).unwrap_or(false)
-            || Self::extract_raw_poem_lines_from_prompt(prompt).is_some()
-            || prompt.to_ascii_lowercase().contains("blackening skies")
-        {
-            structured_lyrics.to_string()
-        } else if let Ok(ret_lyr) = std::fs::read_to_string(&lyrics_out_path) {
-            if !ret_lyr.trim().is_empty() {
-                ret_lyr
-            } else {
-                structured_lyrics.to_string()
-            }
-        } else {
-            structured_lyrics.to_string()
-        };
-
-        let _ = std::fs::remove_dir_all(&work_dir);
-
-        Some(ReferenceRlSongOutput {
-            title: title.to_string(),
-            genre_label: format!("{} • Lyria 3.5 Studio Master", genre_label),
-            prompt_used: prompt.to_string(),
-            lyrics: resolved_lyrics,
-            bpm,
-            key_signature: key_signature.to_string(),
-            final_master,
-            vocals,
-            drums,
-            bass,
-            acoustic_guitar,
-            keys_organ,
-            lead_guitar_solo,
-            percussion_fills,
-            draft_groove,
-        })
-    }
-
-    /// Primary entry point: Synthesizes a complete full-length song using Google Gemini `models/lyria-3.5`
-    /// when `GEMINI_API_KEY` is configured in `.env`, falling back cleanly to the 7-Movement Section-Aligned
-    /// Studio Acoustic & Formant-Preserved Vocal DSP engine when offline.
+    /// Primary entry point: Synthesizes a complete full-length song using the 9-Movement Section-Aligned
+    /// Studio Acoustic & Formant-Preserved Vocal DSP engine.
     #[allow(clippy::too_many_arguments)]
     pub fn synthesize_full_reference_rl_song(
         prompt: &str,
@@ -1902,7 +1638,7 @@ for fname, af in stem_specs:
         )
     }
 
-    /// Multimodal Text/Poem + Optional Photo-to-Music entry point powered by Google Gemini `models/lyria-3.5`.
+    /// Multimodal Text/Poem + Optional local visual mood entry point (100% open-weight / pure-Rust DSP).
     #[allow(clippy::too_many_arguments)]
     pub fn synthesize_full_reference_rl_song_with_image(
         prompt: &str,
@@ -1993,24 +1729,6 @@ for fname, af in stem_specs:
             _ => auto_lyrics,
         };
 
-        #[cfg(all(windows, not(test)))]
-        {
-            if let Some(lyria_out) = Self::try_synthesize_with_lyria_3_5(
-                prompt,
-                custom_lyrics,
-                &title,
-                &genre_label,
-                bpm,
-                &key_signature,
-                &structured_lyrics,
-                melodic_seed,
-                image_base64,
-                image_mime_type,
-            ) {
-                return lyria_out;
-            }
-        }
-        #[cfg(not(all(windows, not(test))))]
         let _ = (image_base64, image_mime_type);
 
         let thirteen_lines = Self::extract_thirteen_poem_lines(&structured_lyrics);
@@ -2266,15 +1984,16 @@ mod single_paragraph_poem_tests {
         assert!(lyrics.contains("Captivated calm."));
         assert!(lyrics.contains("Nourished."));
 
-        let lyria_prompt = ReferenceRlSynthesizer::build_lyria_3_5_prompt(
+        let ow_prompt = ReferenceRlSynthesizer::build_open_weight_prompt(
             user_prompt,
             Some("[Verse 1]\nGot a ticket in my coat and a dollar in my hand"),
             80,
             "G Major",
             &lyrics,
         );
-        assert!(lyria_prompt.contains("make folk music with acustic rythom"));
-        assert!(lyria_prompt.contains("A portrait of nettles and flowers around the heart."));
-        assert!(!lyria_prompt.contains("Got a ticket in my coat"));
+        assert!(ow_prompt.contains("make folk music with acustic rythom"));
+        assert!(ow_prompt.contains("A portrait of nettles and flowers around the heart."));
+        assert!(!ow_prompt.contains("Got a ticket in my coat"));
+        assert!(!ow_prompt.to_ascii_lowercase().contains("lyria"));
     }
 }

@@ -904,8 +904,8 @@ impl MelodicSingingSynthesizer {
 
     #[inline]
     /// Formant-Preserving 4-Point Hermite Cubic Melodic Contour & Singing Vibrato Resampler.
-    /// Operates on clause-pitched neural vocal phrases (rendered via Gemini Audio TTS or
-    /// `en-US-AvaNeural` + FFmpeg `librubberband` with `formant=preserved`) to apply smooth
+    /// Operates on clause-pitched neural vocal phrases (rendered via local neural TTS
+    /// `en-US-AvaNeural` / Kokoro + FFmpeg `librubberband` with `formant=preserved`) to apply smooth
     /// continuous phrase-level melodic glide and natural human singing vibrato without any
     /// glottal cycle-chopping buzz or consonant smearing.
     fn apply_smooth_30ms_pitch_and_vibrato(
@@ -983,52 +983,6 @@ impl MelodicSingingSynthesizer {
         out
     }
 
-    /// Reads `GEMINI_API_KEY` from process environment or `.env` files (`d:\harfile\music\.env`, `d:\harfile\ModelFusion\.env`).
-    /// Supports both standard `AIzaSy...` keys and newer `AQ....` Google AI Studio / Gemini API keys.
-    pub fn resolve_dotenv_gemini_api_key() -> Option<String> {
-        let is_real_key = |k: &str| -> bool {
-            let t = k.trim().trim_matches('"').trim_matches('\'');
-            (t.starts_with("AIzaSy") || t.starts_with("AQ."))
-                && t.len() >= 25
-                && !t.contains("DummyKey")
-                && !t.contains("UnitTest")
-                && !t.ends_with("Test")
-        };
-
-        for env_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY"] {
-            if let Ok(k) = std::env::var(env_name) {
-                let clean = k.trim().trim_matches('"').trim_matches('\'');
-                if is_real_key(clean) {
-                    return Some(clean.to_string());
-                }
-            }
-        }
-        let candidates = [
-            std::path::PathBuf::from(".env"),
-            std::path::PathBuf::from(r"d:\harfile\music\.env"),
-            std::path::PathBuf::from(r"d:\harfile\ModelFusion\.env"),
-        ];
-        for path in &candidates {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                for line in content.lines() {
-                    let l = line.trim();
-                    if l.starts_with('#') || l.is_empty() {
-                        continue;
-                    }
-                    if let Some((k, v)) = l.split_once('=') {
-                        if k.trim() == "GEMINI_API_KEY" || k.trim() == "GOOGLE_API_KEY" {
-                            let clean = v.trim().trim_matches('"').trim_matches('\'');
-                            if is_real_key(clean) {
-                                return Some(clean.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
-
     #[cfg(windows)]
     fn render_thirteen_line_neural_phrases(&self, lines: &[String; 13]) -> Option<[Vec<f32>; 13]> {
         let pid = std::process::id();
@@ -1065,49 +1019,20 @@ impl MelodicSingingSynthesizer {
                 .join(", ")
         };
 
-        let gemini_key = Self::resolve_dotenv_gemini_api_key().unwrap_or_default();
         let py_script = format!(
-            "import asyncio, base64, edge_tts, glob, json, os, shutil, subprocess, urllib.request, wave\n\
+            "import asyncio, edge_tts, glob, os, shutil, subprocess\n\
              txts = [{}]\n\
              mp3s = [{}]\n\
              wavs = [{}]\n\
-             gemini_key = r'{}'\n\
              # Musical scale pitch ratios (2^(st/12)) for formant-preserved librubberband singing per full line\n\
              rb_pitches = [1.0000, 1.0595, 1.0000, 1.0595, 1.1225, 1.1892, 1.2599, 1.1892, 1.2599, 1.1225, 1.0000, 1.0595, 1.0000]\n\
              rb_tempos  = [0.88,   0.88,   0.88,   0.89,   0.90,   0.87,   0.87,   0.87,   0.87,   0.88,   0.88,   0.87,   0.85]\n\
              rates      = ['-16%', '-16%', '-16%', '-15%', '-12%', '-15%', '-14%', '-14%', '-14%', '-14%', '-16%', '-18%', '-20%']\n\
              pitches    = ['+1Hz', '+2Hz', '+1Hz', '+2Hz', '+4Hz', '+5Hz', '+6Hz', '+5Hz', '+6Hz', '+3Hz', '+1Hz', '+0Hz', '-1Hz']\n\
-             def try_gemini_tts(text, out_wav):\n\
-             \x20   if not gemini_key:\n\
-             \x20       return False\n\
-             \x20   try:\n\
-             \x20       url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key={{gemini_key}}'\n\
-             \x20       body = {{\n\
-             \x20           'contents': [{{'parts': [{{'text': f'Sing warmly and melodically with clear lyrical diction: {{text}}'}}]}}],\n\
-             \x20           'generationConfig': {{\n\
-             \x20               'responseModalities': ['AUDIO'],\n\
-             \x20               'speechConfig': {{'voiceConfig': {{'prebuiltVoiceConfig': {{'voiceName': 'Aoede'}}}}}}\n\
-             \x20           }}\n\
-             \x20       }}\n\
-             \x20       req = urllib.request.Request(url, data=json.dumps(body).encode('utf-8'), headers={{'Content-Type': 'application/json'}}, method='POST')\n\
-             \x20       with urllib.request.urlopen(req, timeout=10) as resp:\n\
-             \x20           data = json.loads(resp.read().decode('utf-8'))\n\
-             \x20           b64 = data['candidates'][0]['content']['parts'][0]['inlineData']['data']\n\
-             \x20           pcm = base64.b64decode(b64)\n\
-             \x20           with wave.open(out_wav, 'wb') as wf:\n\
-             \x20               wf.setnchannels(1)\n\
-             \x20               wf.setsampwidth(2)\n\
-             \x20               wf.setframerate(24000)\n\
-             \x20               wf.writeframes(pcm)\n\
-             \x20           return True\n\
-             \x20   except Exception:\n\
-             \x20       return False\n\
              sem = asyncio.Semaphore(5)\n\
              async def synth_one(i):\n\
              \x20   async with sem:\n\
              \x20       t = open(txts[i], 'r', encoding='utf-8').read().strip()\n\
-             \x20       if try_gemini_tts(t, mp3s[i]):\n\
-             \x20           return\n\
              \x20       c = edge_tts.Communicate(t, 'en-US-AvaNeural', rate=rates[i], pitch=pitches[i])\n\
              \x20       await c.save(mp3s[i])\n\
              async def main():\n\
@@ -1123,7 +1048,6 @@ impl MelodicSingingSynthesizer {
             fmt_list(&txt_paths),
             fmt_list(&mp3_paths),
             fmt_list(&wav_paths),
-            gemini_key
         );
 
         let mut py_cmd = std::process::Command::new("python");

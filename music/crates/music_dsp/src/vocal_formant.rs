@@ -119,6 +119,80 @@ impl BiquadFilter {
         }
     }
 
+    /// Creates a 2nd-order Low-Shelf EQ filter based on the Audio EQ Cookbook.
+    pub fn low_shelf(cutoff_freq: f32, gain_db: f32, channels: usize) -> Self {
+        if gain_db.abs() < 0.01 {
+            return Self {
+                b0: 1.0,
+                b1: 0.0,
+                b2: 0.0,
+                a1: 0.0,
+                a2: 0.0,
+                states: vec![[0.0, 0.0]; channels],
+            };
+        }
+        let f0 = cutoff_freq.clamp(20.0, 12000.0);
+        let a = 10.0f32.powf(gain_db / 40.0);
+        let w0 = 2.0 * PI * f0 / SAMPLE_RATE as f32;
+        let cos_w0 = w0.cos();
+        let sin_w0 = w0.sin();
+        let alpha = sin_w0 * 0.5 * 2.0f32.sqrt();
+        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
+
+        let b0 = a * ((a + 1.0) - (a - 1.0) * cos_w0 + two_sqrt_a_alpha);
+        let b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
+        let b2 = a * ((a + 1.0) - (a - 1.0) * cos_w0 - two_sqrt_a_alpha);
+        let a0 = (a + 1.0) + (a - 1.0) * cos_w0 + two_sqrt_a_alpha;
+        let a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cos_w0);
+        let a2 = (a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha;
+
+        Self {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: a1 / a0,
+            a2: a2 / a0,
+            states: vec![[0.0, 0.0]; channels],
+        }
+    }
+
+    /// Creates a 2nd-order High-Shelf EQ filter based on the Audio EQ Cookbook.
+    pub fn high_shelf(cutoff_freq: f32, gain_db: f32, channels: usize) -> Self {
+        if gain_db.abs() < 0.01 {
+            return Self {
+                b0: 1.0,
+                b1: 0.0,
+                b2: 0.0,
+                a1: 0.0,
+                a2: 0.0,
+                states: vec![[0.0, 0.0]; channels],
+            };
+        }
+        let f0 = cutoff_freq.clamp(1000.0, 20000.0);
+        let a = 10.0f32.powf(gain_db / 40.0);
+        let w0 = 2.0 * PI * f0 / SAMPLE_RATE as f32;
+        let cos_w0 = w0.cos();
+        let sin_w0 = w0.sin();
+        let alpha = sin_w0 * 0.5 * 2.0f32.sqrt();
+        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
+
+        let b0 = a * ((a + 1.0) + (a - 1.0) * cos_w0 + two_sqrt_a_alpha);
+        let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0);
+        let b2 = a * ((a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha);
+        let a0 = (a + 1.0) - (a - 1.0) * cos_w0 + two_sqrt_a_alpha;
+        let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cos_w0);
+        let a2 = (a + 1.0) - (a - 1.0) * cos_w0 - two_sqrt_a_alpha;
+
+        Self {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: a1 / a0,
+            a2: a2 / a0,
+            states: vec![[0.0, 0.0]; channels],
+        }
+    }
+
     /// Processes a single sample for a specific channel.
     #[inline]
     pub fn process_sample(&mut self, ch: usize, x: f32) -> f32 {
@@ -277,4 +351,36 @@ pub fn apply_vocal_timbre(
 /// Contract compatibility helper matching `tests/common/mod.rs` line 496.
 pub fn apply_vocal_formant_and_rasp(input: &AudioBuffer, rasp_amount: f32) -> AudioBuffer {
     apply_vocal_timbre(input, rasp_amount, 0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_biquad_low_and_high_shelf_unity_and_gain() {
+        let mut unity_lo = BiquadFilter::low_shelf(100.0, 0.0, 2);
+        let mut boost_lo = BiquadFilter::low_shelf(100.0, 6.0, 2);
+        let mut cut_hi = BiquadFilter::high_shelf(10000.0, -6.0, 2);
+
+        let mut rms_unity = 0.0f32;
+        let mut rms_boost = 0.0f32;
+        let mut rms_hi_cut = 0.0f32;
+
+        for i in 0..4800 {
+            let t = i as f32 / SAMPLE_RATE as f32;
+            let low_sig = (2.0 * PI * 60.0 * t).sin() * 0.4;
+            let high_sig = (2.0 * PI * 14000.0 * t).sin() * 0.4;
+
+            let y_u = unity_lo.process_sample(0, low_sig);
+            let y_b = boost_lo.process_sample(0, low_sig);
+            let y_c = cut_hi.process_sample(0, high_sig);
+
+            rms_unity += y_u * y_u;
+            rms_boost += y_b * y_b;
+            rms_hi_cut += y_c * y_c;
+        }
+        assert!(rms_boost > rms_unity * 2.5, "6 dB low shelf should substantially boost 60 Hz");
+        assert!(rms_hi_cut < rms_unity * 0.6, "-6 dB high shelf should attenuate 14 kHz");
+    }
 }
