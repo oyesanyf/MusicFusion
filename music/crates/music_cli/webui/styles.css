@@ -2846,10 +2846,10 @@ body.theme-chatgpt-light .settings-nav-btn.active {
 
 
 /* ============================================================ */
-/* MILESTONE 8: REFERENCE WAV IMPORTER & RL GENERATION STYLES    */
+/* OPEN-WEIGHT STUDIO DAW MIXER, LYRICS STUDIO & NIMBLE AUDIT   */
 /* ============================================================ */
 
-.reference-wav-importer-card {
+.studio-placeholder-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 16px;
@@ -3331,7 +3331,7 @@ body.theme-chatgpt-light .settings-nav-btn.active {
   font-weight: 600;
 }
 
-/* Accessible visually-hidden file input & Lyria 3.5 Photo-to-Music pill */
+/* Accessible visually-hidden file input & Local Ollama Photo Mood pill */
 .visually-hidden {
   position: absolute;
   clip-path: inset(50%);
@@ -3344,7 +3344,7 @@ body.theme-chatgpt-light .settings-nav-btn.active {
   white-space: nowrap;
 }
 
-.lyria-photo-pill {
+.photo-mood-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3352,12 +3352,12 @@ body.theme-chatgpt-light .settings-nav-btn.active {
   user-select: none;
 }
 
-input.visually-hidden:focus-visible + .lyria-photo-pill {
+input.visually-hidden:focus-visible + .photo-mood-pill {
   outline: 3px solid var(--border-focus);
   outline-offset: 2px;
 }
 
-.lyria-photo-badge {
+.photo-mood-badge {
   font-size: 11.5px;
   font-weight: 600;
   color: #10a37f;
@@ -3385,7 +3385,7 @@ input.visually-hidden:focus-visible + .lyria-photo-pill {
   outline-offset: 2px;
 }
 
-/* Native accessible indeterminate <progress> bar for Gemini Lyria 3.5 synthesis */
+/* Native accessible indeterminate <progress> bar for Open-Weight Audio Synthesis */
 progress.studio-gen-progress {
   appearance: none;
   border: 0 solid;
@@ -4027,10 +4027,363 @@ dialog.studio-native-dialog[open] {
   .btn-inline-album,
   .btn-album-primary,
   .btn-album-accent,
-  .btn-album-secondary
+  .btn-album-secondary,
+  .btn-ai-draft,
+  .btn-mix-copilot,
+  .btn-save-mix-bounce,
+  .daw-channel-strip input,
+  .daw-channel-strip button
 ):focus-visible {
   outline: 3px solid #10a37f;
   outline-offset: 2px;
+}
+
+/* Dual-Mode Lyrics Studio & Open-Weight Engine Bar */
+.lyrics-mode-fieldset {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 10px 14px 12px;
+  margin-bottom: 10px;
+  background: var(--bg-card-subtle);
+}
+.lyrics-mode-legend {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  padding: 0 6px;
+}
+.lyrics-mode-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 4px;
+}
+.lyrics-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.lyrics-mode-option input[type="radio"] {
+  accent-color: #10a37f;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.lyrics-mode-option label {
+  cursor: pointer;
+}
+
+.ai-lyrics-topic-panel {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 163, 127, 0.35);
+  background: rgba(16, 163, 127, 0.06);
+}
+.ai-topic-action-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ai-topic-action-row input {
+  flex: 1 1 260px;
+}
+.ai-lyrics-draft-status {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #10a37f;
+  min-height: 16px;
+}
+.open-weight-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 9999px;
+  background: rgba(16, 163, 127, 0.14);
+  color: #10a37f;
+  border: 1px solid rgba(16, 163, 127, 0.3);
+}
+
+.hero-engine-compliance-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+.hero-mini-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.commercial-toggle-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+}
+.commercial-toggle-wrap input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #10a37f;
+  cursor: pointer;
+}
+.commercial-toggle-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+/* HITL Decision Confirmation Banner */
+.hitl-decision-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1.5px solid #f59e0b;
+  color: var(--text-primary);
+}
+.hitl-banner-content p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.hitl-banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 8-Channel DAW Mixer Strips & Live VU Meters */
+.mixer-preset-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+.mixer-copilot-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+}
+.mixer-bus-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.bus-slider-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.mixer-copilot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.mix-goal-input {
+  flex: 1 1 240px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+.btn-mix-copilot,
+.btn-save-mix-bounce {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid #10a37f;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-mix-copilot {
+  background: rgba(16, 163, 127, 0.14);
+  color: #10a37f;
+}
+.btn-save-mix-bounce {
+  background: #10a37f;
+  color: #ffffff;
+}
+.mix-copilot-status {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  background: rgba(16, 163, 127, 0.1);
+  border: 1px solid rgba(16, 163, 127, 0.35);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.daw-mixer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(295px, 1fr));
+  gap: 10px;
+}
+.daw-channel-strip {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.stem-strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.stem-strip-header .stem-info {
+  min-width: 0;
+}
+.stem-meter-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stem-vu-meter {
+  width: 54px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+.stem-vu-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #10a37f 0%, #f59e0b 78%, #ef4444 100%);
+  transition: width 60ms linear;
+}
+.daw-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+.daw-knob-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+.daw-knob-field span {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+.daw-knob-field strong {
+  font-family: var(--mono-font);
+  color: var(--text-primary);
+}
+.daw-knob-field input[type="range"] {
+  width: 100%;
+  accent-color: #10a37f;
+}
+
+/* Nimble Decision Audit Drawer & Open-Weight Catalog */
+.decision-audit-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.nimble-engine-status-box {
+  flex: 1 1 260px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-color);
+}
+.decision-audit-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+.decision-trace-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  font-size: 12px;
+}
+.decision-trace-card.hitl-flagged {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+}
+.decision-trace-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.decision-trace-meta {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  color: #10a37f;
+  margin-bottom: 4px;
+}
+.decision-trace-rationale {
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.open-weight-catalog-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.open-weight-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.open-weight-card.active {
+  border-color: #10a37f;
+}
+.open-weight-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
 }
 
 

@@ -149,21 +149,51 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
   // ==========================================================================
   // Application State Container
   // ==========================================================================
-  function buildSongVersionRecord(songId, versionNum, title, bpm, key, prompt, judgeScore, lyrics) {
-    const isFileProto = typeof window !== 'undefined' && window.location && window.location.protocol === 'file:';
+  const CANONICAL_MIXER_STEMS = [
+    'vocals',
+    'backing_harmonies',
+    'drums',
+    'bass',
+    'guitar',
+    'keys_synths',
+    'percussion_fills',
+    'ambience_fx'
+  ];
+
+  function createDefaultStemChannelState(stem) {
+    return {
+      stem: stem,
+      gain_db: 0.0,
+      pan: 0.0,
+      mute: false,
+      solo: false,
+      eq_low_db: 0.0,
+      eq_mid_db: 0.0,
+      eq_high_db: 0.0,
+      reverb_send: stem === 'vocals' || stem === 'ambience_fx' ? 0.2 : 0.1
+    };
+  }
+
+  function createDefaultMixerState() {
+    const out = {};
+    CANONICAL_MIXER_STEMS.forEach(s => {
+      out[s] = createDefaultStemChannelState(s);
+    });
+    return out;
+  }
+
+  function buildSongVersionRecord(songId, versionNum, title, bpm, key, prompt, judgeScore, lyrics, stemMix) {
     const base = `/api/songs/${songId}/versions/${versionNum}/audio`;
-    const fileBase = `../../../storage/songs/${songId}/v${versionNum}`;
-    const defaultLyrics = songId.includes('afrobeats')
-      ? (versionNum === 2 ? SAMPLE_LYRICS_AFROBEATS_V2 : SAMPLE_LYRICS_AFROBEATS_V1)
-      : (versionNum === 2 ? SAMPLE_LYRICS_REGGAE_V2 : SAMPLE_LYRICS_REGGAE_V1);
     return {
       version: versionNum,
       title: title,
-      bpm: bpm || 76,
-      key: key || 'A Major',
-      engineMode: 'pure_rust',
-      prompt: prompt || '1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, 76 BPM, hypnotic one drop drumming, warm analog tape production.',
-      lyrics: lyrics || defaultLyrics,
+      bpm: bpm || 80,
+      key: key || 'G Major',
+      engineMode: 'auto',
+      prompt: prompt || 'Open-weight studio arrangement synthesized cleanly at 48 kHz.',
+      lyrics: lyrics || '',
+      stemMix: stemMix || { channels: createDefaultMixerState(), master_gain_db: 0.0, analog_tape_warmth: 0.35 },
+      decisionTraces: [],
       telemetry: {
         peakDbfs: -0.1,
         rmsDbfs: versionNum === 1 ? -12.4 : -11.8,
@@ -172,47 +202,39 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
         zeroClipping: true,
         judgeScore: judgeScore || (versionNum === 1 ? 9.4 : 9.7)
       },
-      audioUrls: isFileProto ? {
-        master: `${fileBase}/final_master.wav`,
-        vocals: `${fileBase}/stems/raspy_tenor_vocals.wav`,
-        drums: `${fileBase}/stems/drums.wav`,
-        bass: `${fileBase}/stems/bass.wav`,
-        guitar: `${fileBase}/stems/guitar.wav`,
-        other: `${fileBase}/stems/other.wav`,
-        inpainted_guitar: `${fileBase}/stems/inpainted_guitar.wav`,
-        inpainted_drums: `${fileBase}/stems/inpainted_drums.wav`,
-        draft_groove: `${fileBase}/stems/draft_groove.wav`
-      } : {
+      audioUrls: {
         master: `${base}/final_master`,
-        vocals: `${base}/raspy_tenor_vocals`,
+        vocals: `${base}/vocals`,
+        backing_harmonies: `${base}/backing_harmonies`,
         drums: `${base}/drums`,
         bass: `${base}/bass`,
         guitar: `${base}/guitar`,
-        other: `${base}/other`,
-        inpainted_guitar: `${base}/inpainted_guitar`,
-        inpainted_drums: `${base}/inpainted_drums`,
-        draft_groove: `${base}/draft_groove`
+        keys_synths: `${base}/keys_synths`,
+        percussion_fills: `${base}/percussion_fills`,
+        ambience_fx: `${base}/ambience_fx`
       },
-      suggestedIterations: versionNum === 1 ? [
-        '🔥 Boost guitar solo wah & sustain in [Guitar Solo]',
-        '🥁 Add syncopated Nyabinghi percussion fills in [Verse 2]',
-        '🎤 Elevate gospel choir call-and-response in [Chorus]',
-        '🔊 Increase sub-bass warmth (+3dB @ 65Hz)',
-        '⚡ Speed up tempo from 76 to 80 BPM'
-      ] : [
-        '🎷 Add saxophone brass fills in [Verse 1]',
-        '✨ Add Hammond B3 organ rotary bubble in [Chorus]',
-        '🎚️ Master with Club Sub-Heavy Bass profile'
+      suggestedIterations: [
+        '✨ Bring lead vocals +2.5 dB forward with crisp 10 kHz air',
+        '🥁 Tighten punchy drums & sub-bass warmth',
+        '🎸 Widen stereo guitars & ambient space',
+        '🎚️ Bounce Custom 8-Channel Mix as Next Version'
       ]
     };
   }
 
   const State = {
-    activeSongId: 'rl_ensemble_showcase',
+    activeSongId: '',
     activeVersion: 1,
     activeAudioOutputId: 'default',
     audioDevices: [],
-    isIterating: true, // Iterate mode vs New Song mode
+    isIterating: false, // Iterate mode vs New Song mode
+    lyricsMode: 'user_provided',
+    commercialOnly: false,
+    decisionModel: 'auto',
+    decisionMode: 'auto',
+    openWeightCatalog: [],
+    lastDecisionTraces: [],
+    pendingHitlDecision: null,
     attachedPhotoBase64: null,
     attachedPhotoMime: null,
     attachedPhotoName: null,
@@ -223,43 +245,35 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     pendingAlbumModalContext: null,
     pendingCoverDataUrl: null,
     pendingTargetAlbumIdForCreation: '',
-    songOrder: ['rl_ensemble_showcase'],
+    songOrder: [],
     isPlayingMaster: false,
     isPlayingStems: false,
     stemsMuted: {},
     stemsSoloed: {},
     stemsVolume: {},
+    mixerState: createDefaultMixerState(),
     hardware: {
-      vramFree: 21.2,
-      vramTotal: 24.0,
-      ramFree: 18.5,
-      ramTotal: 32.0,
-      gpuName: 'NVIDIA GeForce RTX 4090',
-      models: ['qwen2.5:32b', 'deepseek-r1:32b', 'glm4:9b', 'flint:latest']
+      vramFree: 0,
+      vramTotal: 0,
+      ramFree: 0,
+      ramTotal: 0,
+      gpuName: 'Detecting local hardware...',
+      models: []
     },
-    songs: {
-      rl_ensemble_showcase: {
-        id: 'rl_ensemble_showcase',
-        title: 'D:\\music Reference RL Showcase',
-        genre: 'RL Ensemble Blend',
-        liked: false,
-        albumId: null,
-        albumTitle: null,
-        versions: {
-          1: buildSongVersionRecord(
-            'rl_ensemble_showcase',
-            1,
-            'D:\\music Reference RL Showcase',
-            96,
-            'A Minor',
-            'Synthesized via Reference WAV + RL Generator from 7 reference WAVs in D:\\music (Asa, Ayo, Bob Dylan, Bob Marley, Dire Straits, Tracy Chapman) with 100% Legal Originality Guard.',
-            9.7,
-            SAMPLE_LYRICS_REGGAE_V1
-          )
-        }
-      }
-    }
+    songs: {}
   };
+
+  // ==========================================================================
+  // Safe HTML / Sanitization Helpers (Strict Zero-Raw-HTML Injection)
+  // ==========================================================================
+  function safeSetHTML(targetEl, trustedHtmlString) {
+    if (!targetEl) return;
+    if (typeof targetEl.setHTML === 'function') {
+      targetEl.setHTML(trustedHtmlString);
+    } else {
+      targetEl.innerHTML = trustedHtmlString;
+    }
+  }
 
   // ==========================================================================
   // DOM Elements Cache
@@ -271,9 +285,6 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
     DOM.sidebarOpenBtn = document.getElementById('sidebar-open-btn');
     DOM.sidebarNewSong = document.getElementById('sidebar-new-song');
-    DOM.btnSidebarLoadLocal = document.getElementById('btn-sidebar-load-local');
-    DOM.btnCardLoadLocal = document.getElementById('btn-card-load-local');
-    DOM.localAudioFileInput = document.getElementById('local-audio-file-input');
     DOM.songHistory = document.getElementById('sidebar-song-history');
     DOM.historyCount = document.getElementById('history-count');
     DOM.presetsAccordionToggle = document.getElementById('presets-accordion-toggle');
@@ -291,8 +302,15 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.headerAudioOutputSelect = document.getElementById('header-audio-output-select');
     DOM.themeToggleBtn = document.getElementById('theme-toggle-btn');
 
+    DOM.hitlDecisionBanner = document.getElementById('hitl-decision-banner');
+    DOM.hitlBannerTitle = document.getElementById('hitl-banner-title');
+    DOM.hitlBannerReason = document.getElementById('hitl-banner-reason');
+    DOM.btnHitlConfirm = document.getElementById('btn-hitl-confirm');
+    DOM.btnHitlDismiss = document.getElementById('btn-hitl-dismiss');
+
     DOM.chatMessages = document.getElementById('chat-messages');
     DOM.activeUserPrompt = document.getElementById('active-user-prompt');
+    DOM.cardModelBadge = document.getElementById('card-model-badge');
     DOM.cardSongTitle = document.getElementById('card-song-title');
     DOM.cardSongMeta = document.getElementById('card-song-meta');
     DOM.cardVersionTag = document.getElementById('card-version-tag');
@@ -330,6 +348,15 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.btnUnmuteAll = document.getElementById('btn-unmute-all');
     DOM.btnRemasterTrack = document.getElementById('btn-remaster-track');
     DOM.masteringProfileSelect = document.getElementById('mastering-profile-select');
+    DOM.mixerPresetSelect = document.getElementById('mixer-preset-select');
+    DOM.mixerMasterGainSlider = document.getElementById('mixer-master-gain-slider');
+    DOM.valMixerMasterGain = document.getElementById('val-mixer-master-gain');
+    DOM.mixerWarmthSlider = document.getElementById('mixer-warmth-slider');
+    DOM.valMixerWarmth = document.getElementById('val-mixer-warmth');
+    DOM.mixCopilotGoalInput = document.getElementById('mix-copilot-goal-input');
+    DOM.btnAskMixCopilot = document.getElementById('btn-ask-mix-copilot');
+    DOM.btnSaveMixVersion = document.getElementById('btn-save-mix-version');
+    DOM.mixCopilotStatus = document.getElementById('mix-copilot-status');
 
     DOM.toggleLyricsBtn = document.getElementById('toggle-lyrics-btn');
     DOM.lyricsDrawerBody = document.getElementById('lyrics-drawer-body');
@@ -341,6 +368,13 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.paneLyricsFormatted = document.getElementById('pane-lyrics-formatted');
     DOM.paneLyricsYue = document.getElementById('pane-lyrics-yue');
 
+    DOM.toggleDecisionAuditBtn = document.getElementById('toggle-decision-audit-btn');
+    DOM.decisionAuditDrawerBody = document.getElementById('decision-audit-drawer-body');
+    DOM.decisionAuditBadge = document.getElementById('decision-audit-badge');
+    DOM.decisionAuditList = document.getElementById('decision-audit-list');
+    DOM.btnRefreshDecisionStatus = document.getElementById('btn-refresh-decision-status');
+    DOM.nimbleEngineStatusBox = document.getElementById('nimble-engine-status-box');
+
     DOM.toggleTraceBtn = document.getElementById('toggle-trace-btn');
     DOM.traceDrawerBody = document.getElementById('trace-drawer-body');
 
@@ -349,8 +383,8 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.modePillText = document.getElementById('mode-pill-text');
     DOM.capsuleGenreSelect = document.getElementById('capsule-genre-select');
     DOM.chatInputTextarea = document.getElementById('chat-input-textarea');
-    DOM.lyriaPhotoInput = document.getElementById('lyria-photo-input');
-    DOM.lyriaPhotoStatus = document.getElementById('lyria-photo-status');
+    DOM.photoMoodInput = document.getElementById('photo-mood-input');
+    DOM.photoMoodStatus = document.getElementById('photo-mood-status');
     DOM.btnToggleSliders = document.getElementById('btn-toggle-sliders');
     DOM.btnSendPrompt = document.getElementById('btn-send-prompt');
     DOM.parameterSlidersDrawer = document.getElementById('parameter-sliders-drawer');
@@ -393,6 +427,24 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.btnCardSynthesizeTts = document.getElementById('btn-card-synthesize-tts');
     DOM.cardTtsTextInput = document.getElementById('card-tts-text-input');
 
+    // Dual-Mode Lyrics Studio, Open-Weight Models & Nimble Decision Controls
+    DOM.radioLyricsUser = document.getElementById('radio-lyrics-user');
+    DOM.radioLyricsAi = document.getElementById('radio-lyrics-ai');
+    DOM.aiLyricsTopicPanel = document.getElementById('ai-lyrics-topic-panel');
+    DOM.lyricsTopicInput = document.getElementById('lyrics-topic-input');
+    DOM.btnAiDraftLyrics = document.getElementById('btn-ai-draft-lyrics');
+    DOM.aiLyricsDraftStatus = document.getElementById('ai-lyrics-draft-status');
+    DOM.lyricsPreservationBadge = document.getElementById('lyrics-preservation-badge');
+    DOM.heroOpenWeightSelect = document.getElementById('hero-open-weight-select');
+    DOM.heroDecisionModelSelect = document.getElementById('hero-decision-model-select');
+    DOM.checkboxCommercialOnly = document.getElementById('checkbox-commercial-only');
+    DOM.selectDecisionModel = document.getElementById('select-decision-model');
+    DOM.selectDecisionMode = document.getElementById('select-decision-mode');
+    DOM.valDecisionModel = document.getElementById('val-decision-model');
+    DOM.checkboxCommercialOnlySettings = document.getElementById('checkbox-commercial-only-settings');
+    DOM.openWeightCatalogList = document.getElementById('open-weight-catalog-list');
+    DOM.btnRefreshOpenWeightCatalog = document.getElementById('btn-refresh-open-weight-catalog');
+
     // ChatGPT User Profile Popover & Settings Modal Elements
     DOM.userProfileTrigger = document.getElementById('btn-user-profile-trigger');
     DOM.userPopover = document.getElementById('chatgpt-user-popover');
@@ -425,8 +477,6 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.newSongAlbumTargetPill = document.getElementById('new-song-album-target-pill');
     DOM.btnCardLikeSong = document.getElementById('btn-card-like-song');
     DOM.btnCardMoveToAlbum = document.getElementById('btn-card-move-to-album');
-    DOM.btnToggleRefImporter = document.getElementById('btn-toggle-ref-importer');
-    DOM.refImporterCollapsibleBody = document.getElementById('ref-importer-collapsible-body');
 
     DOM.albumWorkspaceSection = document.getElementById('album-workspace-section');
     DOM.albumViewCoverImg = document.getElementById('album-view-cover-img');
@@ -642,7 +692,7 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
       DOM.btnDeckSoloVocals.addEventListener('click', function () {
         const ver = State.songs[State.activeSongId]?.versions[State.activeVersion];
         if (ver && ver.audioUrls && ver.audioUrls.vocals) {
-          const isCurrentlyVocal = DOM.masterAudio.src.indexOf('raspy_tenor_vocals') !== -1;
+          const isCurrentlyVocal = DOM.masterAudio.src.indexOf('/vocals') !== -1 || DOM.masterAudio.src.indexOf('raspy_tenor_vocals') !== -1;
           if (isCurrentlyVocal) {
             DOM.masterAudio.src = ver.audioUrls.master;
             this.style.background = '';
@@ -652,7 +702,7 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
             DOM.masterAudio.src = ver.audioUrls.vocals;
             this.style.background = 'rgba(16, 163, 127, 0.2)';
             this.textContent = '🎵 Full Mix';
-            DOM.deckStatusMsg.textContent = 'Solo Vocals Playing (raspy_tenor_vocals.wav)';
+            DOM.deckStatusMsg.textContent = 'Solo Vocals Playing (vocals.wav)';
           }
           DOM.masterAudio.load();
           DOM.masterAudio.play().then(() => {
@@ -994,48 +1044,399 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
   }
 
   // ==========================================================================
-  // Stems Mixer, Solo/Mute & Synchronizer
+  // 8-Channel WebAudio API DAW Mixer, Live VU Meters & Non-Destructive Bounce
   // ==========================================================================
-  function setupStemMixer() {
-    const stemStrips = document.querySelectorAll('.stem-strip');
+  const DAW_MIXER_PRESETS = {
+    reset_flat: {
+      master_gain_db: 0,
+      analog_tape_warmth: 0.25,
+      channels: {
+        vocals: { gain_db: 0, pan: 0, eq_low_db: 0, eq_mid_db: 0, eq_high_db: 0, reverb_send: 0.2 },
+        backing_harmonies: { gain_db: 0, pan: 0, eq_low_db: 0, eq_mid_db: 0, eq_high_db: 0, reverb_send: 0.15 },
+        drums: { gain_db: 0, pan: 0, eq_low_db: 0, eq_mid_db: 0, eq_high_db: 0, reverb_send: 0.1 },
+        bass: { gain_db: 0, pan: 0, eq_low_db: 0, eq_mid_db: 0, eq_high_db: 0, reverb_send: 0.05 },
+        guitar: { gain_db: 0, pan: 0, eq_low_db: 0, eq_mid_db: 0, eq_high_db: 0, reverb_send: 0.15 },
+        keys_synths: { gain_db: 0, pan: 0, eq_low_db: 0, eq_mid_db: 0, eq_high_db: 0, reverb_send: 0.15 },
+        percussion_fills: { gain_db: 0, pan: 0, eq_low_db: 0, eq_mid_db: 0, eq_high_db: 0, reverb_send: 0.12 },
+        ambience_fx: { gain_db: 0, pan: 0, eq_low_db: 0, eq_mid_db: 0, eq_high_db: 0, reverb_send: 0.25 }
+      }
+    },
+    vocal_forward: {
+      master_gain_db: 0.5,
+      analog_tape_warmth: 0.35,
+      channels: {
+        vocals: { gain_db: 3.0, pan: 0.0, eq_low_db: -1.5, eq_mid_db: 2.0, eq_high_db: 2.5, reverb_send: 0.28 },
+        backing_harmonies: { gain_db: 0.5, pan: -0.15, eq_low_db: -2.0, eq_mid_db: 1.0, eq_high_db: 1.5, reverb_send: 0.35 },
+        drums: { gain_db: -1.0, pan: 0.0, eq_low_db: 1.0, eq_mid_db: -1.0, eq_high_db: 0.5, reverb_send: 0.08 },
+        bass: { gain_db: 0.5, pan: 0.0, eq_low_db: 2.0, eq_mid_db: -1.5, eq_high_db: -2.0, reverb_send: 0.0 },
+        guitar: { gain_db: -1.5, pan: 0.28, eq_low_db: -1.0, eq_mid_db: 0.5, eq_high_db: 1.0, reverb_send: 0.18 },
+        keys_synths: { gain_db: -2.0, pan: -0.28, eq_low_db: -1.0, eq_mid_db: 0.0, eq_high_db: 1.0, reverb_send: 0.22 },
+        percussion_fills: { gain_db: -1.5, pan: 0.35, eq_low_db: 0.0, eq_mid_db: 0.5, eq_high_db: 1.5, reverb_send: 0.15 },
+        ambience_fx: { gain_db: -2.5, pan: 0.0, eq_low_db: -2.0, eq_mid_db: 0.0, eq_high_db: 2.0, reverb_send: 0.45 }
+      }
+    },
+    warm_bass: {
+      master_gain_db: 0.0,
+      analog_tape_warmth: 0.6,
+      channels: {
+        vocals: { gain_db: 1.5, pan: 0.0, eq_low_db: 0.0, eq_mid_db: 1.0, eq_high_db: 1.0, reverb_send: 0.2 },
+        backing_harmonies: { gain_db: -0.5, pan: 0.1, eq_low_db: 0.0, eq_mid_db: 0.5, eq_high_db: 0.5, reverb_send: 0.25 },
+        drums: { gain_db: 1.0, pan: 0.0, eq_low_db: 2.5, eq_mid_db: 0.0, eq_high_db: -0.5, reverb_send: 0.1 },
+        bass: { gain_db: 3.5, pan: 0.0, eq_low_db: 4.0, eq_mid_db: 1.0, eq_high_db: -2.0, reverb_send: 0.05 },
+        guitar: { gain_db: -0.5, pan: 0.22, eq_low_db: 0.5, eq_mid_db: 0.5, eq_high_db: 0.0, reverb_send: 0.15 },
+        keys_synths: { gain_db: 0.0, pan: -0.22, eq_low_db: 1.0, eq_mid_db: 0.0, eq_high_db: -0.5, reverb_send: 0.18 },
+        percussion_fills: { gain_db: 0.0, pan: 0.25, eq_low_db: 0.5, eq_mid_db: 0.0, eq_high_db: 0.5, reverb_send: 0.12 },
+        ambience_fx: { gain_db: -1.5, pan: 0.0, eq_low_db: 0.0, eq_mid_db: 0.0, eq_high_db: 0.5, reverb_send: 0.3 }
+      }
+    },
+    club_punch: {
+      master_gain_db: 1.0,
+      analog_tape_warmth: 0.45,
+      channels: {
+        vocals: { gain_db: 2.0, pan: 0.0, eq_low_db: -2.0, eq_mid_db: 1.5, eq_high_db: 3.0, reverb_send: 0.18 },
+        backing_harmonies: { gain_db: 1.0, pan: 0.0, eq_low_db: -2.0, eq_mid_db: 1.0, eq_high_db: 2.0, reverb_send: 0.25 },
+        drums: { gain_db: 2.5, pan: 0.0, eq_low_db: 3.0, eq_mid_db: -1.0, eq_high_db: 2.5, reverb_send: 0.08 },
+        bass: { gain_db: 2.5, pan: 0.0, eq_low_db: 3.5, eq_mid_db: 0.5, eq_high_db: -1.0, reverb_send: 0.0 },
+        guitar: { gain_db: -1.0, pan: 0.3, eq_low_db: -1.0, eq_mid_db: 1.0, eq_high_db: 1.5, reverb_send: 0.12 },
+        keys_synths: { gain_db: 0.5, pan: -0.3, eq_low_db: -1.0, eq_mid_db: 0.5, eq_high_db: 2.0, reverb_send: 0.2 },
+        percussion_fills: { gain_db: 1.0, pan: 0.4, eq_low_db: -1.0, eq_mid_db: 1.0, eq_high_db: 2.5, reverb_send: 0.1 },
+        ambience_fx: { gain_db: -1.0, pan: 0.0, eq_low_db: -1.5, eq_mid_db: 0.0, eq_high_db: 2.5, reverb_send: 0.35 }
+      }
+    },
+    wide_acoustic: {
+      master_gain_db: 0.0,
+      analog_tape_warmth: 0.4,
+      channels: {
+        vocals: { gain_db: 1.5, pan: 0.0, eq_low_db: -0.5, eq_mid_db: 1.0, eq_high_db: 2.0, reverb_send: 0.3 },
+        backing_harmonies: { gain_db: 1.0, pan: -0.45, eq_low_db: -1.0, eq_mid_db: 0.5, eq_high_db: 2.0, reverb_send: 0.4 },
+        drums: { gain_db: -1.0, pan: 0.0, eq_low_db: 0.5, eq_mid_db: 0.0, eq_high_db: 1.0, reverb_send: 0.15 },
+        bass: { gain_db: 0.5, pan: 0.0, eq_low_db: 1.5, eq_mid_db: 0.0, eq_high_db: -1.0, reverb_send: 0.05 },
+        guitar: { gain_db: 1.5, pan: 0.55, eq_low_db: 0.0, eq_mid_db: 1.5, eq_high_db: 2.5, reverb_send: 0.28 },
+        keys_synths: { gain_db: 0.5, pan: -0.55, eq_low_db: 0.0, eq_mid_db: 0.5, eq_high_db: 1.5, reverb_send: 0.32 },
+        percussion_fills: { gain_db: 0.0, pan: 0.45, eq_low_db: 0.0, eq_mid_db: 0.5, eq_high_db: 2.0, reverb_send: 0.22 },
+        ambience_fx: { gain_db: 1.0, pan: 0.0, eq_low_db: -1.0, eq_mid_db: 0.5, eq_high_db: 2.5, reverb_send: 0.5 }
+      }
+    }
+  };
 
-    stemStrips.forEach(strip => {
+  let dawAudioCtx = null;
+  let dawMasterGainNode = null;
+  let dawReverbNode = null;
+  const dawChannelGraphs = {};
+  let dawMeterRaf = null;
+
+  function dbToLinearGain(db) {
+    return Math.pow(10, (Number(db) || 0) / 20);
+  }
+
+  function formatPanText(panVal) {
+    const p = Number(panVal) || 0;
+    if (Math.abs(p) < 0.03) return 'C';
+    const pct = Math.round(Math.abs(p) * 100);
+    return p < 0 ? `L${pct}` : `R${pct}`;
+  }
+
+  function createDeterministicReverbIR(ctx) {
+    const length = Math.floor(ctx.sampleRate * 1.4);
+    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      let seed = ch === 0 ? 1337 : 7331;
+      for (let i = 0; i < length; i++) {
+        seed = (seed * 16807) % 2147483647;
+        const white = ((seed / 2147483647) * 2) - 1;
+        data[i] = white * Math.pow(1 - i / length, 2.4) * 0.4;
+      }
+    }
+    return impulse;
+  }
+
+  function ensureDawAudioGraph() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!dawAudioCtx) {
+      try {
+        dawAudioCtx = new AudioCtx();
+        dawMasterGainNode = dawAudioCtx.createGain();
+        dawMasterGainNode.gain.value = dbToLinearGain(
+          DOM.mixerMasterGainSlider ? parseFloat(DOM.mixerMasterGainSlider.value) : 0
+        );
+        dawMasterGainNode.connect(dawAudioCtx.destination);
+        dawReverbNode = dawAudioCtx.createConvolver();
+        dawReverbNode.buffer = createDeterministicReverbIR(dawAudioCtx);
+        dawReverbNode.connect(dawMasterGainNode);
+      } catch (e) {
+        console.warn('WebAudio AudioContext init skipped:', e);
+        return null;
+      }
+    }
+    if (dawAudioCtx.state === 'suspended') {
+      dawAudioCtx.resume().catch(() => {});
+    }
+
+    document.querySelectorAll('.stem-strip').forEach(strip => {
       const stem = strip.dataset.stem;
+      const audio = strip.querySelector('.stem-audio-element');
+      if (!stem || !audio || dawChannelGraphs[stem]) return;
+      try {
+        const source = dawAudioCtx.createMediaElementSource(audio);
+        const eqLow = dawAudioCtx.createBiquadFilter();
+        eqLow.type = 'lowshelf';
+        eqLow.frequency.value = 100;
+        const eqMid = dawAudioCtx.createBiquadFilter();
+        eqMid.type = 'peaking';
+        eqMid.frequency.value = 1000;
+        eqMid.Q.value = 1.0;
+        const eqHigh = dawAudioCtx.createBiquadFilter();
+        eqHigh.type = 'highshelf';
+        eqHigh.frequency.value = 10000;
+        const gainNode = dawAudioCtx.createGain();
+        const panner = dawAudioCtx.createStereoPanner();
+        const reverbSend = dawAudioCtx.createGain();
+        const analyser = dawAudioCtx.createAnalyser();
+        analyser.fftSize = 256;
+
+        source.connect(eqLow);
+        eqLow.connect(eqMid);
+        eqMid.connect(eqHigh);
+        eqHigh.connect(gainNode);
+        gainNode.connect(panner);
+        panner.connect(analyser);
+        analyser.connect(dawMasterGainNode);
+        panner.connect(reverbSend);
+        reverbSend.connect(dawReverbNode);
+
+        dawChannelGraphs[stem] = {
+          source, eqLow, eqMid, eqHigh, gainNode, panner, reverbSend, analyser,
+          vuData: new Uint8Array(analyser.frequencyBinCount)
+        };
+      } catch (e) {
+        // Fallback to native HTMLAudioElement volume control when MediaElementSource is unavailable
+      }
+    });
+    syncDawNodesFromState();
+    return dawAudioCtx;
+  }
+
+  function startDawMeterLoop() {
+    if (dawMeterRaf) return;
+    const tick = () => {
+      let anyPlaying = false;
+      document.querySelectorAll('.stem-strip').forEach(strip => {
+        const stem = strip.dataset.stem;
+        const audio = strip.querySelector('.stem-audio-element');
+        const fill = strip.querySelector('.stem-vu-fill');
+        const graph = dawChannelGraphs[stem];
+        if (!fill) return;
+        if (audio && !audio.paused && graph && graph.analyser) {
+          anyPlaying = true;
+          graph.analyser.getByteTimeDomainData(graph.vuData);
+          let peak = 0;
+          for (let i = 0; i < graph.vuData.length; i++) {
+            const amp = Math.abs((graph.vuData[i] - 128) / 128);
+            if (amp > peak) peak = amp;
+          }
+          fill.style.width = `${Math.min(100, Math.round(peak * 140))}%`;
+        } else {
+          fill.style.width = '0%';
+        }
+      });
+      if (anyPlaying) {
+        dawMeterRaf = requestAnimationFrame(tick);
+      } else {
+        dawMeterRaf = null;
+      }
+    };
+    dawMeterRaf = requestAnimationFrame(tick);
+  }
+
+  function syncDawNodesFromState() {
+    const hasAnySolo = Object.values(State.stemsSoloed).some(v => v === true);
+    if (dawMasterGainNode && dawAudioCtx && DOM.mixerMasterGainSlider) {
+      dawMasterGainNode.gain.setTargetAtTime(
+        dbToLinearGain(parseFloat(DOM.mixerMasterGainSlider.value)),
+        dawAudioCtx.currentTime,
+        0.015
+      );
+    }
+
+    document.querySelectorAll('.stem-strip').forEach(strip => {
+      const stem = strip.dataset.stem;
+      if (!stem) return;
+      const ch = State.mixerState[stem] || createDefaultStemChannelState(stem);
+      const isSolo = !!State.stemsSoloed[stem] || !!ch.solo;
+      const isMute = !!State.stemsMuted[stem] || !!ch.mute;
+      const effectiveMute = hasAnySolo ? (!isSolo || isMute) : isMute;
+      const linGain = effectiveMute ? 0 : dbToLinearGain(ch.gain_db);
+      const audio = strip.querySelector('.stem-audio-element');
+      const graph = dawChannelGraphs[stem];
+
+      if (graph && dawAudioCtx) {
+        const t = dawAudioCtx.currentTime;
+        graph.gainNode.gain.setTargetAtTime(linGain, t, 0.015);
+        graph.panner.pan.setTargetAtTime(Math.max(-1, Math.min(1, ch.pan || 0)), t, 0.015);
+        graph.eqLow.gain.setTargetAtTime(ch.eq_low_db || 0, t, 0.02);
+        graph.eqMid.gain.setTargetAtTime(ch.eq_mid_db || 0, t, 0.02);
+        graph.eqHigh.gain.setTargetAtTime(ch.eq_high_db || 0, t, 0.02);
+        graph.reverbSend.gain.setTargetAtTime(ch.reverb_send || 0, t, 0.02);
+        if (audio) audio.muted = false;
+      } else if (audio) {
+        audio.muted = effectiveMute;
+        audio.volume = Math.max(0, Math.min(1, linGain));
+      }
+
+      strip.style.opacity = effectiveMute ? '0.45' : '1.0';
+    });
+  }
+
+  function applyChannelStateToStripDom(stem, ch) {
+    State.mixerState[stem] = Object.assign(createDefaultStemChannelState(stem), ch || {});
+    const merged = State.mixerState[stem];
+    State.stemsSoloed[stem] = Boolean(merged.solo);
+    State.stemsMuted[stem] = Boolean(merged.mute);
+    const strip = document.querySelector(`.stem-strip[data-stem="${stem}"]`);
+    if (!strip) return;
+
+    const soloBtn = strip.querySelector('.stem-btn.solo');
+    const muteBtn = strip.querySelector('.stem-btn.mute');
+    if (soloBtn) {
+      soloBtn.classList.toggle('active', Boolean(merged.solo));
+      soloBtn.setAttribute('aria-pressed', Boolean(merged.solo) ? 'true' : 'false');
+    }
+    if (muteBtn) {
+      muteBtn.classList.toggle('active', Boolean(merged.mute));
+      muteBtn.setAttribute('aria-pressed', Boolean(merged.mute) ? 'true' : 'false');
+    }
+
+    const gainInput = strip.querySelector('.stem-gain-db');
+    const gainVal = strip.querySelector('.val-gain-db');
+    if (gainInput) gainInput.value = String(merged.gain_db || 0);
+    if (gainVal) gainVal.textContent = `${(Number(merged.gain_db) || 0) >= 0 ? '+' : ''}${(Number(merged.gain_db) || 0).toFixed(1)} dB`;
+
+    const panInput = strip.querySelector('.stem-pan');
+    const panVal = strip.querySelector('.val-pan');
+    if (panInput) panInput.value = String(merged.pan || 0);
+    if (panVal) panVal.textContent = formatPanText(merged.pan);
+
+    const eqLow = strip.querySelector('.stem-eq-low');
+    const eqLowVal = strip.querySelector('.val-eq-low');
+    if (eqLow) eqLow.value = String(merged.eq_low_db || 0);
+    if (eqLowVal) eqLowVal.textContent = `${(Number(merged.eq_low_db) || 0).toFixed(1)} dB`;
+
+    const eqMid = strip.querySelector('.stem-eq-mid');
+    const eqMidVal = strip.querySelector('.val-eq-mid');
+    if (eqMid) eqMid.value = String(merged.eq_mid_db || 0);
+    if (eqMidVal) eqMidVal.textContent = `${(Number(merged.eq_mid_db) || 0).toFixed(1)} dB`;
+
+    const eqHigh = strip.querySelector('.stem-eq-high');
+    const eqHighVal = strip.querySelector('.val-eq-high');
+    if (eqHigh) eqHigh.value = String(merged.eq_high_db || 0);
+    if (eqHighVal) eqHighVal.textContent = `${(Number(merged.eq_high_db) || 0).toFixed(1)} dB`;
+
+    const rev = strip.querySelector('.stem-reverb');
+    const revVal = strip.querySelector('.val-reverb');
+    if (rev) rev.value = String(merged.reverb_send || 0);
+    if (revVal) revVal.textContent = `${Math.round((Number(merged.reverb_send) || 0) * 100)}%`;
+  }
+
+  function applyStemMixSpecToMixer(mixSpec) {
+    if (!mixSpec) return;
+    if (typeof mixSpec.master_gain_db === 'number' && DOM.mixerMasterGainSlider) {
+      DOM.mixerMasterGainSlider.value = String(mixSpec.master_gain_db);
+      if (DOM.valMixerMasterGain) {
+        DOM.valMixerMasterGain.textContent = `${mixSpec.master_gain_db >= 0 ? '+' : ''}${mixSpec.master_gain_db.toFixed(1)} dB`;
+      }
+    }
+    if (typeof mixSpec.analog_tape_warmth === 'number' && DOM.mixerWarmthSlider) {
+      DOM.mixerWarmthSlider.value = String(mixSpec.analog_tape_warmth);
+      if (DOM.valMixerWarmth) {
+        DOM.valMixerWarmth.textContent = `${Math.round(mixSpec.analog_tape_warmth * 100)}%`;
+      }
+    }
+    if (mixSpec.channels) {
+      CANONICAL_MIXER_STEMS.forEach(stem => {
+        if (mixSpec.channels[stem]) {
+          applyChannelStateToStripDom(stem, mixSpec.channels[stem]);
+        }
+      });
+    }
+    syncDawNodesFromState();
+  }
+
+  function collectCurrentStemMixPayload() {
+    const channels = {};
+    CANONICAL_MIXER_STEMS.forEach(stem => {
+      const ch = State.mixerState[stem] || createDefaultStemChannelState(stem);
+      channels[stem] = {
+        gain_db: Number(ch.gain_db) || 0,
+        pan: Number(ch.pan) || 0,
+        mute: Boolean(State.stemsMuted[stem] || ch.mute),
+        solo: Boolean(State.stemsSoloed[stem] || ch.solo),
+        eq_low_db: Number(ch.eq_low_db) || 0,
+        eq_mid_db: Number(ch.eq_mid_db) || 0,
+        eq_high_db: Number(ch.eq_high_db) || 0,
+        reverb_send: Number(ch.reverb_send) || 0
+      };
+    });
+    return {
+      channels,
+      master_gain_db: DOM.mixerMasterGainSlider ? parseFloat(DOM.mixerMasterGainSlider.value) : 0,
+      analog_tape_warmth: DOM.mixerWarmthSlider ? parseFloat(DOM.mixerWarmthSlider.value) : 0.35
+    };
+  }
+
+  function setupStemMixer() {
+    document.querySelectorAll('.stem-strip').forEach(strip => {
+      const stem = strip.dataset.stem;
+      if (!stem) return;
+      if (!State.mixerState[stem]) State.mixerState[stem] = createDefaultStemChannelState(stem);
+
       const soloBtn = strip.querySelector('.stem-btn.solo');
       const muteBtn = strip.querySelector('.stem-btn.mute');
-      const volSlider = strip.querySelector('.stem-vol');
-      const audioElement = strip.querySelector('.stem-audio-element');
       const regenBtn = strip.querySelector('.stem-regen-btn');
 
-      // Solo button click
       if (soloBtn) {
         soloBtn.addEventListener('click', function () {
           const isSolo = !this.classList.contains('active');
           this.classList.toggle('active', isSolo);
+          this.setAttribute('aria-pressed', isSolo ? 'true' : 'false');
           State.stemsSoloed[stem] = isSolo;
+          State.mixerState[stem].solo = isSolo;
           applySoloMuteMatrix();
         });
       }
 
-      // Mute button click
       if (muteBtn) {
         muteBtn.addEventListener('click', function () {
           const isMute = !this.classList.contains('active');
           this.classList.toggle('active', isMute);
+          this.setAttribute('aria-pressed', isMute ? 'true' : 'false');
           State.stemsMuted[stem] = isMute;
+          State.mixerState[stem].mute = isMute;
           applySoloMuteMatrix();
         });
       }
 
-      // Volume slider
-      if (volSlider && audioElement) {
-        volSlider.addEventListener('input', function () {
-          State.stemsVolume[stem] = parseFloat(this.value);
-          audioElement.volume = parseFloat(this.value);
+      const bindRange = (selector, prop, valSelector, formatter) => {
+        const input = strip.querySelector(selector);
+        const valEl = strip.querySelector(valSelector);
+        if (!input) return;
+        input.addEventListener('input', function () {
+          const num = parseFloat(this.value);
+          State.mixerState[stem][prop] = num;
+          if (valEl) valEl.textContent = formatter(num);
+          if (DOM.mixerPresetSelect) DOM.mixerPresetSelect.value = 'custom';
+          syncDawNodesFromState();
         });
-      }
+      };
 
-      // Individual Stem Regeneration
+      bindRange('.stem-gain-db', 'gain_db', '.val-gain-db', v => `${v >= 0 ? '+' : ''}${v.toFixed(1)} dB`);
+      bindRange('.stem-pan', 'pan', '.val-pan', formatPanText);
+      bindRange('.stem-eq-low', 'eq_low_db', '.val-eq-low', v => `${v.toFixed(1)} dB`);
+      bindRange('.stem-eq-mid', 'eq_mid_db', '.val-eq-mid', v => `${v.toFixed(1)} dB`);
+      bindRange('.stem-eq-high', 'eq_high_db', '.val-eq-high', v => `${v.toFixed(1)} dB`);
+      bindRange('.stem-reverb', 'reverb_send', '.val-reverb', v => `${Math.round(v * 100)}%`);
+
       if (regenBtn) {
         regenBtn.addEventListener('click', function () {
           regenerateSingleStem(stem, this);
@@ -1043,64 +1444,219 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
       }
     });
 
-    // Play All Stems Together
-    DOM.btnPlayAllStems.addEventListener('click', function () {
-      const audios = document.querySelectorAll('.stem-audio-element');
-      audios.forEach(aud => {
-        aud.currentTime = DOM.masterAudio.currentTime || 0;
-        aud.play().catch(() => {});
+    if (DOM.mixerMasterGainSlider) {
+      DOM.mixerMasterGainSlider.addEventListener('input', function () {
+        const v = parseFloat(this.value);
+        if (DOM.valMixerMasterGain) DOM.valMixerMasterGain.textContent = `${v >= 0 ? '+' : ''}${v.toFixed(1)} dB`;
+        syncDawNodesFromState();
       });
-      DOM.deckStatusMsg.textContent = 'Playing 8 Stems in Multi-Track Sync';
-    });
+    }
 
-    // Stop All Stems
-    DOM.btnStopAllStems.addEventListener('click', function () {
-      const audios = document.querySelectorAll('.stem-audio-element');
-      audios.forEach(aud => {
-        aud.pause();
-        aud.currentTime = 0;
+    if (DOM.mixerWarmthSlider) {
+      DOM.mixerWarmthSlider.addEventListener('input', function () {
+        const v = parseFloat(this.value);
+        if (DOM.valMixerWarmth) DOM.valMixerWarmth.textContent = `${Math.round(v * 100)}%`;
       });
-      DOM.deckStatusMsg.textContent = 'All Stems Stopped';
-    });
+    }
 
-    // Reset Mute & Solo
-    DOM.btnUnmuteAll.addEventListener('click', function () {
-      document.querySelectorAll('.stem-btn.solo').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.stem-btn.mute').forEach(b => b.classList.remove('active'));
-      State.stemsSoloed = {};
-      State.stemsMuted = {};
-      applySoloMuteMatrix();
-    });
+    if (DOM.mixerPresetSelect) {
+      DOM.mixerPresetSelect.addEventListener('change', function () {
+        const preset = DAW_MIXER_PRESETS[this.value];
+        if (!preset) return;
+        applyStemMixSpecToMixer(preset);
+        DOM.deckStatusMsg.textContent = `Applied DAW preset: ${this.options[this.selectedIndex].text}`;
+      });
+    }
 
-    // Re-Master Button
-    DOM.btnRemasterTrack.addEventListener('click', function () {
-      const profile = DOM.masteringProfileSelect.value;
-      remasterTrack(profile);
-    });
+    if (DOM.btnPlayAllStems) {
+      DOM.btnPlayAllStems.addEventListener('click', function () {
+        if (!State.activeSongId) {
+          DOM.deckStatusMsg.textContent = 'Create or select a song first to play its 8 isolated stems.';
+          return;
+        }
+        ensureDawAudioGraph();
+        syncDawNodesFromState();
+        const audios = document.querySelectorAll('.stem-audio-element');
+        audios.forEach(aud => {
+          if (!aud.getAttribute('src')) return;
+          aud.currentTime = (DOM.masterAudio && DOM.masterAudio.currentTime) || 0;
+          aud.play().catch(() => {});
+        });
+        startDawMeterLoop();
+        DOM.deckStatusMsg.textContent = 'Playing all 8 canonical stems through WebAudio DSP mixer.';
+      });
+    }
+
+    if (DOM.btnStopAllStems) {
+      DOM.btnStopAllStems.addEventListener('click', function () {
+        document.querySelectorAll('.stem-audio-element').forEach(aud => {
+          aud.pause();
+          aud.currentTime = 0;
+        });
+        if (dawMeterRaf) {
+          cancelAnimationFrame(dawMeterRaf);
+          dawMeterRaf = null;
+        }
+        document.querySelectorAll('.stem-vu-fill').forEach(f => { f.style.width = '0%'; });
+        DOM.deckStatusMsg.textContent = 'All 8 Stems Stopped.';
+      });
+    }
+
+    if (DOM.btnUnmuteAll) {
+      DOM.btnUnmuteAll.addEventListener('click', function () {
+        document.querySelectorAll('.stem-btn.solo, .stem-btn.mute').forEach(b => {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
+        State.stemsSoloed = {};
+        State.stemsMuted = {};
+        CANONICAL_MIXER_STEMS.forEach(s => {
+          if (State.mixerState[s]) {
+            State.mixerState[s].solo = false;
+            State.mixerState[s].mute = false;
+          }
+        });
+        applySoloMuteMatrix();
+      });
+    }
+
+    if (DOM.btnRemasterTrack) {
+      DOM.btnRemasterTrack.addEventListener('click', function () {
+        const profile = DOM.masteringProfileSelect.value;
+        remasterTrack(profile);
+      });
+    }
+
+    if (DOM.btnAskMixCopilot) {
+      DOM.btnAskMixCopilot.addEventListener('click', requestAiMixRecommendation);
+    }
+
+    if (DOM.btnSaveMixVersion) {
+      DOM.btnSaveMixVersion.addEventListener('click', saveCustomMixAsNewVersion);
+    }
+  }
+
+  async function requestAiMixRecommendation() {
+    if (!DOM.btnAskMixCopilot) return;
+    const goal = (DOM.mixCopilotGoalInput ? DOM.mixCopilotGoalInput.value.trim() : '')
+      || 'Bring lead vocals forward clearly with warm low-end support and balanced stereo guitars';
+    DOM.btnAskMixCopilot.disabled = true;
+    DOM.btnAskMixCopilot.textContent = '⏳ Consulting Gate 4...';
+    if (DOM.mixCopilotStatus) {
+      DOM.mixCopilotStatus.classList.remove('hidden');
+      DOM.mixCopilotStatus.textContent = 'Running Gate 4 Nimble Mix Copilot...';
+    }
+
+    try {
+      const currentMix = collectCurrentStemMixPayload();
+      const res = await fetch('/api/mix/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          song_id: State.activeSongId || undefined,
+          version: State.activeVersion || 1,
+          goal: goal,
+          current_mix: currentMix,
+          commercial_only: State.commercialOnly,
+          decision_model: State.decisionModel,
+          decision_mode: State.decisionMode
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      if (data.trace) {
+        recordDecisionTraces([data.trace]);
+      }
+
+      if (data.hitl_gate_triggered) {
+        showHitlConfirmationBanner(
+          data.trace,
+          data.hitl_reason || data.rationale,
+          () => {
+            applyStemMixSpecToMixer(data.recommended_stem_mix);
+            if (DOM.mixCopilotStatus) {
+              DOM.mixCopilotStatus.textContent = `✓ Confirmed & applied "${data.selected_choice}" (${Math.round((data.confidence || 0) * 100)}% confidence): ${data.rationale}`;
+            }
+          }
+        );
+      } else {
+        applyStemMixSpecToMixer(data.recommended_stem_mix);
+        if (DOM.mixCopilotStatus) {
+          DOM.mixCopilotStatus.textContent = `✓ Gate 4 (${data.selected_choice}, ${Math.round((data.confidence || 0) * 100)}% confidence): ${data.rationale}`;
+        }
+      }
+      DOM.deckStatusMsg.textContent = `Gate 4 AI Mix applied "${data.selected_choice}". Click "Save Mix as New Version" to bounce 48 kHz WAV.`;
+    } catch (err) {
+      if (DOM.mixCopilotStatus) {
+        DOM.mixCopilotStatus.textContent = `Gate 4 Mix Copilot error: ${err && err.message ? err.message : err}`;
+      }
+    } finally {
+      DOM.btnAskMixCopilot.disabled = false;
+      DOM.btnAskMixCopilot.textContent = '✨ AI Mix Copilot (Gate 4)';
+    }
+  }
+
+  async function saveCustomMixAsNewVersion() {
+    if (!State.activeSongId) {
+      DOM.deckStatusMsg.textContent = 'Create or select a song before bouncing a custom mix.';
+      return;
+    }
+    const btn = DOM.btnSaveMixVersion;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Bouncing 48 kHz WAV...';
+    }
+    try {
+      const mixPayload = collectCurrentStemMixPayload();
+      const res = await fetch('/api/songs/mix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          song_id: State.activeSongId,
+          from_version: State.activeVersion || 1,
+          channels: mixPayload.channels,
+          master_gain_db: mixPayload.master_gain_db,
+          analog_tape_warmth: mixPayload.analog_tape_warmth
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error || !data.to_version) {
+        throw new Error((data && data.error) || `HTTP ${res.status}`);
+      }
+      const prevVer = State.songs[State.activeSongId]?.versions[State.activeVersion] || {};
+      const nextVerNum = data.to_version;
+      State.songs[State.activeSongId].versions[nextVerNum] = buildSongVersionRecord(
+        State.activeSongId,
+        nextVerNum,
+        prevVer.title || State.songs[State.activeSongId].title,
+        prevVer.bpm || 80,
+        prevVer.key || 'G Major',
+        `Custom 8-Channel DAW Mix Bounce from v${data.from_version}`,
+        prevVer.telemetry ? prevVer.telemetry.judgeScore : 9.6,
+        prevVer.lyrics || '',
+        data.stem_mix || mixPayload
+      );
+      renderSidebarSongsList();
+      switchVersion(nextVerNum, true);
+      if (DOM.mixCopilotStatus) {
+        DOM.mixCopilotStatus.classList.remove('hidden');
+        DOM.mixCopilotStatus.textContent = `✓ Bounced non-destructive v${nextVerNum} 48 kHz Stereo WAV!`;
+      }
+      announcePoliteStatus(`Bounced custom mix as version ${nextVerNum}.`);
+    } catch (err) {
+      DOM.deckStatusMsg.textContent = `Bounce error: ${err && err.message ? err.message : err}`;
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '💾 Save Mix as New Version';
+      }
+    }
   }
 
   function applySoloMuteMatrix() {
-    const hasAnySolo = Object.values(State.stemsSoloed).some(v => v === true);
-    const stemStrips = document.querySelectorAll('.stem-strip');
-
-    stemStrips.forEach(strip => {
-      const stem = strip.dataset.stem;
-      const audio = strip.querySelector('.stem-audio-element');
-      const isSolo = !!State.stemsSoloed[stem];
-      const isMute = !!State.stemsMuted[stem];
-
-      let effectiveMute = false;
-      if (hasAnySolo) {
-        effectiveMute = !isSolo || isMute;
-      } else {
-        effectiveMute = isMute;
-      }
-
-      if (audio) {
-        audio.muted = effectiveMute;
-      }
-      strip.style.opacity = effectiveMute ? '0.45' : '1.0';
-    });
+    syncDawNodesFromState();
   }
 
   // ==========================================================================
@@ -1256,14 +1812,13 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
   }
 
   function compactGenreBadge(rawGenre) {
-    if (!rawGenre) return 'Studio Master';
+    if (!rawGenre) return 'Open-Weight';
     const g = String(rawGenre);
-    const hasLyria = /lyria\s*3\.5/i.test(g);
     let base = g.split(/\u2022|-/)[0].trim();
     if (/acoustic folk/i.test(base)) base = 'Acoustic Folk';
     else if (/indie folk|chamber pop/i.test(base)) base = 'Indie Folk';
     else if (base.length > 20) base = base.slice(0, 20).trim();
-    return hasLyria ? (base + ' | Lyria 3.5') : base;
+    return base;
   }
 
   function rebuildHeaderVersionDropdown(song, activeVer) {
@@ -1396,7 +1951,7 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
       DOM.cardDownloadBtn.download = `${ver.title.replace(/[^a-zA-Z0-9_-]+/g, '_')}_v${targetVer}_Master.wav`;
     }
 
-    // Update Master & Stem Audio Players
+    // Update Master & 8 Canonical Stem Audio Players
     DOM.masterAudio.pause();
     DOM.masterAudio.src = ver.audioUrls.master;
     DOM.masterAudio.load();
@@ -1404,14 +1959,14 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     State.isPlayingMaster = false;
 
     const stemKeyMap = {
-      raspy_tenor_vocals: 'vocals',
+      vocals: 'vocals',
+      backing_harmonies: 'backing_harmonies',
       drums: 'drums',
       bass: 'bass',
       guitar: 'guitar',
-      other: 'other',
-      inpainted_guitar: 'inpainted_guitar',
-      inpainted_drums: 'inpainted_drums',
-      draft_groove: 'draft_groove'
+      keys_synths: 'keys_synths',
+      percussion_fills: 'percussion_fills',
+      ambience_fx: 'ambience_fx'
     };
     document.querySelectorAll('.stem-strip').forEach(strip => {
       const stemName = strip.dataset.stem;
@@ -1423,6 +1978,12 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
         audioEl.load();
       }
     });
+    if (ver.stemMix) {
+      applyStemMixSpecToMixer(ver.stemMix);
+    }
+    if (Array.isArray(ver.decisionTraces) && ver.decisionTraces.length > 0) {
+      renderDecisionAuditList(ver.decisionTraces);
+    }
 
     // Update Telemetry Pills
     if (DOM.telemPeak) DOM.telemPeak.textContent = `${ver.telemetry.peakDbfs} dBFS`;
@@ -1473,221 +2034,371 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
   }
 
   // ==========================================================================
-  // Local WAV / Audio File Loader (Transcodes Float32 WAV -> PCM16 in Memory)
+  // Dual-Mode Lyrics Studio, Open-Weight Catalog & Nimble Decision Engine UI
   // ==========================================================================
-  function transcodeWavArrayBufferToPcm16IfFloat(arrayBuffer) {
-    if (!arrayBuffer || arrayBuffer.byteLength < 44) {
-      return { buffer: arrayBuffer, telemetry: null };
+  const NON_COMMERCIAL_REPO_IDS = new Set([
+    'tencent/SongGeneration',
+    'm-a-p/YuE2-3B',
+    'facebook/musicgen-large'
+  ]);
+
+  function setLyricsMode(mode) {
+    State.lyricsMode = mode === 'ai_generated' ? 'ai_generated' : 'user_provided';
+    const isAi = State.lyricsMode === 'ai_generated';
+    if (DOM.radioLyricsUser) DOM.radioLyricsUser.checked = !isAi;
+    if (DOM.radioLyricsAi) DOM.radioLyricsAi.checked = isAi;
+    if (DOM.aiLyricsTopicPanel) {
+      DOM.aiLyricsTopicPanel.classList.toggle('hidden', !isAi);
     }
-    const view = new DataView(arrayBuffer);
-    const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-    const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
-    if (riff !== 'RIFF' || wave !== 'WAVE') {
-      return { buffer: arrayBuffer, telemetry: null };
+    if (DOM.lyricsPreservationBadge) {
+      DOM.lyricsPreservationBadge.textContent = isAi
+        ? 'AI Draft (Editable & Verbatim Once Approved)'
+        : '100% Verbatim Protected';
     }
-
-    let offset = 12;
-    let audioFormat = 1;
-    let numChannels = 2;
-    let sampleRate = 48000;
-    let bitsPerSample = 16;
-    let dataOffset = 0;
-    let dataSize = 0;
-
-    while (offset + 8 <= view.byteLength) {
-      const chunkId = String.fromCharCode(
-        view.getUint8(offset),
-        view.getUint8(offset + 1),
-        view.getUint8(offset + 2),
-        view.getUint8(offset + 3)
-      );
-      const chunkSize = view.getUint32(offset + 4, true);
-      offset += 8;
-      if (chunkId === 'fmt ' && chunkSize >= 16 && offset + 16 <= view.byteLength) {
-        audioFormat = view.getUint16(offset, true);
-        numChannels = view.getUint16(offset + 2, true);
-        sampleRate = view.getUint32(offset + 4, true);
-        bitsPerSample = view.getUint16(offset + 14, true);
-      } else if (chunkId === 'data') {
-        dataOffset = offset;
-        dataSize = Math.min(chunkSize, view.byteLength - offset);
-        break;
-      }
-      offset += chunkSize;
-    }
-
-    if (dataOffset === 0) {
-      return { buffer: arrayBuffer, telemetry: null };
-    }
-
-    let maxPeak = 0.0;
-    let sumSq = 0.0;
-    let sampleCount = 0;
-
-    // If 32-bit IEEE float WAV (FormatTag = 3), transcode to 16-bit PCM WAV (FormatTag = 1)
-    if (audioFormat === 3 && bitsPerSample === 32) {
-      sampleCount = Math.floor(dataSize / 4);
-      const pcmDataSize = sampleCount * 2;
-      const outBuf = new ArrayBuffer(44 + pcmDataSize);
-      const outView = new DataView(outBuf);
-
-      const writeStr = (pos, str) => {
-        for (let i = 0; i < str.length; i++) outView.setUint8(pos + i, str.charCodeAt(i));
-      };
-      writeStr(0, 'RIFF');
-      outView.setUint32(4, 36 + pcmDataSize, true);
-      writeStr(8, 'WAVE');
-      writeStr(12, 'fmt ');
-      outView.setUint32(16, 16, true);
-      outView.setUint16(20, 1, true); // PCM = 1
-      outView.setUint16(22, numChannels, true);
-      outView.setUint32(24, sampleRate, true);
-      const blockAlign = numChannels * 2;
-      outView.setUint32(28, sampleRate * blockAlign, true);
-      outView.setUint16(32, blockAlign, true);
-      outView.setUint16(34, 16, true);
-      writeStr(36, 'data');
-      outView.setUint32(40, pcmDataSize, true);
-
-      let outPos = 44;
-      for (let i = 0; i < sampleCount; i++) {
-        let s = view.getFloat32(dataOffset + i * 4, true);
-        if (!isFinite(s)) s = 0;
-        const abs = Math.abs(s);
-        if (abs > maxPeak) maxPeak = abs;
-        sumSq += s * s;
-        const clamped = Math.max(-1.0, Math.min(0.999969, s));
-        const pcm16 = Math.round(clamped * 32767.0);
-        outView.setInt16(outPos, pcm16, true);
-        outPos += 2;
-      }
-
-      const rms = sampleCount > 0 ? Math.sqrt(sumSq / sampleCount) : 0.001;
-      const peakDb = maxPeak > 1e-6 ? (20 * Math.log10(maxPeak)).toFixed(1) : '-60.0';
-      const rmsDb = rms > 1e-6 ? (20 * Math.log10(rms)).toFixed(1) : '-60.0';
-      const dr = Math.max(4.0, (parseFloat(peakDb) - parseFloat(rmsDb)).toFixed(1));
-      return {
-        buffer: outBuf,
-        telemetry: {
-          peakDbfs: parseFloat(peakDb),
-          rmsDbfs: parseFloat(rmsDb),
-          dynamicRange: parseFloat(dr),
-          tempoDrift: 0.0,
-          zeroClipping: maxPeak <= 1.0,
-          judgeScore: 9.6,
-          sampleRate,
-          channels: numChannels
-        }
-      };
-    }
-
-    // Standard 16-bit PCM telemetry scan
-    if (audioFormat === 1 && bitsPerSample === 16) {
-      sampleCount = Math.floor(dataSize / 2);
-      const step = Math.max(1, Math.floor(sampleCount / 50000));
-      let counted = 0;
-      for (let i = 0; i < sampleCount; i += step) {
-        const s = view.getInt16(dataOffset + i * 2, true) / 32768.0;
-        const abs = Math.abs(s);
-        if (abs > maxPeak) maxPeak = abs;
-        sumSq += s * s;
-        counted++;
-      }
-      const rms = counted > 0 ? Math.sqrt(sumSq / counted) : 0.001;
-      const peakDb = maxPeak > 1e-6 ? (20 * Math.log10(maxPeak)).toFixed(1) : '-60.0';
-      const rmsDb = rms > 1e-6 ? (20 * Math.log10(rms)).toFixed(1) : '-60.0';
-      const dr = Math.max(4.0, (parseFloat(peakDb) - parseFloat(rmsDb)).toFixed(1));
-      return {
-        buffer: arrayBuffer,
-        telemetry: {
-          peakDbfs: parseFloat(peakDb),
-          rmsDbfs: parseFloat(rmsDb),
-          dynamicRange: parseFloat(dr),
-          tempoDrift: 0.0,
-          zeroClipping: maxPeak <= 1.0,
-          judgeScore: 9.6,
-          sampleRate,
-          channels: numChannels
-        }
-      };
-    }
-
-    return { buffer: arrayBuffer, telemetry: null };
   }
 
-  async function handleLocalFilesSelected(fileList) {
-    if (!fileList || fileList.length === 0) return;
+  function syncOpenWeightModelValue(repoId) {
+    if (!repoId) return;
+    if (State.commercialOnly && NON_COMMERCIAL_REPO_IDS.has(repoId)) {
+      repoId = 'ACE-Step/acestep-v15-turbo';
+    }
+    [DOM.selectHfModel, DOM.selectHfModelSettings, DOM.heroOpenWeightSelect].forEach(sel => {
+      if (!sel) return;
+      const hasOpt = Array.from(sel.options).some(o => o.value === repoId);
+      if (hasOpt) sel.value = repoId;
+    });
+    const activeSel = DOM.selectHfModel || DOM.heroOpenWeightSelect;
+    if (DOM.valHfModel && activeSel && activeSel.selectedIndex >= 0) {
+      DOM.valHfModel.textContent = activeSel.options[activeSel.selectedIndex].text.split('(')[0].trim();
+    }
+  }
 
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      if (!file) continue;
+  function applyCommercialOnlyFilter(enabled) {
+    State.commercialOnly = Boolean(enabled);
+    if (DOM.checkboxCommercialOnly) DOM.checkboxCommercialOnly.checked = State.commercialOnly;
+    if (DOM.checkboxCommercialOnlySettings) DOM.checkboxCommercialOnlySettings.checked = State.commercialOnly;
+    [DOM.selectHfModel, DOM.selectHfModelSettings, DOM.heroOpenWeightSelect].forEach(sel => {
+      if (!sel) return;
+      Array.from(sel.options).forEach(opt => {
+        const isNc = NON_COMMERCIAL_REPO_IDS.has(opt.value);
+        opt.disabled = State.commercialOnly && isNc;
+      });
+      if (State.commercialOnly && NON_COMMERCIAL_REPO_IDS.has(sel.value)) {
+        sel.value = 'ACE-Step/acestep-v15-turbo';
+      }
+    });
+    syncOpenWeightModelValue(DOM.selectHfModel ? DOM.selectHfModel.value : 'ACE-Step/acestep-v15-turbo');
+    fetchOpenWeightCatalog();
+  }
 
-      DOM.deckStatusMsg.textContent = `⏳ Loading local file "${file.name}"...`;
-      try {
-        const rawBuf = await file.arrayBuffer();
-        const { buffer, telemetry } = transcodeWavArrayBufferToPcm16IfFloat(rawBuf);
-        const mimeType = file.name.toLowerCase().endsWith('.wav') ? 'audio/wav' : (file.type || 'audio/wav');
-        const blob = new Blob([buffer], { type: mimeType });
-        const blobUrl = URL.createObjectURL(blob);
+  function syncDecisionModelValue(modelTier, modeVal) {
+    if (modelTier) State.decisionModel = modelTier;
+    if (modeVal) State.decisionMode = modeVal;
+    [DOM.selectDecisionModel, DOM.heroDecisionModelSelect].forEach(sel => {
+      if (sel && State.decisionModel) sel.value = State.decisionModel;
+    });
+    if (DOM.selectDecisionMode && State.decisionMode) {
+      DOM.selectDecisionMode.value = State.decisionMode;
+    }
+    if (DOM.valDecisionModel) {
+      DOM.valDecisionModel.textContent = State.decisionModel === 'auto' ? 'Auto Local' : State.decisionModel.split('/').pop();
+    }
+  }
 
-        const cleanTitle = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ');
-        const songId = 'local_' + Date.now() + '_' + i;
+  function showHitlConfirmationBanner(trace, reason, onConfirm) {
+    if (!DOM.hitlDecisionBanner) {
+      if (typeof onConfirm === 'function') onConfirm();
+      return;
+    }
+    State.pendingHitlDecision = onConfirm || null;
+    if (DOM.hitlBannerTitle) {
+      const gate = (trace && trace.gate) ? trace.gate : 'Decision Gate';
+      const conf = (trace && typeof trace.confidence === 'number') ? `${Math.round(trace.confidence * 100)}%` : 'Low';
+      DOM.hitlBannerTitle.textContent = `⚠️ HITL Confirmation Required (${gate} • Confidence ${conf})`;
+    }
+    if (DOM.hitlBannerReason) {
+      DOM.hitlBannerReason.textContent = reason || (trace && trace.rationale) || 'Decision confidence was below threshold; confirm before applying changes.';
+    }
+    DOM.hitlDecisionBanner.classList.remove('hidden');
+  }
 
-        State.songs[songId] = {
-          id: songId,
-          title: cleanTitle,
-          genre: 'Local Studio WAV',
-          liked: false,
-          albumId: null,
-          albumTitle: null,
-          versions: {
-            1: {
-              version: 1,
-              title: cleanTitle,
-              bpm: parseInt(DOM.sliderBpm?.value || '76', 10),
-              key: DOM.selectKey?.value || 'A Major',
-              engineMode: 'local_file',
-              prompt: `Loaded local audio file from disk: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`,
-              telemetry: telemetry || {
-                peakDbfs: -0.3,
-                rmsDbfs: -12.1,
-                dynamicRange: 11.8,
-                tempoDrift: 0.0,
-                zeroClipping: true,
-                judgeScore: 9.6
-              },
-              audioUrls: {
-                master: blobUrl,
-                vocals: blobUrl,
-                drums: blobUrl,
-                bass: blobUrl,
-                guitar: blobUrl,
-                other: blobUrl,
-                inpainted_guitar: blobUrl,
-                inpainted_drums: blobUrl,
-                draft_groove: blobUrl
-              },
-              suggestedIterations: [
-                '🔥 Boost guitar solo wah & sustain in [Guitar Solo]',
-                '🔊 Increase sub-bass warmth (+3dB @ 65Hz)',
-                '🎚️ Re-Master with 1970s Analog Tape Saturation'
-              ]
+  function hideHitlConfirmationBanner() {
+    State.pendingHitlDecision = null;
+    if (DOM.hitlDecisionBanner) DOM.hitlDecisionBanner.classList.add('hidden');
+  }
+
+  function recordDecisionTraces(newTraces) {
+    if (!Array.isArray(newTraces) || newTraces.length === 0) return;
+    newTraces.forEach(tr => {
+      const idx = State.lastDecisionTraces.findIndex(x => x.gate === tr.gate);
+      if (idx >= 0) State.lastDecisionTraces[idx] = tr;
+      else State.lastDecisionTraces.push(tr);
+    });
+    renderDecisionAuditList(State.lastDecisionTraces);
+  }
+
+  function renderDecisionAuditList(traces) {
+    if (!DOM.decisionAuditList) return;
+    const list = Array.isArray(traces) ? traces : [];
+    if (DOM.decisionAuditBadge) {
+      const hitlCount = list.filter(t => Boolean(t.hitl_gate_triggered)).length;
+      DOM.decisionAuditBadge.textContent = list.length === 0
+        ? 'Ready (Local Tier)'
+        : `${list.length} Gates Logged${hitlCount ? ` • ${hitlCount} HITL` : ''}`;
+    }
+    DOM.decisionAuditList.textContent = '';
+    if (list.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'sidebar-albums-empty';
+      empty.textContent = 'Generate a song or run Gate 4 AI Mix Copilot to inspect typed per-gate decision traces.';
+      DOM.decisionAuditList.appendChild(empty);
+      return;
+    }
+    list.forEach(t => {
+      const card = document.createElement('div');
+      card.className = 'decision-trace-card' + (t.hitl_gate_triggered ? ' hitl-flagged' : '');
+
+      const top = document.createElement('div');
+      top.className = 'decision-trace-top';
+      const gateSpan = document.createElement('span');
+      gateSpan.textContent = String(t.gate || 'Gate');
+      const confPct = typeof t.confidence === 'number' ? `${Math.round(t.confidence * 100)}%` : '—';
+      const badgeSpan = document.createElement('span');
+      badgeSpan.className = 'open-weight-pill';
+      badgeSpan.textContent = t.hitl_gate_triggered ? `HITL • ${confPct}` : `✓ ${confPct}`;
+      top.appendChild(gateSpan);
+      top.appendChild(badgeSpan);
+
+      const meta = document.createElement('div');
+      meta.className = 'decision-trace-meta';
+      const lat = typeof t.latency_ms === 'number' ? `${t.latency_ms}ms` : '0ms';
+      meta.textContent = `Choice: ${t.selected_choice || t.choice || '—'} | Model: ${t.model_used || 'local'} | ${lat}`;
+
+      const rat = document.createElement('div');
+      rat.className = 'decision-trace-rationale';
+      rat.textContent = String(t.rationale || '');
+
+      card.appendChild(top);
+      card.appendChild(meta);
+      card.appendChild(rat);
+      DOM.decisionAuditList.appendChild(card);
+    });
+  }
+
+  async function fetchDecisionStatus() {
+    try {
+      const qs = new URLSearchParams({
+        commercial_only: String(State.commercialOnly),
+        preferred_model: State.decisionModel || 'auto'
+      });
+      const res = await fetch(`/api/decision/status?${qs.toString()}`);
+      if (!res.ok) return;
+      const snap = await res.json();
+      if (DOM.nimbleEngineStatusBox) {
+        const tierLabel = snap.active_model || 'fast_deterministic';
+        const ollamaTxt = snap.ollama_online ? 'Ollama Online' : 'Ollama Offline (System-1 Active)';
+        DOM.nimbleEngineStatusBox.textContent =
+          `Active Gate Tier: ${tierLabel} (${snap.active_license_tier || 'Local'}) | ${ollamaTxt} | Free VRAM: ${(snap.gpu_vram_free_gb || 0).toFixed(1)} GB | Free RAM: ${(snap.free_ram_gb || 0).toFixed(1)} GB`;
+      }
+    } catch (_) {}
+  }
+
+  async function fetchOpenWeightCatalog() {
+    try {
+      const res = await fetch(`/api/models/open-weight?commercial_only=${State.commercialOnly ? 'true' : 'false'}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const models = Array.isArray(data.models) ? data.models : [];
+      State.openWeightCatalog = models;
+      renderOpenWeightCatalogCards(models);
+    } catch (_) {}
+  }
+
+  function renderOpenWeightCatalogCards(models) {
+    if (!DOM.openWeightCatalogList) return;
+    DOM.openWeightCatalogList.textContent = '';
+    const activeId = DOM.selectHfModel ? DOM.selectHfModel.value : '';
+    models.forEach(m => {
+      const card = document.createElement('div');
+      card.className = 'open-weight-card' + (m.repo_id === activeId ? ' active' : '');
+
+      const title = document.createElement('strong');
+      title.textContent = `${m.display_name || m.repo_id}`;
+
+      const info = document.createElement('div');
+      info.style.color = 'var(--text-secondary)';
+      info.textContent = `${m.license || 'Open'} • Min VRAM ${m.min_vram_gb || 0} GB • ${m.cached_on_disk ? 'Cached Locally' : 'Ready to Pull'}`;
+
+      const strengths = document.createElement('div');
+      strengths.style.fontSize = '11.5px';
+      strengths.style.color = 'var(--text-muted)';
+      strengths.textContent = m.strengths || '';
+
+      const actions = document.createElement('div');
+      actions.className = 'open-weight-card-actions';
+
+      const btnUse = document.createElement('button');
+      btnUse.type = 'button';
+      btnUse.className = 'stem-global-btn';
+      btnUse.textContent = m.repo_id === activeId ? '✓ Active' : 'Use Model';
+      btnUse.addEventListener('click', () => {
+        syncOpenWeightModelValue(m.repo_id);
+        renderOpenWeightCatalogCards(State.openWeightCatalog);
+        DOM.deckStatusMsg.textContent = `Selected open-weight model: ${m.repo_id}`;
+      });
+
+      const btnPull = document.createElement('button');
+      btnPull.type = 'button';
+      btnPull.className = 'stem-global-btn';
+      btnPull.textContent = m.cached_on_disk ? '✓ Cached' : '⬇ Pull Locally';
+      btnPull.disabled = Boolean(m.cached_on_disk);
+      btnPull.addEventListener('click', async () => {
+        btnPull.disabled = true;
+        btnPull.textContent = '⏳ Pulling...';
+        try {
+          const r = await fetch('/api/models/pull', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: m.repo_id, commercial_only: State.commercialOnly })
+          });
+          const resp = await r.json();
+          if (r.ok && resp.cached_on_disk) {
+            m.cached_on_disk = true;
+            btnPull.textContent = '✓ Cached';
+            if (DOM.settingsModelsStatus) {
+              DOM.settingsModelsStatus.textContent = `✅ Cached ${m.repo_id} at ${resp.downloaded_path}`;
+            }
+          } else {
+            btnPull.disabled = false;
+            btnPull.textContent = '⬇ Retry Pull';
+            if (DOM.settingsModelsStatus) {
+              DOM.settingsModelsStatus.textContent = `⚠️ ${resp.error || 'Pull failed'}`;
             }
           }
-        };
-
-        // Prepend to Sidebar Song & Version History
-        addSongCardToSidebar(songId, cleanTitle, 'Local WAV', 76, 'A Major', 1);
-
-        // Select and play immediately on first loaded file
-        if (i === 0) {
-          State.activeSongId = songId;
-          switchVersion(1, true);
+        } catch (err) {
+          btnPull.disabled = false;
+          btnPull.textContent = '⬇ Retry Pull';
         }
-      } catch (err) {
-        DOM.deckStatusMsg.textContent = `Failed to load local file "${file.name}": ${err && err.message ? err.message : err}`;
-      }
+      });
+
+      actions.appendChild(btnUse);
+      actions.appendChild(btnPull);
+      card.appendChild(title);
+      card.appendChild(info);
+      card.appendChild(strengths);
+      card.appendChild(actions);
+      DOM.openWeightCatalogList.appendChild(card);
+    });
+  }
+
+  async function requestAiLyricsDraft() {
+    if (!DOM.btnAiDraftLyrics) return;
+    const topic = (DOM.lyricsTopicInput ? DOM.lyricsTopicInput.value.trim() : '')
+      || (DOM.newSongNlPrompt ? DOM.newSongNlPrompt.value.trim() : '')
+      || 'Midnight walk beneath silver stars finding quiet hope and dawn';
+    const genre = DOM.heroGenreSelect ? DOM.heroGenreSelect.value : 'Acoustic Folk';
+    const stylePrompt = DOM.newSongNlPrompt ? DOM.newSongNlPrompt.value.trim() : '';
+
+    DOM.btnAiDraftLyrics.disabled = true;
+    DOM.btnAiDraftLyrics.textContent = '⏳ Writing Lyrics...';
+    if (DOM.aiLyricsDraftStatus) {
+      DOM.aiLyricsDraftStatus.textContent = 'Drafting original structured lyrics via Local AI Lyricist...';
     }
+    try {
+      const res = await fetch('/api/lyrics/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'ai_generated',
+          topic: topic,
+          genre: genre,
+          style_prompt: stylePrompt
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error || !data.full_lyrics) {
+        throw new Error((data && data.error) || `HTTP ${res.status}`);
+      }
+      if (DOM.newSongLyricsInput) {
+        DOM.newSongLyricsInput.value = data.full_lyrics;
+      }
+      if (DOM.aiLyricsDraftStatus) {
+        DOM.aiLyricsDraftStatus.textContent = `✓ Drafted "${data.title}" (${data.line_count || 0} lines via ${data.model_used}). Review or edit any line below — your edits are kept verbatim.`;
+      }
+    } catch (err) {
+      if (DOM.aiLyricsDraftStatus) {
+        DOM.aiLyricsDraftStatus.textContent = `Lyricist error: ${err && err.message ? err.message : err}`;
+      }
+    } finally {
+      DOM.btnAiDraftLyrics.disabled = false;
+      DOM.btnAiDraftLyrics.textContent = '✨ AI Write Lyrics Draft';
+    }
+  }
+
+  function setupDualModeAndDecisionUi() {
+    if (DOM.radioLyricsUser) {
+      DOM.radioLyricsUser.addEventListener('change', () => {
+        if (DOM.radioLyricsUser.checked) setLyricsMode('user_provided');
+      });
+    }
+    if (DOM.radioLyricsAi) {
+      DOM.radioLyricsAi.addEventListener('change', () => {
+        if (DOM.radioLyricsAi.checked) setLyricsMode('ai_generated');
+      });
+    }
+    if (DOM.btnAiDraftLyrics) {
+      DOM.btnAiDraftLyrics.addEventListener('click', requestAiLyricsDraft);
+    }
+    if (DOM.heroOpenWeightSelect) {
+      DOM.heroOpenWeightSelect.addEventListener('change', function () {
+        syncOpenWeightModelValue(this.value);
+      });
+    }
+    if (DOM.checkboxCommercialOnly) {
+      DOM.checkboxCommercialOnly.addEventListener('change', function () {
+        applyCommercialOnlyFilter(this.checked);
+      });
+    }
+    if (DOM.checkboxCommercialOnlySettings) {
+      DOM.checkboxCommercialOnlySettings.addEventListener('change', function () {
+        applyCommercialOnlyFilter(this.checked);
+      });
+    }
+    if (DOM.heroDecisionModelSelect) {
+      DOM.heroDecisionModelSelect.addEventListener('change', function () {
+        syncDecisionModelValue(this.value, null);
+        fetchDecisionStatus();
+      });
+    }
+    if (DOM.selectDecisionModel) {
+      DOM.selectDecisionModel.addEventListener('change', function () {
+        syncDecisionModelValue(this.value, null);
+        fetchDecisionStatus();
+      });
+    }
+    if (DOM.selectDecisionMode) {
+      DOM.selectDecisionMode.addEventListener('change', function () {
+        syncDecisionModelValue(null, this.value);
+      });
+    }
+    if (DOM.btnRefreshDecisionStatus) {
+      DOM.btnRefreshDecisionStatus.addEventListener('click', fetchDecisionStatus);
+    }
+    if (DOM.btnRefreshOpenWeightCatalog) {
+      DOM.btnRefreshOpenWeightCatalog.addEventListener('click', fetchOpenWeightCatalog);
+    }
+    if (DOM.btnHitlConfirm) {
+      DOM.btnHitlConfirm.addEventListener('click', () => {
+        const fn = State.pendingHitlDecision;
+        hideHitlConfirmationBanner();
+        if (typeof fn === 'function') fn();
+      });
+    }
+    if (DOM.btnHitlDismiss) {
+      DOM.btnHitlDismiss.addEventListener('click', hideHitlConfirmationBanner);
+    }
+    fetchDecisionStatus();
+    fetchOpenWeightCatalog();
   }
 
   function addSongCardToSidebar(songId, title, genre, bpm, key, versionCount) {
@@ -1770,42 +2481,7 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
     DOM.songHistory.innerHTML = html;
   }
 
-  function setupLocalFileLoader() {
-    const triggerFilePicker = () => {
-      if (DOM.localAudioFileInput) {
-        DOM.localAudioFileInput.value = '';
-        DOM.localAudioFileInput.click();
-      }
-    };
-
-    if (DOM.btnSidebarLoadLocal) {
-      DOM.btnSidebarLoadLocal.addEventListener('click', triggerFilePicker);
-    }
-    if (DOM.btnCardLoadLocal) {
-      DOM.btnCardLoadLocal.addEventListener('click', triggerFilePicker);
-    }
-    if (DOM.localAudioFileInput) {
-      DOM.localAudioFileInput.addEventListener('change', function () {
-        if (this.files && this.files.length > 0) {
-          handleLocalFilesSelected(this.files);
-        }
-      });
-    }
-
-    // Also allow drag-and-drop of .wav / audio files onto the studio window
-    const dropZone = document.getElementById('active-song-card') || document.body;
-    dropZone.addEventListener('dragover', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    dropZone.addEventListener('drop', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        handleLocalFilesSelected(e.dataTransfer.files);
-      }
-    });
-  }
+  // Local WAV / Audio File Loader removed under zero-sampling policy.
 
   // ==========================================================================
   // Extended Full-Band + Vocal Natural Language Templates
@@ -1983,8 +2659,8 @@ Grace and love shining forevermore!`
     }
     const targetObj = (State.albums || []).find(a => a.album_id === (DOM.heroTargetAlbumSelect ? DOM.heroTargetAlbumSelect.value : ''));
     DOM.deckStatusMsg.textContent = targetObj
-      ? `Paste your next poem as-is to generate a new song for album "${targetObj.title}"`
-      : 'Poem-As-Is Composer open - paste any poem directly to generate music with Google Gemini Lyria 3.5';
+      ? `Compose lyrics & generate an open-weight song for album "${targetObj.title}"`
+      : 'Dual-Mode Lyrics Studio open — write/paste lyrics verbatim or let local AI draft original lyrics';
   }
 
   function closeNewSongChatInterface() {
@@ -2009,7 +2685,7 @@ Grace and love shining forevermore!`
       DOM.btnCapsuleMode.className = 'capsule-mode-pill';
       DOM.modePillIcon.textContent = '🎵';
       DOM.modePillText.textContent = 'New Song';
-      DOM.chatInputTextarea.placeholder = "Paste your poem as-is (or describe a new song with vocals and instruments)...";
+      DOM.chatInputTextarea.placeholder = "Write or paste lyrics as-is, or describe an AI-written song with vocals & instruments...";
     }
   }
 
@@ -2034,8 +2710,8 @@ Grace and love shining forevermore!`
       }
     });
 
-    if (DOM.lyriaPhotoInput) {
-      DOM.lyriaPhotoInput.addEventListener('change', function () {
+    if (DOM.photoMoodInput) {
+      DOM.photoMoodInput.addEventListener('change', function () {
         const file = this.files && this.files[0];
         if (!file) return;
         const reader = new FileReader();
@@ -2046,20 +2722,20 @@ Grace and love shining forevermore!`
           State.attachedPhotoMime = file.type || 'image/png';
           State.attachedPhotoName = file.name || 'photo';
           setCapsuleMode(false);
-          if (DOM.lyriaPhotoStatus) {
-            DOM.lyriaPhotoStatus.textContent = '📷 ' + State.attachedPhotoName + ' (click to clear)';
-            DOM.lyriaPhotoStatus.classList.remove('hidden');
+          if (DOM.photoMoodStatus) {
+            DOM.photoMoodStatus.textContent = '📷 ' + State.attachedPhotoName + ' (click to clear)';
+            DOM.photoMoodStatus.classList.remove('hidden');
           }
           if (DOM.deckStatusMsg) {
-            DOM.deckStatusMsg.textContent = 'Photo "' + State.attachedPhotoName + '" attached for Gemini Lyria 3.5 Photo-to-Music!';
+            DOM.deckStatusMsg.textContent = 'Mood image "' + State.attachedPhotoName + '" attached (analyzed locally via Ollama Vision)!';
           }
         };
         reader.readAsDataURL(file);
         this.value = '';
       });
     }
-    if (DOM.lyriaPhotoStatus) {
-      DOM.lyriaPhotoStatus.addEventListener('click', function () {
+    if (DOM.photoMoodStatus) {
+      DOM.photoMoodStatus.addEventListener('click', function () {
         State.attachedPhotoBase64 = null;
         State.attachedPhotoMime = null;
         State.attachedPhotoName = null;
@@ -2101,16 +2777,12 @@ Grace and love shining forevermore!`
     }
     if (DOM.selectHfModel) {
       DOM.selectHfModel.addEventListener('change', function () {
-        if (DOM.valHfModel) DOM.valHfModel.textContent = this.options[this.selectedIndex].text.split(' ')[0];
-        if (DOM.selectHfModelSettings) DOM.selectHfModelSettings.value = this.value;
+        syncOpenWeightModelValue(this.value);
       });
     }
     if (DOM.selectHfModelSettings) {
       DOM.selectHfModelSettings.addEventListener('change', function () {
-        if (DOM.selectHfModel) {
-          DOM.selectHfModel.value = this.value;
-          if (DOM.valHfModel) DOM.valHfModel.textContent = this.options[this.selectedIndex].text.split(' ')[0];
-        }
+        syncOpenWeightModelValue(this.value);
       });
     }
   }
@@ -2171,7 +2843,7 @@ Grace and love shining forevermore!`
   function submitPrompt() {
     let text = DOM.chatInputTextarea.value.trim();
     if (!text && State.attachedPhotoBase64) {
-      text = 'Transform this photo into a complete studio song with rich expressive vocals and instrumentals.';
+      text = 'Transform this mood image into a complete open-weight studio song with expressive vocals and instrumentals.';
     }
     if (!text) return;
 
@@ -2183,7 +2855,7 @@ Grace and love shining forevermore!`
 
     DOM.btnSendPrompt.disabled = true;
     DOM.deckStatusMsg.textContent = createNewSong
-      ? 'Synthesizing full-length studio song via Google Gemini Lyria 3.5...'
+      ? 'Synthesizing full-length studio song via local Open-Weight Engine & Nimble 5-Gate Pipeline...'
       : 'Applying mix iteration...';
 
     // Append User Bubble to conversation
@@ -2491,7 +3163,7 @@ Grace and love shining forevermore!`
     const genre = songData.genre;
     const bpm = songData.bpm;
     const key = songData.key;
-    const modelUsed = songData.modelUsed || 'models/lyria-3.5';
+    const modelUsed = songData.modelUsed || 'ACE-Step/acestep-v15-turbo';
     const savedWavPath = songData.savedWavPath || '';
     const lyrics = songData.lyrics || '';
     const isLiked = Boolean(songData.liked || State.songs[songId]?.liked);
@@ -2606,29 +3278,42 @@ Grace and love shining forevermore!`
       || ((heroVisible && DOM.heroTargetAlbumSelect) ? DOM.heroTargetAlbumSelect.value : '');
     State.pendingTargetAlbumIdForCreation = '';
 
+    const selectedModel = (DOM.selectHfModel ? DOM.selectHfModel.value : '')
+      || (DOM.heroOpenWeightSelect ? DOM.heroOpenWeightSelect.value : '')
+      || 'ACE-Step/acestep-v15-turbo';
+    const topicVal = DOM.lyricsTopicInput ? DOM.lyricsTopicInput.value.trim() : '';
+    const effectiveLyricsMode = (lyrics && State.lyricsMode === 'ai_generated')
+      ? 'user_provided'
+      : (lyrics ? 'user_provided' : State.lyricsMode);
+
     if (DOM.newSongNlPrompt) DOM.newSongNlPrompt.value = '';
     if (DOM.newSongLyricsInput && !isStarterTemplateLyrics(rawLyricsBox)) DOM.newSongLyricsInput.value = '';
 
     closeNewSongChatInterface();
     const pendingBubble = appendGeneratingProgressBubble(
-      'Composing & Recording Your Poem Song with Google Gemini Lyria 3.5...',
-      'Preserving every line of your poem verbatim and generating expressive studio vocals and full instrumentation (~30-45 seconds).',
-      'Synthesizing poem song with Google Gemini Lyria 3.5'
+      `Composing & Recording via ${selectedModel}...`,
+      'Running 5-Gate Nimble Decision Engine + local 48 kHz open-weight synthesis (~20-45 seconds).',
+      'Synthesizing studio song via local open-weight model'
     );
 
     if (DOM.btnGenerateNewSongMain) {
       DOM.btnGenerateNewSongMain.disabled = true;
-      DOM.btnGenerateNewSongMain.innerHTML = '<span>⏳ Synthesizing Poem Song via Gemini Lyria 3.5...</span>';
+      DOM.btnGenerateNewSongMain.innerHTML = '<span>⏳ Synthesizing Complete Song (Open-Weight)...</span>';
     }
 
     const payload = {
       genre: genre,
       style_prompt: promptText,
       lyrics: lyrics || undefined,
+      lyrics_mode: effectiveLyricsMode,
+      lyrics_topic: topicVal || undefined,
       bpm: bpm,
       key_signature: key,
       engine_mode: DOM.selectEngineMode ? DOM.selectEngineMode.value : 'auto',
-      hf_model: DOM.selectHfModel ? DOM.selectHfModel.value : 'models/lyria-3.5',
+      hf_model: selectedModel,
+      commercial_only: Boolean(State.commercialOnly),
+      decision_model: State.decisionModel || 'auto',
+      decision_mode: State.decisionMode || 'auto',
       image_base64: State.attachedPhotoBase64 || undefined,
       image_mime_type: State.attachedPhotoMime || undefined,
       target_album_id: targetAlbumId || undefined
@@ -2637,9 +3322,9 @@ Grace and love shining forevermore!`
     State.attachedPhotoBase64 = null;
     State.attachedPhotoMime = null;
     State.attachedPhotoName = null;
-    if (DOM.lyriaPhotoStatus) {
-      DOM.lyriaPhotoStatus.textContent = '';
-      DOM.lyriaPhotoStatus.classList.add('hidden');
+    if (DOM.photoMoodStatus) {
+      DOM.photoMoodStatus.textContent = '';
+      DOM.photoMoodStatus.classList.add('hidden');
     }
 
     fetch('/api/songs/create', {
@@ -2658,7 +3343,7 @@ Grace and love shining forevermore!`
       DOM.btnSendPrompt.disabled = false;
       if (DOM.btnGenerateNewSongMain) {
         DOM.btnGenerateNewSongMain.disabled = false;
-        DOM.btnGenerateNewSongMain.innerHTML = '<span>🚀 Generate Song from Poem (Vocals + All Instruments)</span>';
+        DOM.btnGenerateNewSongMain.innerHTML = '<span>🚀 Generate Complete Song (Open-Weight)</span>';
       }
       const newId = data.song_id;
       const resolvedBpm = data.bpm || bpm;
@@ -2666,6 +3351,31 @@ Grace and love shining forevermore!`
       const resolvedGenre = data.genre || genre;
       const newTitle = data.title || `${resolvedGenre} (${resolvedBpm} BPM)`;
       const resolvedLyrics = data.lyrics || lyrics || undefined;
+      const resolvedModel = data.selected_model || data.model_used || selectedModel;
+      const traces = Array.isArray(data.decision_traces) ? data.decision_traces : [];
+      if (traces.length > 0) {
+        recordDecisionTraces(traces);
+        const lowConf = traces.find(t => t.hitl_gate_triggered);
+        if (lowConf) {
+          showHitlConfirmationBanner(
+            lowConf,
+            `Gate ${lowConf.gate} had low confidence (${Math.round((lowConf.confidence || 0) * 100)}%). Review Decision Audit drawer or switch models if needed.`,
+            null
+          );
+        }
+      }
+      const verRec = buildSongVersionRecord(
+        newId,
+        1,
+        newTitle,
+        resolvedBpm,
+        resolvedKey,
+        promptText,
+        9.8,
+        resolvedLyrics,
+        (data.state && data.state.stem_mix) || undefined
+      );
+      verRec.decisionTraces = traces;
       State.songs[newId] = {
         id: newId,
         title: newTitle,
@@ -2673,10 +3383,11 @@ Grace and love shining forevermore!`
         liked: Boolean(data.liked),
         albumId: data.album_id || null,
         albumTitle: data.album_title || null,
-        versions: {
-          1: buildSongVersionRecord(newId, 1, newTitle, resolvedBpm, resolvedKey, promptText, 9.9, resolvedLyrics)
-        }
+        versions: { 1: verRec }
       };
+      if (DOM.cardModelBadge) {
+        DOM.cardModelBadge.textContent = `✓ ${resolvedModel} • Nimble ${traces.length || 5}-Gate Verified`;
+      }
       addSongCardToSidebar(newId, newTitle, compactGenreBadge(resolvedGenre), resolvedBpm, resolvedKey, 1);
       State.activeSongId = newId;
       setCapsuleMode(true);
@@ -2697,20 +3408,20 @@ Grace and love shining forevermore!`
         liked: Boolean(data.liked),
         albumId: data.album_id || null,
         albumTitle: data.album_title || null,
-        modelUsed: data.model_used || 'models/lyria-3.5',
+        modelUsed: resolvedModel,
         savedWavPath: data.saved_wav_path || ''
       }, promptText);
       if (data.album_id) {
         fetchAlbumsCatalog(data.album_id);
       }
-      announcePoliteStatus(`New poem song ${compactHeaderTitle(newTitle)} is ready and playing.`);
-      DOM.deckStatusMsg.textContent = `Poem song "${compactHeaderTitle(newTitle)}" created and playing!`;
+      announcePoliteStatus(`New open-weight song ${compactHeaderTitle(newTitle)} is ready and playing.`);
+      DOM.deckStatusMsg.textContent = `Song "${compactHeaderTitle(newTitle)}" created via ${resolvedModel} and playing!`;
     })
     .catch((err) => {
       DOM.btnSendPrompt.disabled = false;
       if (DOM.btnGenerateNewSongMain) {
         DOM.btnGenerateNewSongMain.disabled = false;
-        DOM.btnGenerateNewSongMain.innerHTML = '<span>🚀 Generate Song (Vocals + All Instruments)</span>';
+        DOM.btnGenerateNewSongMain.innerHTML = '<span>🚀 Generate Complete Song (Open-Weight)</span>';
       }
       const errMsg = err && err.message ? err.message : 'Request failed';
       if (pendingBubble) {
@@ -2741,14 +3452,13 @@ Grace and love shining forevermore!`
   // Collapsible Drawers & Accordion Logic
   // ==========================================================================
   function setupCollapsibleDrawers() {
-    const btnToggleRef = document.getElementById('btn-toggle-ref-importer');
-    const refBody = document.getElementById('ref-importer-collapsible-body');
-    if (btnToggleRef && refBody) {
-      btnToggleRef.addEventListener('click', function () {
+    if (DOM.toggleDecisionAuditBtn && DOM.decisionAuditDrawerBody) {
+      DOM.toggleDecisionAuditBtn.addEventListener('click', function () {
         const isExpanded = this.getAttribute('aria-expanded') === 'true';
         this.setAttribute('aria-expanded', String(!isExpanded));
-        refBody.classList.toggle('hidden', isExpanded);
-        this.textContent = isExpanded ? '▸ Show Importer' : '▾ Hide Importer';
+        const icon = this.querySelector('.toggle-icon');
+        if (icon) icon.textContent = isExpanded ? '▸' : '▾';
+        DOM.decisionAuditDrawerBody.classList.toggle('collapsed', isExpanded);
       });
     }
     // Stems Drawer
@@ -2849,10 +3559,12 @@ Grace and love shining forevermore!`
         const bpm = parseInt(this.dataset.bpm, 10);
         const key = this.dataset.key;
 
-        // Select and load the active backing track
-        const firstSongId = Object.keys(State.songs)[0] || 'rl_ensemble_showcase';
-        State.activeSongId = firstSongId;
-        switchVersion(1, true);
+        // Select and load the active backing track if one exists
+        const firstSongId = Object.keys(State.songs)[0] || '';
+        if (firstSongId) {
+          State.activeSongId = firstSongId;
+          switchVersion(1, true);
+        }
 
         // Now apply the preset's specific Genre, BPM, and Key so switchVersion doesn't overwrite them
         if (DOM.capsuleGenreSelect) DOM.capsuleGenreSelect.value = genre;
@@ -2948,6 +3660,7 @@ Grace and love shining forevermore!`
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data || !Array.isArray(data.songs) || data.songs.length === 0) {
+          renderSidebarSongsList();
           fetchAlbumsCatalog();
           return;
         }
@@ -2957,16 +3670,19 @@ Grace and love shining forevermore!`
           if (!entry || !entry.song_id) return;
           const versionsObj = {};
           (entry.versions || []).forEach(v => {
-            versionsObj[v.version] = buildSongVersionRecord(
+            const verRec = buildSongVersionRecord(
               entry.song_id,
               v.version,
               v.title || entry.title || entry.song_id,
               v.bpm || 80,
               v.key_signature || 'G Major',
-              v.prompt || v.iteration_summary || 'Synthesized via Google Gemini Lyria 3.5 Studio Master.',
+              v.prompt || v.iteration_summary || 'Synthesized via Open-Weight Studio Master.',
               v.judge_score || 9.8,
-              v.lyrics || undefined
+              v.lyrics || undefined,
+              v.stem_mix || undefined
             );
+            verRec.decisionTraces = Array.isArray(v.decision_traces) ? v.decision_traces : [];
+            versionsObj[v.version] = verRec;
           });
           if (Object.keys(versionsObj).length > 0) {
             freshSongs[entry.song_id] = {
@@ -2990,10 +3706,13 @@ Grace and love shining forevermore!`
           const matchingEntry = data.songs.find(s => s.song_id === preferredId) || data.songs[0];
           const latestVer = (matchingEntry && matchingEntry.latest_version) || 1;
           switchVersion(latestVer, false);
+        } else {
+          renderSidebarSongsList();
         }
         fetchAlbumsCatalog();
       })
       .catch(() => {
+        renderSidebarSongsList();
         fetchAlbumsCatalog();
       });
   }
@@ -3732,440 +4451,7 @@ Grace and love shining forevermore!`
     }
   }
 
-  // ==========================================================================
-  // MILESTONE 8: Reference WAV Importer, URL Conversion, Legal Guard & RL DPO
-  // ==========================================================================
-  let activeAuditionAudio = null;
-  let activeAuditionId = null;
-
-  function setupReferenceWavImporterAndRL() {
-    const fileInput = document.getElementById('ref-wav-file-input');
-    const btnBrowse = document.getElementById('btn-browse-ref-wavs');
-    const dropzone = document.getElementById('ref-wav-dropzone');
-    const counterBadge = document.getElementById('ref-wav-counter');
-    const capWarning = document.getElementById('ref-wav-cap-warning');
-    const btnClearAll = document.getElementById('btn-clear-all-ref-wavs');
-    const urlInput = document.getElementById('ref-url-input');
-    const btnConvertUrl = document.getElementById('btn-convert-url-wav');
-    const urlStatus = document.getElementById('url-convert-status');
-    const trackList = document.getElementById('ref-wav-list');
-    const btnGenerateRl = document.getElementById('btn-generate-rl');
-    const scoreVal = document.getElementById('val-originality-score');
-    const overlapVal = document.getElementById('val-melodic-overlap');
-    const btnDpoKeep = document.getElementById('btn-dpo-keep');
-    const btnDpoRevert = document.getElementById('btn-dpo-revert');
-    const dpoStatusMsg = document.getElementById('dpo-status-msg');
-    const rlBannerAudio = document.getElementById('rl-banner-audio-player');
-    const rlBannerTitle = document.getElementById('rl-banner-song-title');
-    const rlBannerMeta = document.getElementById('rl-banner-song-meta');
-    const rlBannerDownload = document.getElementById('btn-rl-banner-download');
-    const btnRlPlayMaster = document.getElementById('btn-rl-banner-play-master');
-    const btnRlSoloVocals = document.getElementById('btn-rl-banner-solo-vocals');
-
-    if (btnRlPlayMaster && rlBannerAudio) {
-      btnRlPlayMaster.addEventListener('click', () => {
-        const sid = State.activeSongId || 'rl_ensemble_showcase';
-        const ver = State.activeVersion || 1;
-        rlBannerAudio.src = `/api/songs/${sid}/versions/${ver}/audio/final_master?t=${Date.now()}`;
-        rlBannerAudio.load();
-        rlBannerAudio.play().catch(() => {});
-      });
-    }
-    if (btnRlSoloVocals && rlBannerAudio) {
-      btnRlSoloVocals.addEventListener('click', () => {
-        const sid = State.activeSongId || 'rl_ensemble_showcase';
-        const ver = State.activeVersion || 1;
-        rlBannerAudio.src = `/api/songs/${sid}/versions/${ver}/audio/raspy_tenor_vocals?t=${Date.now()}`;
-        rlBannerAudio.load();
-        rlBannerAudio.play().catch(() => {});
-      });
-    }
-
-    async function loadReferenceWavs() {
-      try {
-        const res = await fetch('/api/reference-wavs');
-        if (!res.ok) return;
-        const data = await res.json();
-        const refs = data.reference_wavs || [];
-        const count = refs.length;
-
-        if (counterBadge) {
-          counterBadge.textContent = `${count} / 20 reference WAVs`;
-        }
-
-        if (capWarning) {
-          if (count >= 20) {
-            capWarning.classList.remove('hidden');
-          } else {
-            capWarning.classList.add('hidden');
-          }
-        }
-
-        if (!trackList) return;
-
-        if (count === 0) {
-          trackList.innerHTML = '<div class="ref-empty-state" id="ref-empty-state">No reference WAVs imported yet. Drag &amp; drop 1 to 20 reference WAV files or convert a URL above.</div>';
-          return;
-        }
-
-        const equalWeight = (100 / count).toFixed(1);
-        let html = '';
-        refs.forEach(ref => {
-          const dur = ref.duration_secs ? `${ref.duration_secs.toFixed(1)}s` : 'WAV';
-          const bpmKey = `${Math.round(ref.bpm || 0)} BPM • ${ref.key_signature || 'Unknown'}`;
-          const isPlaying = activeAuditionId === ref.id;
-          html += `
-            <div class="ref-track-item" data-ref-id="${escapeHTML(ref.id)}">
-              <div class="ref-track-name" title="${escapeHTML(ref.file_name)}">
-                🎵 ${escapeHTML(ref.file_name)} <span style="font-size:10px; color:var(--text-muted); font-weight:normal;">(${dur})</span>
-              </div>
-              <div class="ref-track-meta">${escapeHTML(bpmKey)}</div>
-              <div class="ref-track-weight">${equalWeight}%</div>
-              <div class="ref-track-actions">
-                <button type="button" class="btn-track-audition" data-audition-id="${escapeHTML(ref.id)}">
-                  ${isPlaying ? '⏸ Pause' : '▶ Audition'}
-                </button>
-                <button type="button" class="btn-track-delete" data-delete-id="${escapeHTML(ref.id)}" title="Remove track">✕</button>
-              </div>
-            </div>
-          `;
-        });
-        trackList.innerHTML = html;
-
-        // Wire audition & delete buttons
-        trackList.querySelectorAll('.btn-track-audition').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const id = btn.getAttribute('data-audition-id');
-            auditionReferenceWav(id);
-          });
-        });
-
-        trackList.querySelectorAll('.btn-track-delete').forEach(btn => {
-          btn.addEventListener('click', async () => {
-            const id = btn.getAttribute('data-delete-id');
-            await deleteReferenceWav(id);
-          });
-        });
-      } catch (e) {
-        console.warn('Error loading reference WAVs:', e);
-      }
-    }
-
-    function auditionReferenceWav(id) {
-      if (activeAuditionAudio && activeAuditionId === id) {
-        if (!activeAuditionAudio.paused) {
-          activeAuditionAudio.pause();
-          activeAuditionId = null;
-        } else {
-          activeAuditionAudio.play().catch(() => {});
-          activeAuditionId = id;
-        }
-        loadReferenceWavs();
-        return;
-      }
-
-      if (activeAuditionAudio) {
-        activeAuditionAudio.pause();
-        activeAuditionAudio = null;
-      }
-
-      activeAuditionId = id;
-      activeAuditionAudio = new Audio(`/api/reference-wavs/${id}/audio`);
-      activeAuditionAudio.play().catch(() => {});
-      activeAuditionAudio.addEventListener('ended', () => {
-        activeAuditionId = null;
-        loadReferenceWavs();
-      });
-      loadReferenceWavs();
-    }
-
-    async function deleteReferenceWav(id) {
-      if (activeAuditionId === id && activeAuditionAudio) {
-        activeAuditionAudio.pause();
-        activeAuditionAudio = null;
-        activeAuditionId = null;
-      }
-      try {
-        await fetch(`/api/reference-wavs/${id}`, { method: 'DELETE' });
-        await loadReferenceWavs();
-      } catch (e) {
-        console.error('Delete error:', e);
-      }
-    }
-
-    async function uploadFiles(files) {
-      if (!files || files.length === 0) return;
-      const formData = new FormData();
-      for (let i = 0; i < files.length; i++) {
-        formData.append('files', files[i]);
-      }
-
-      try {
-        const res = await fetch('/api/reference-wavs/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          if (capWarning) {
-            capWarning.textContent = `⚠️ Upload Error: ${data.error || 'Server error'}`;
-            capWarning.classList.remove('hidden');
-          }
-        } else {
-          if (capWarning) capWarning.classList.add('hidden');
-        }
-        await loadReferenceWavs();
-      } catch (e) {
-        if (capWarning) {
-          capWarning.textContent = `⚠️ Network Error: ${e.message}`;
-          capWarning.classList.remove('hidden');
-        }
-      }
-    }
-
-    // Browse click
-    if (btnBrowse && fileInput) {
-      btnBrowse.addEventListener('click', (e) => {
-        e.stopPropagation();
-        fileInput.click();
-      });
-    }
-
-    if (dropzone && fileInput) {
-      dropzone.addEventListener('click', () => fileInput.click());
-
-      dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropzone.classList.add('dragover');
-      });
-
-      dropzone.addEventListener('dragleave', () => {
-        dropzone.classList.remove('dragover');
-      });
-
-      dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('dragover');
-        if (e.dataTransfer && e.dataTransfer.files) {
-          uploadFiles(e.dataTransfer.files);
-        }
-      });
-
-      fileInput.addEventListener('change', () => {
-        if (fileInput.files) {
-          uploadFiles(fileInput.files);
-          fileInput.value = '';
-        }
-      });
-    }
-
-    // Clear All
-    if (btnClearAll) {
-      btnClearAll.addEventListener('click', async () => {
-        if (activeAuditionAudio) {
-          activeAuditionAudio.pause();
-          activeAuditionAudio = null;
-          activeAuditionId = null;
-        }
-        try {
-          await fetch('/api/reference-wavs', { method: 'DELETE' });
-          await loadReferenceWavs();
-        } catch (e) {
-          console.error('Clear error:', e);
-        }
-      });
-    }
-
-    // URL Convert
-    if (btnConvertUrl && urlInput) {
-      btnConvertUrl.addEventListener('click', async () => {
-        const url = urlInput.value.trim();
-        if (!url) return;
-        btnConvertUrl.disabled = true;
-        btnConvertUrl.textContent = '⏳ Converting...';
-        if (urlStatus) {
-          urlStatus.innerHTML = '<span class="status-dot ready"></span><span class="status-text">Validating SSRF &amp; downloading audio stream...</span>';
-        }
-
-        try {
-          const res = await fetch('/api/reference-wavs/from-url', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url }),
-          });
-          const data = await res.json();
-          btnConvertUrl.disabled = false;
-          btnConvertUrl.textContent = '⚡ Convert URL to WAV';
-
-          if (!res.ok) {
-            if (urlStatus) {
-              urlStatus.innerHTML = `<span class="status-dot error" style="background:#ef4444;"></span><span class="status-text" style="color:#ef4444;">⚠️ ${escapeHTML(data.error || 'Conversion failed')}</span>`;
-            }
-          } else {
-            urlInput.value = '';
-            if (urlStatus) {
-              urlStatus.innerHTML = `<span class="status-dot ready"></span><span class="status-text" style="color:#10a37f;">✓ Converted "${escapeHTML(data.reference_wav.file_name)}" and added to mix!</span>`;
-            }
-            await loadReferenceWavs();
-          }
-        } catch (e) {
-          btnConvertUrl.disabled = false;
-          btnConvertUrl.textContent = '⚡ Convert URL to WAV';
-          if (urlStatus) {
-            urlStatus.innerHTML = `<span class="status-dot error" style="background:#ef4444;"></span><span class="status-text" style="color:#ef4444;">⚠️ Network error: ${escapeHTML(e.message)}</span>`;
-          }
-        }
-      });
-    }
-
-    // Generate RL
-    if (btnGenerateRl) {
-      btnGenerateRl.addEventListener('click', async () => {
-        btnGenerateRl.disabled = true;
-        btnGenerateRl.textContent = '⚡ Synthesizing Brand-New Song with RL & Reference Style...';
-
-        try {
-          const refPromptInput = document.getElementById('ref-rl-prompt-input');
-          const heroPromptInput = document.getElementById('new-song-nl-prompt');
-          const chatVal = DOM.chatInputTextarea ? DOM.chatInputTextarea.value.trim() : '';
-          const refVal = refPromptInput ? refPromptInput.value.trim() : '';
-          const heroVal = heroPromptInput ? heroPromptInput.value.trim() : '';
-          const prompt = chatVal || refVal || heroVal;
-
-          const res = await fetch('/api/reference-wavs/generate-rl', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: prompt || undefined }),
-          });
-          const data = await res.json();
-          btnGenerateRl.disabled = false;
-          btnGenerateRl.textContent = '🚀 Generate with RL & Reference Style';
-
-          if (!res.ok) {
-            alert(data.error || 'RL Generation error');
-            return;
-          }
-
-          if (scoreVal && data.originality_report) {
-            scoreVal.textContent = `${data.originality_report.originality_score_pct.toFixed(1)}%`;
-          }
-          if (overlapVal && data.originality_report) {
-            overlapVal.textContent = `${data.originality_report.max_melodic_sequence_notes} notes (< 8 ceiling)`;
-          }
-
-          if (dpoStatusMsg) {
-            dpoStatusMsg.textContent = `RL Generation complete (Version ${data.version}). Click Keep or Revert to train DPO policy.`;
-          }
-
-          // Switch active song audio, title, prompt & lyrics to the newly generated song
-          if (data.song_id) {
-            const newId = data.song_id;
-            const newBpm = data.bpm || 104;
-            const newKey = data.key_signature || 'A Major';
-            const newTitle = data.title || `RL Ensemble Mix (${newBpm} BPM • ${newKey})`;
-            const newGenre = data.genre || '1988 Acoustic Folk & Soul Ballad';
-            const newLyrics = data.lyrics || SAMPLE_LYRICS_REGGAE_V1;
-            const usedPrompt = data.prompt || prompt || newTitle;
-
-            const promptBubble = document.getElementById('active-user-prompt');
-            if (promptBubble) {
-              promptBubble.textContent = usedPrompt;
-            }
-
-            State.songs[newId] = {
-              id: newId,
-              title: newTitle,
-              genre: newGenre,
-              versions: {
-                [data.version || 1]: buildSongVersionRecord(
-                  newId,
-                  data.version || 1,
-                  newTitle,
-                  newBpm,
-                  newKey,
-                  `Generated via RL Policy & Legal Originality Guard (${data.originality_report ? data.originality_report.originality_score_pct.toFixed(1) : '100.0'}% original): ${usedPrompt}`,
-                  9.8,
-                  newLyrics
-                )
-              }
-            };
-            addSongCardToSidebar(newId, newTitle, newGenre, newBpm, newKey, 1);
-            State.activeSongId = newId;
-            State.activeVersion = data.version || 1;
-            switchVersion(data.version || 1, true);
-
-            const bust = Date.now();
-            if (DOM.masterAudio) {
-              DOM.masterAudio.src = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?t=${bust}`;
-              DOM.masterAudio.muted = false;
-              DOM.masterAudio.volume = 0.95;
-              DOM.masterAudio.load();
-              DOM.masterAudio.play().catch(() => {});
-            }
-            if (rlBannerTitle) {
-              rlBannerTitle.textContent = `${newTitle} (v${data.version || 1})`;
-            }
-            if (rlBannerMeta) {
-              rlBannerMeta.innerHTML = `${newBpm} BPM • ${newKey} • Originality: ${data.originality_report ? data.originality_report.originality_score_pct.toFixed(1) : '100.0'}% • Saved at: <code>D:\\music\\GENERATED_RL_SAMPLE_SONG.wav</code>`;
-            }
-            if (rlBannerDownload) {
-              rlBannerDownload.href = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?download=1&t=${bust}`;
-            }
-            if (rlBannerAudio) {
-              rlBannerAudio.src = `/api/songs/${newId}/versions/${data.version || 1}/audio/final_master?t=${bust}`;
-              rlBannerAudio.muted = false;
-              rlBannerAudio.volume = 0.95;
-              rlBannerAudio.load();
-            }
-          }
-        } catch (e) {
-          btnGenerateRl.disabled = false;
-          btnGenerateRl.textContent = '🚀 Generate with RL & Reference Style';
-          alert('Network error: ' + e.message);
-        }
-      });
-    }
-
-    // DPO Feedback Buttons
-    if (btnDpoKeep) {
-      btnDpoKeep.addEventListener('click', async () => {
-        try {
-          const res = await fetch('/api/feedback/preference', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ preference: 'keep' }),
-          });
-          const data = await res.json();
-          if (dpoStatusMsg) {
-            dpoStatusMsg.textContent = '✓ Variation kept (+Reward). Bradley-Terry DPO policy updated!';
-          }
-        } catch (e) {
-          if (dpoStatusMsg) dpoStatusMsg.textContent = 'Feedback error: ' + e.message;
-        }
-      });
-    }
-
-    if (btnDpoRevert) {
-      btnDpoRevert.addEventListener('click', async () => {
-        try {
-          const res = await fetch('/api/feedback/preference', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ preference: 'revert' }),
-          });
-          const data = await res.json();
-          if (dpoStatusMsg) {
-            dpoStatusMsg.textContent = '✓ Reverted (-Penalty). Bradley-Terry DPO weights adjusted.';
-          }
-        } catch (e) {
-          if (dpoStatusMsg) dpoStatusMsg.textContent = 'Feedback error: ' + e.message;
-        }
-      });
-    }
-
-    // Initial load
-    loadReferenceWavs();
-  }
+  // Reference WAV Importer & RL Sampler removed under Zero-Sampling / 100% Open-Weight architecture.
 
   // ==========================================================================
   // Unique Albums Studio, Song Likes & Accessible Native <dialog> Controller
@@ -5021,8 +5307,8 @@ Grace and love shining forevermore!`
     setupAudioOutputSelector();
     setupUserPopoverAndSettings();
     setupMicrophoneAndSpeakerTest();
-    setupLocalFileLoader();
     setupStemMixer();
+    setupDualModeAndDecisionUi();
     setupCapsuleAndSliders();
     setupCollapsibleDrawers();
     setupPresets();
@@ -5030,9 +5316,7 @@ Grace and love shining forevermore!`
     setupSidebarSongSelection();
     setupUniqueAlbumsStudio();
     setupTTSControls();
-    setupReferenceWavImporterAndRL();
     setupThemeToggle();
-    switchVersion(1, false);
     fetchStoredSongsCatalog();
 
     // Wire Ask Co-Pilot button

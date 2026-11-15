@@ -35,18 +35,13 @@
         </div>
       </div>
 
-      <!-- + New Song & Load Local WAV Buttons -->
+      <!-- + New Song Button (Zero Audio Sampling / Pure Generation) -->
       <div class="sidebar-action-wrap" style="display:flex; flex-direction:column; gap:8px;">
         <button type="button" class="sidebar-new-btn" id="sidebar-new-song" title="Start a brand-new song project (Ctrl+N)">
           <span class="btn-icon">➕</span>
           <span class="btn-text">New Song</span>
           <span class="btn-kbd">Ctrl+N</span>
         </button>
-        <button type="button" class="sidebar-new-btn" id="btn-sidebar-load-local" title="Load and play any local .WAV / audio file from disk" style="background:rgba(16,163,127,0.16); border-color:#10a37f;">
-          <span class="btn-icon">📂</span>
-          <span class="btn-text">Load Local WAV File</span>
-        </button>
-        <input type="file" id="local-audio-file-input" accept=".wav,.mp3,.ogg,.flac,.m4a,audio/*" multiple style="display:none;">
       </div>
 
       <!-- Scrollable Navigation and History -->
@@ -72,24 +67,14 @@
         <div class="sidebar-section-header" style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
           <span class="section-title" id="sidebar-songs-heading">UNASSIGNED SONGS</span>
           <div style="display:flex; align-items:center; gap:6px;">
-            <span class="section-count" id="history-count">1</span>
+            <span class="section-count" id="history-count">0</span>
             <button type="button" class="sidebar-mini-action-btn" id="btn-toggle-song-filter" aria-pressed="false">Show All</button>
           </div>
         </div>
 
         <div class="sidebar-history-container" id="sidebar-song-history">
-          <!-- Single RL-Generated Example Song from D:\music Reference WAVs -->
-          <div class="history-item active" data-song-id="rl_ensemble_showcase" data-version="1" tabindex="0">
-            <div class="history-item-top">
-              <span class="history-genre-badge reggae">RL Ensemble Blend</span>
-              <span class="history-time">Just now</span>
-            </div>
-            <div class="history-item-title">D:\music Reference RL Showcase</div>
-            <div class="history-item-meta">Blended from 7 Reference WAVs • 48 kHz</div>
-            <div class="history-version-chips">
-              <button type="button" class="version-chip sidebar-play-btn" data-action="play-song" data-song-id="rl_ensemble_showcase" title="Play this song now" style="background:#10a37f; color:#fff; font-weight:600;">▶ Play</button>
-              <button type="button" class="version-chip active" data-song-id="rl_ensemble_showcase" data-version="1" title="Version 1: RL Ensemble Master">v1</button>
-            </div>
+          <div class="sidebar-albums-empty">
+            Loading your studio catalog… Click <strong>+ New Song</strong> to write or paste lyrics and generate a track with open-weight models.
           </div>
         </div>
 
@@ -289,29 +274,91 @@
         <div class="chat-messages" id="chat-messages">
 
           <!-- ============================================================ -->
-          <!-- POEM-AS-IS & NEW SONG COMPOSER                               -->
+          <!-- DUAL-MODE LYRICS STUDIO & OPEN-WEIGHT SONG COMPOSER          -->
           <!-- ============================================================ -->
-          <section class="chatgpt-new-song-hero hidden" id="new-song-chat-hero" aria-label="Poem As-Is and New Song Composer">
-            <h2 class="chatgpt-hero-heading">Paste your poem as-is &amp; generate music</h2>
-            <p class="chatgpt-hero-sub">Give any poem directly as-is (multi-line stanzas or a single paragraph, with or without a music style note). Every line is preserved in exact poem order and sung with studio vocals via <strong>Google Gemini Lyria 3.5</strong>.</p>
+          <section class="chatgpt-new-song-hero hidden" id="new-song-chat-hero" aria-label="Dual-Mode Lyrics Studio and Open-Weight Song Composer">
+            <h2 class="chatgpt-hero-heading">Write or paste lyrics &amp; compose 100% open-weight music</h2>
+            <p class="chatgpt-hero-sub">Provide your own lyrics/poem (preserved <strong>100% verbatim</strong>) or let local AI draft original structured lyrics. Synthesized strictly with local open-weight models and tuned through the <strong>Nimble 5-Gate Decision Engine</strong>.</p>
 
             <!-- Main ChatGPT Pill Composer Box -->
             <div class="chatgpt-pill-composer-box">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px; flex-wrap:wrap;">
-                <label for="new-song-nl-prompt" style="font-size:12.5px; font-weight:700; color:var(--text-primary);">📜 PASTE YOUR POEM AS-IS (OPTIONAL STYLE NOTE + POEM):</label>
+              <!-- Dual-Mode Lyrics Studio Fieldset (Native Radio Buttons per Form Accessibility) -->
+              <fieldset class="lyrics-mode-fieldset" id="lyrics-mode-fieldset">
+                <legend class="lyrics-mode-legend">🎤 Lyrics Mode</legend>
+                <div class="lyrics-mode-options">
+                  <div class="lyrics-mode-option">
+                    <input type="radio" id="radio-lyrics-user" name="hero_lyrics_mode" value="user_provided" checked>
+                    <label for="radio-lyrics-user">Write / Paste My Own Lyrics (100% Verbatim)</label>
+                  </div>
+                  <div class="lyrics-mode-option">
+                    <input type="radio" id="radio-lyrics-ai" name="hero_lyrics_mode" value="ai_generated">
+                    <label for="radio-lyrics-ai">Let Local AI Write Original Lyrics</label>
+                  </div>
+                </div>
+              </fieldset>
+
+              <!-- AI Songwriting Topic Panel (Shown in AI Mode) -->
+              <div id="ai-lyrics-topic-panel" class="ai-lyrics-topic-panel hidden">
+                <label for="lyrics-topic-input" style="font-size:12.5px; font-weight:700; color:var(--text-primary); display:block; margin-bottom:4px;">
+                  ✍️ SONG TOPIC, STORY OR EMOTION (FOR LOCAL AI LYRICIST):
+                </label>
+                <div class="ai-topic-action-row">
+                  <input type="text" id="lyrics-topic-input" name="lyrics_topic" class="album-form-control" maxlength="240" placeholder="e.g., Walking at midnight by a silver river dreaming of peace and morning light...">
+                  <button type="button" class="chatgpt-blue-send-btn" id="btn-ai-draft-lyrics" style="white-space:nowrap;">
+                    ✨ AI Write Lyrics Draft
+                  </button>
+                </div>
+                <div id="ai-lyrics-draft-status" class="ai-lyrics-draft-status" role="status" aria-live="polite"></div>
+              </div>
+
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; margin-bottom:4px; gap:8px; flex-wrap:wrap;">
+                <label for="new-song-nl-prompt" style="font-size:12.5px; font-weight:700; color:var(--text-primary);">🎵 STYLE DIRECTION &amp; ARRANGEMENT PROMPT (OPTIONAL IF LYRICS BELOW):</label>
                 <span id="new-song-album-target-pill" class="album-target-pill hidden"></span>
               </div>
-              <p id="new-song-nl-hint" style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">Example: paste your poem directly, or write "make acoustic folk music of this poem" followed by your poem. Listen first, and if you like it, move it into a Unique Album!</p>
-              <textarea id="new-song-nl-prompt" name="poem_or_prompt" class="chatgpt-nl-textarea" rows="6" aria-describedby="new-song-nl-hint" placeholder="Paste your poem here as-is..." spellcheck="true"></textarea>
+              <p id="new-song-nl-hint" style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">Describe the instruments, vocal character, groove, and studio feel — or paste a poem directly here when using User-Provided mode.</p>
+              <textarea id="new-song-nl-prompt" name="poem_or_prompt" class="chatgpt-nl-textarea" rows="4" aria-describedby="new-song-nl-hint" placeholder="e.g., Warm 1988 acoustic folk ballad with intimate raspy tenor vocals, fingerpicked guitar, brush drums, upright bass..." spellcheck="true"></textarea>
 
-              <!-- Sung Lyrics Box (Optional separate poem/lyrics box if user wants style above & poem below) -->
+              <!-- Editable Sung Lyrics Box (100% Verbatim or Reviewed AI Draft) -->
               <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-subtle);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <label for="new-song-lyrics-input" style="font-size:12px; font-weight:600; color:var(--text-secondary);">🎤 OPTIONAL SEPARATE POEM / LYRICS BOX:</label>
-                  <span style="font-size:11.5px; color:var(--text-muted);">Leave blank when your poem is in the box above</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-wrap:wrap; gap:6px;">
+                  <label for="new-song-lyrics-input" id="new-song-lyrics-label" style="font-size:12.5px; font-weight:700; color:var(--text-primary);">📜 SONG LYRICS / POEM (PRESERVED 100% VERBATIM WHEN PROVIDED):</label>
+                  <span id="lyrics-preservation-badge" class="open-weight-pill">Verbatim Protected</span>
                 </div>
-                <p id="new-song-lyrics-hint" style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">If you prefer describing only the music style above and pasting your raw poem separately, paste it here.</p>
-                <textarea id="new-song-lyrics-input" name="custom_lyrics" class="chatgpt-nl-textarea" rows="4" style="min-height:84px; font-size:13px;" aria-describedby="new-song-lyrics-hint" placeholder="Optional: leave blank when your poem is already pasted above..." spellcheck="true"></textarea>
+                <p id="new-song-lyrics-hint" style="font-size:11.5px; color:var(--text-muted); margin-bottom:6px;">Every word and section tag ([Verse 1], [Chorus], [Bridge]) you write or edit here is passed verbatim without rewriting.</p>
+                <textarea id="new-song-lyrics-input" name="custom_lyrics" class="chatgpt-nl-textarea" rows="5" style="min-height:110px; font-size:13px;" aria-describedby="new-song-lyrics-hint" placeholder="[Verse 1]&#10;Write or paste your lyrics here as-is, or click 'AI Write Lyrics Draft' above..." spellcheck="true"></textarea>
+              </div>
+
+              <!-- Open-Weight Engine, Commercial Compliance & Nimble Decision Quick Bar -->
+              <div class="hero-engine-compliance-row">
+                <div>
+                  <label for="hero-open-weight-select" class="hero-mini-label">Open-Weight Synthesizer</label>
+                  <select id="hero-open-weight-select" class="version-select" style="width:100%; font-size:12px;">
+                    <option value="ACE-Step/acestep-v15-turbo" selected>ACE-Step 1.5 Turbo (MIT • 2B • All-Round Anchor)</option>
+                    <option value="ACE-Step/acestep-v15-xl-turbo">ACE-Step 1.5 XL (MIT • 4B • Studio Full-Song)</option>
+                    <option value="tencent/SongGeneration">LeVo 2 / SongGeneration (Custom NC • Peak Vocal Fidelity)</option>
+                    <option value="m-a-p/YuE2-3B">YuE2 3B (CC BY-NC 4.0 • Long-Form Suno-Style Vocals)</option>
+                    <option value="MiniMaxAI/MiniMax-Music3">MiniMax-Music3 (Community &lt;$20M • 5-Min Full-Song)</option>
+                    <option value="ASLP-lab/DiffRhythm2">DiffRhythm 2 (Apache 2.0 • Fast Diffusion)</option>
+                    <option value="openmusic/Muse">Muse (MIT/Apache 2.0 • Open Alignment &amp; LoRA)</option>
+                    <option value="stabilityai/stable-audio-open-1.0">Stable Audio Open (CC / Community &lt;$1M • Instrumentals)</option>
+                    <option value="facebook/musicgen-large">MusicGen Large 3.3B (CC BY-NC 4.0 • Melody Conditioned)</option>
+                    <option value="google/magenta-realtime-2">Magenta RealTime 2 (Apache 2.0 • Live Instrumental Streaming)</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="hero-decision-model-select" class="hero-mini-label">Nimble Decision Gate Tier</label>
+                  <select id="hero-decision-model-select" class="version-select" style="width:100%; font-size:12px;">
+                    <option value="auto" selected>Auto (Local Bespoke-Nimble-9B → Qwen2.5 → System-1)</option>
+                    <option value="bespokelabs/Bespoke-Nimble-9B">Bespoke-Nimble-9B (Local Ollama / HF)</option>
+                    <option value="bespokelabs/Bespoke-Nimble-9B-v3">Bespoke-Nimble-9B-v3 (Local v3 Tier)</option>
+                    <option value="qwen2.5">Qwen 2.5 (Local Ollama Fallback)</option>
+                    <option value="fast_deterministic">System-1 Deterministic (&lt;1 ms / 0 VRAM)</option>
+                  </select>
+                </div>
+                <div class="commercial-toggle-wrap">
+                  <input type="checkbox" id="checkbox-commercial-only" name="commercial_only">
+                  <label for="checkbox-commercial-only" class="commercial-toggle-label">Commercial-Safe Weights Only (Hide NC Models)</label>
+                </div>
               </div>
 
               <!-- Optional Target Album Selector when composing directly for an Album -->
@@ -326,7 +373,7 @@
               <div class="chatgpt-tts-control-box" style="margin-top:14px; padding:14px 16px; background:var(--bg-card-subtle); border:1px solid var(--border-color); border-radius:16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                   <span style="font-size:12.5px; font-weight:700; color:var(--text-primary);">🎤 MODELFUSION TEXT-TO-VOICE (TTS) VOCAL ENGINE:</span>
-                  <span style="font-size:11px; color:#10a37f; font-weight:600;">✨ Studio AI Vocalists</span>
+                  <span style="font-size:11px; color:#10a37f; font-weight:600;">✨ Local Open-Weight Vocalists</span>
                 </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:4px;">
                   <div>
@@ -338,7 +385,7 @@
                       <option value="fish-speech">Fish-Speech-1.5 (Natural Emotional Cadence)</option>
                       <option value="parler-tts">Parler-TTS Large (Style-Prompted Gospel Choir)</option>
                       <option value="seed-vc">Plachtaa Seed-VC (Pitch-Locked Timbre Fusion)</option>
-                      <option value="david_lead_zira_choir">Microsoft David (Lead) + Zira (Choir Duet 48kHz)</option>
+                      <option value="david_lead_zira_choir">System Dual-Voice (Lead + Choir Harmony 48kHz)</option>
                     </select>
                   </div>
                   <div>
@@ -372,7 +419,7 @@
                 </div>
 
                 <button type="button" class="chatgpt-blue-send-btn" id="btn-generate-new-song-main">
-                  <span>🚀 Generate Music from Poem / Prompt</span>
+                  <span>🚀 Generate Complete Song (Open-Weight)</span>
                 </button>
               </div>
             </div>
@@ -444,200 +491,17 @@
             <ol class="album-tracklist" id="album-view-tracklist" role="list"></ol>
           </section>
 
-          <!-- ============================================================ -->
-          <!-- REFERENCE WAV IMPORTER & RL GENERATION SECTION (MILESTONE 8) -->
-          <!-- ============================================================ -->
-          <section class="reference-wav-importer-card" id="reference-wav-importer-section" aria-label="Reference WAV Importer & RL Generation">
-            <div class="ref-card-header">
-              <div class="ref-header-title-group">
-                <span class="ref-icon">📁</span>
-                <div>
-                  <h3 class="ref-title">Reference WAV Importer &amp; Style Ensemble Blend (Optional)</h3>
-                  <p class="ref-subtitle">Expand to import 1 to 20 reference .WAV files or convert streaming URLs to blend production style with RL.</p>
-                </div>
-              </div>
-              <div class="ref-header-badges">
-                <span class="ref-counter-badge" id="ref-wav-counter">0 / 20 reference WAVs</span>
-                <button type="button" class="btn-toggle-ref-panel" id="btn-toggle-ref-importer" aria-expanded="false" aria-controls="ref-importer-collapsible-body">▸ Show Importer</button>
-                <button type="button" class="btn-clear-ref-wavs" id="btn-clear-all-ref-wavs" title="Clear all reference WAVs">🗑️ Clear All</button>
-              </div>
+          <!-- Active Studio Model & HITL Decision Confirmation Banner -->
+          <div id="hitl-decision-banner" class="hitl-decision-banner hidden" role="region" aria-label="Decision Confirmation Prompt">
+            <div class="hitl-banner-content">
+              <strong id="hitl-banner-title">⚠️ Human-in-the-Loop Confirmation Suggested</strong>
+              <p id="hitl-banner-reason"></p>
             </div>
-
-            <div id="ref-importer-collapsible-body" class="hidden">
-            <!-- Over-Capacity Warning Banner -->
-            <div class="ref-warning-banner hidden" id="ref-wav-cap-warning" role="alert">
-              ⚠️ <strong>Maximum Capacity Reached:</strong> The studio supports up to 20 reference WAV files. Please remove a track before adding more.
+            <div class="hitl-banner-actions">
+              <button type="button" class="btn-album-primary" id="btn-hitl-confirm">✓ Confirm &amp; Apply</button>
+              <button type="button" class="btn-album-secondary" id="btn-hitl-dismiss">Dismiss</button>
             </div>
-
-            <!-- Dual Import Controls: Native File Picker & Drag-and-Drop Zone + URL Converter Bar -->
-            <div class="ref-importer-controls-grid">
-              <!-- Drag and Drop Zone -->
-              <div class="ref-dropzone" id="ref-wav-dropzone" tabindex="0" role="button" aria-label="Drag and drop WAV files here or click to browse">
-                <input type="file" id="ref-wav-file-input" multiple accept=".wav,audio/wav" style="display:none;">
-                <div class="dropzone-content">
-                  <div class="dropzone-icon">📥</div>
-                  <div class="dropzone-text">
-                    <strong>Drag &amp; drop WAV files here</strong> or <span class="dropzone-browse-link" id="btn-browse-ref-wavs">Browse from Computer</span>
-                  </div>
-                  <div class="dropzone-hint">Supports up to 20 files • 44.1 / 48 kHz 16/24/32-bit WAV</div>
-                </div>
-              </div>
-
-              <!-- Convert URL to WAV Bar -->
-              <div class="ref-url-convert-box">
-                <label for="ref-url-input" class="ref-url-label">🔗 Convert URL to WAV &amp; Add to Current Mix:</label>
-                <div class="ref-url-input-group">
-                  <input type="url" id="ref-url-input" class="ref-url-input" placeholder="Paste streaming or audio URL (e.g. YouTube, SoundCloud, direct WAV)..." spellcheck="false">
-                  <button type="button" class="btn-convert-url-wav" id="btn-convert-url-wav">
-                    <span>⚡ Convert URL to WAV</span>
-                  </button>
-                </div>
-                <div class="ref-url-status" id="url-convert-status">
-                  <span class="status-dot ready"></span>
-                  <span class="status-text">SSRF-protected downloader ready (rejects private &amp; loopback IPs)</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Active Reference Tracks Table / List -->
-            <div class="ref-tracks-container" id="ref-tracks-container">
-              <div class="ref-tracks-header">
-                <span class="col-name">File / Source</span>
-                <span class="col-meta">BPM &amp; Key</span>
-                <span class="col-weight">Style Blend Weight</span>
-                <span class="col-actions">Actions</span>
-              </div>
-              <div class="ref-wav-list" id="ref-wav-list">
-                <!-- Dynamically rendered track items -->
-                <div class="ref-empty-state" id="ref-empty-state">
-                  No reference WAVs imported yet. Drag &amp; drop 1 to 20 reference WAV files or convert a URL above.
-                </div>
-              </div>
-            </div>
-
-            <!-- RL Prompt Box & Generation Button Bar -->
-            <div style="margin-top: 12px; padding: 12px 14px; border-radius: 10px; background: var(--bg-card-subtle); border: 1px solid var(--border-color);">
-              <label for="ref-rl-prompt-input" style="font-size: 12.5px; font-weight: 700; color: var(--text-primary); display: block; margin-bottom: 6px;">
-                ✨ Describe the Brand-New Song to Generate from Your Reference WAVs (Style, Instruments &amp; Vocal Feel):
-              </label>
-              <textarea
-                id="ref-rl-prompt-input"
-                class="chatgpt-nl-textarea"
-                rows="3"
-                style="width: 100%; font-size: 13px; padding: 9px 12px; min-height: 72px;"
-                placeholder="Paste any song prompt here..."
-                spellcheck="false"
-              >Create a 1988 Acoustic Folk and Soul Ballad titled "One Love Shining" at 104 BPM in A Major. Feature a soulful, warm contralto or raspy acoustic tenor lead vocal with intimate dual harmony call-and-response in the chorus and outro, a continuous hypnotic fingerpicked steel-string acoustic guitar riff with bright hammer-ons and open chords, a 16-bar melodic woody acoustic slide guitar solo during the bridge, stripped-back Verse 1 shaker and woodblock building into tight dry studio cross-stick rimshot and brushed snare swells with driving 16th-note hi-hats, a deep 55–90 Hz fingerstyle fretless bass line with woody tape saturation, whisper-quiet Hammond B3 pad with delicate Wurlitzer electric piano chords and yearning pedal steel swells, mastered on a 1988 LA Studer A800 48 kHz 16-bit PCM stereo tape master with vocal-priority compression.</textarea>
-            </div>
-
-            <!-- RL Generation Button Bar -->
-            <div class="ref-generation-bar">
-              <div class="ref-gen-left">
-                <span class="ensemble-badge" id="ensemble-blend-badge">⚖️ Anti-Monopoly Ensemble: ≤ 60% Cap</span>
-                <span class="dpo-badge" id="dpo-feedback-badge">🎯 Online DPO Preference Learning Active</span>
-              </div>
-              <button type="button" class="btn-generate-rl" id="btn-generate-rl">
-                <span>🚀 Generate with RL &amp; Reference Style</span>
-              </button>
-            </div>
-
-            <!-- PROMINENT GENERATED RL SAMPLE OUTPUT PLAYER (Right under the Reference Pool Table!) -->
-            <div id="rl-generated-output-banner" style="margin-top: 12px; padding: 14px 16px; border-radius: 12px; background: linear-gradient(135deg, rgba(16, 163, 127, 0.14), rgba(59, 130, 246, 0.10)); border: 2px solid #10a37f; display: flex; flex-direction: column; gap: 10px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-                <div>
-                  <div style="font-size: 14px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-                    <span>🎵 GENERATED RL SAMPLE SONG:</span>
-                    <span id="rl-banner-song-title" style="color: #10a37f;">D:\music Reference RL Showcase (v1 Master)</span>
-                  </div>
-                  <div id="rl-banner-song-meta" style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-                    107 BPM • A Minor • Blended from your 7 D:\music WAVs • Saved at: <code>D:\music\GENERATED_RL_SAMPLE_SONG.wav</code>
-                  </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                  <button type="button" id="btn-rl-banner-solo-vocals" class="card-download-btn" style="background: #2563eb; color: #fff; border: none; font-weight: 600; cursor: pointer;">
-                    🎤 Solo Vocals
-                  </button>
-                  <button type="button" id="btn-rl-banner-play-master" class="card-download-btn" style="background: #10a37f; color: #fff; border: none; font-weight: 600; cursor: pointer;">
-                    ▶ Play Full Master
-                  </button>
-                  <a id="btn-rl-banner-download" href="/api/songs/rl_ensemble_showcase/versions/1/audio/final_master?download=1" download="GENERATED_RL_SAMPLE_SONG.wav" class="card-download-btn" style="font-weight: 600;">
-                    ⬇ Download Generated WAV
-                  </a>
-                </div>
-              </div>
-              <audio id="rl-banner-audio-player" controls preload="auto" src="/api/songs/rl_ensemble_showcase/versions/1/audio/final_master" style="width: 100%; height: 38px; border-radius: 8px;"></audio>
-            </div>
-
-            <!-- Legal & Originality Safeguard Verified Card -->
-            <div class="legal-compliance-card" id="legal-compliance-card">
-              <div class="compliance-header">
-                <div class="compliance-title-group">
-                  <span class="shield-icon">🛡️</span>
-                  <div>
-                    <h4 class="compliance-title">Legal &amp; Originality Safeguards Verified</h4>
-                    <span class="compliance-subtitle">Full compliance with Bridgeport Music, Tennessee ELVIS Act, and strict anti-plagiarism ceilings</span>
-                  </div>
-                </div>
-                <div class="originality-score-pill" id="originality-score-pill">
-                  <span class="score-label">Originality Score:</span>
-                  <span class="score-val" id="val-originality-score">100.0%</span>
-                </div>
-              </div>
-
-              <div class="compliance-badges-grid">
-                <!-- Badge 1: Zero Waveform Sampling (Bridgeport) -->
-                <div class="compliance-badge-item passed" id="badge-bridgeport">
-                  <div class="badge-icon">✓</div>
-                  <div class="badge-text">
-                    <strong>Zero Waveform Sampling</strong>
-                    <span>100% synthesized from scratch • Bridgeport Music compliant</span>
-                  </div>
-                </div>
-
-                <!-- Badge 2: Melodic Overlap Ceiling -->
-                <div class="compliance-badge-item passed" id="badge-melodic-overlap">
-                  <div class="badge-icon">✓</div>
-                  <div class="badge-text">
-                    <strong>Transposition-Invariant Melodic Guard</strong>
-                    <span>LCS Overlap: <span id="val-melodic-overlap">0 notes (&lt; 8 ceiling)</span></span>
-                  </div>
-                </div>
-
-                <!-- Badge 3: Synthetic Vocals Only (Tennessee ELVIS Act) -->
-                <div class="compliance-badge-item passed" id="badge-elvis">
-                  <div class="badge-icon">✓</div>
-                  <div class="badge-text">
-                    <strong>Synthetic Vocal Timbre Only</strong>
-                    <span>Tennessee ELVIS Act compliant • Zero voice cloning</span>
-                  </div>
-                </div>
-
-                <!-- Badge 4: Anti-Monopoly Style Blending -->
-                <div class="compliance-badge-item passed" id="badge-anti-monopoly">
-                  <div class="badge-icon">✓</div>
-                  <div class="badge-text">
-                    <strong>Anti-Monopoly Ensemble Blending</strong>
-                    <span>Single source cap ≤ 60.0% • Simplex normalized</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- DPO Preference Feedback Row (Keep / Revert) -->
-              <div class="dpo-feedback-row" id="dpo-feedback-row">
-                <span class="dpo-prompt">RL Generation Feedback (Trains DPO Policy):</span>
-                <div class="dpo-buttons">
-                  <button type="button" class="btn-dpo-keep" id="btn-dpo-keep" title="Keep this variation (Positive DPO reward)">
-                    👍 Keep Variation (+Reward)
-                  </button>
-                  <button type="button" class="btn-dpo-revert" id="btn-dpo-revert" title="Revert to previous variation (Negative DPO penalty)">
-                    👎 Revert (-Penalty)
-                  </button>
-                </div>
-                <span class="dpo-status-msg" id="dpo-status-msg"></span>
-              </div>
-            </div>
-            </div>
-          </section>
+          </div>
 
           <div id="studio-polite-announcer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 
@@ -646,10 +510,10 @@
             <div class="bubble-header">
               <span class="bubble-avatar user-avatar">👤</span>
               <span class="bubble-author">You</span>
-              <span class="bubble-timestamp">10:45 AM</span>
+              <span class="bubble-timestamp">Studio Prompt</span>
             </div>
             <div class="bubble-content" id="active-user-prompt">
-              Warm acoustic &amp; roots groove with clear upfront lead vocals and soaring Dire Straits-style guitar solo
+              Open-weight 48 kHz studio composition — click "+ New Song" to write or paste lyrics, pick any open-weight model, and sculpt all 8 channels in the DAW Mixer below.
             </div>
           </div>
 
@@ -658,8 +522,8 @@
             <div class="bubble-header">
               <span class="bubble-avatar assistant-avatar">🎵</span>
               <span class="bubble-author">Universal Music Producer</span>
-              <span class="bubble-timestamp">10:46 AM</span>
-              <span class="bubble-quality-badge success">✓ Quality Passed (Score 9.8/10)</span>
+              <span class="bubble-timestamp">Open-Weight 48 kHz</span>
+              <span class="bubble-quality-badge success" id="card-model-badge">✓ ACE-Step 1.5 • Nimble 5-Gate Verified</span>
             </div>
 
             <!-- THE INTERACTIVE SONG CARD -->
@@ -667,8 +531,8 @@
               <!-- Card Header -->
               <div class="song-card-header">
                 <div class="song-card-title-group">
-                  <div class="song-card-title" id="card-song-title">Midnight Highway Strings (107 BPM • A Minor)</div>
-                  <div class="song-card-subtitle" id="card-song-meta">Acoustic Roots &amp; Dire Straits Guitar Fusion • 107 BPM • A Minor • 48 kHz Stereo WAV</div>
+                  <div class="song-card-title" id="card-song-title">Studio Ready — Select or Create a Song</div>
+                  <div class="song-card-subtitle" id="card-song-meta">Open-Weight Studio • 48 kHz 16-Bit PCM Stereo WAV</div>
                 </div>
                 <div class="song-card-actions" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                   <span class="version-tag" id="card-version-tag">v1 Master</span>
@@ -678,10 +542,7 @@
                   <button type="button" class="card-album-btn" id="btn-card-move-to-album">
                     💿 Move to Album...
                   </button>
-                  <button type="button" class="card-download-btn" id="btn-card-load-local" title="Load and play a local .WAV or audio file from your computer">
-                    📂 Load Local WAV
-                  </button>
-                  <a href="/api/songs/rl_ensemble_showcase/versions/1/audio/final_master?download=1" download="GENERATED_RL_SAMPLE_SONG.wav" class="card-download-btn" id="card-download-btn" title="Download Master 48 kHz WAV">
+                  <a href="#" download="Studio_Master.wav" class="card-download-btn" id="card-download-btn" title="Download Master 48 kHz WAV">
                     ⬇ Download WAV
                   </a>
                 </div>
@@ -691,7 +552,7 @@
               <div class="master-deck-container">
                 <div class="deck-top-row">
                   <span class="deck-label">FINAL MASTER (48 kHz 16-Bit PCM Stereo)</span>
-                  <span class="deck-time" id="master-time-display">00:00 / 01:02</span>
+                  <span class="deck-time" id="master-time-display">00:00 / 00:00</span>
                 </div>
 
                 <!-- Custom Styled Canvas Waveform -->
@@ -701,7 +562,7 @@
                 </div>
 
                 <!-- Native HTML5 Audio Element (Driven by Custom Deck & Visible Controls) -->
-                <audio id="master-audio-player" controls preload="auto" src="/api/songs/rl_ensemble_showcase/versions/1/audio/final_master" style="width:100%; height:36px; margin:8px 0; border-radius:8px;">
+                <audio id="master-audio-player" controls preload="metadata" src="" style="width:100%; height:36px; margin:8px 0; border-radius:8px;">
                   Your browser does not support the audio element.
                 </audio>
 
@@ -823,20 +684,32 @@
                 <textarea id="card-tts-text-input" class="chatgpt-nl-textarea" rows="2" style="min-height:55px; font-size:12.5px; padding:8px 10px; border-radius:8px; background:var(--bg-canvas); border:1px solid var(--border-color);" placeholder="Enter lyrics or spoken hook to synthesize directly into this song version..."></textarea>
               </div>
 
-              <!-- Collapsible Drawer 1: Stems & Multi-Track Studio -->
+              <!-- Collapsible Drawer 1: 8-Channel WebAudio DAW Mixer & Stems Studio (Auto-Expanded) -->
               <div class="card-collapsible-section">
-                <button type="button" class="section-toggle-btn" id="toggle-stems-btn" aria-expanded="false">
-                  <span class="toggle-icon">▸</span>
-                  <span class="toggle-title">🎛️ Stems &amp; Multi-Track Studio (8 Isolated Tracks)</span>
-                  <span class="toggle-badge">8 Stems Available</span>
+                <button type="button" class="section-toggle-btn" id="toggle-stems-btn" aria-expanded="true">
+                  <span class="toggle-icon">▾</span>
+                  <span class="toggle-title">🎛️ 8-Channel DAW Stem Mixer &amp; Master Bounce Studio</span>
+                  <span class="toggle-badge">8 Canonical Stems • Live WebAudio DSP</span>
                 </button>
 
-                <div class="section-collapsible-body collapsed" id="stems-drawer-body">
+                <div class="section-collapsible-body" id="stems-drawer-body">
                   <div class="stems-global-actions">
                     <button type="button" class="stem-global-btn" id="btn-play-all-stems">▶ Play All Active Stems</button>
                     <button type="button" class="stem-global-btn" id="btn-stop-all-stems">⏹ Stop All Stems</button>
                     <button type="button" class="stem-global-btn" id="btn-unmute-all">Reset Mute/Solo</button>
+                    <div class="mixer-preset-wrap">
+                      <label for="mixer-preset-select" class="visually-hidden">Mixer Preset</label>
+                      <select id="mixer-preset-select" class="profile-select" title="Apply 8-Channel Mixer Preset">
+                        <option value="custom" selected>Mixer Preset: Custom</option>
+                        <option value="vocal_forward">Preset: Vocal Forward (+3.0 dB Lead)</option>
+                        <option value="warm_bass">Preset: Warm Tape Sub-Bass</option>
+                        <option value="club_punch">Preset: Club Punch &amp; Crisp Air</option>
+                        <option value="wide_acoustic">Preset: Wide Stereo Acoustic</option>
+                        <option value="reset_flat">Preset: Reset Flat (0 dB)</option>
+                      </select>
+                    </div>
                     <div class="remaster-inline-wrap">
+                      <label for="mastering-profile-select" class="visually-hidden">Mastering Profile</label>
                       <select id="mastering-profile-select" class="profile-select">
                         <option value="WarmAnalogTape" selected>Profile: 1970s Warm Analog Tape</option>
                         <option value="ModernPunchy">Profile: Modern Punchy Hit</option>
@@ -848,150 +721,272 @@
                     </div>
                   </div>
 
-                  <!-- 8 Isolated Stem Strips -->
-                  <div class="stem-tracks-grid" id="stem-tracks-grid">
-                    <!-- Stem 1: Vocals -->
-                    <div class="stem-strip" data-stem="vocals">
-                      <div class="stem-info">
-                        <span class="stem-icon">🎤</span>
-                        <div class="stem-meta">
-                          <span class="stem-name">Raspy Tenor Vocals</span>
-                          <span class="stem-type">Formant Filter + Pitch Vocoder</span>
+                  <!-- AI Mix Copilot & Non-Destructive Bounce Action Bar -->
+                  <div class="mixer-copilot-bar">
+                    <div class="mixer-bus-controls">
+                      <label for="mixer-master-gain-slider" class="bus-slider-label">
+                        Master Bus: <span id="val-mixer-master-gain">+0.0 dB</span>
+                      </label>
+                      <input type="range" id="mixer-master-gain-slider" min="-12" max="6" step="0.5" value="0">
+                      <label for="mixer-warmth-slider" class="bus-slider-label">
+                        Tape Warmth: <span id="val-mixer-warmth">35%</span>
+                      </label>
+                      <input type="range" id="mixer-warmth-slider" min="0" max="1" step="0.05" value="0.35">
+                    </div>
+                    <div class="mixer-copilot-actions">
+                      <label for="mix-copilot-goal-input" class="visually-hidden">Mix Goal for Gate 4 Copilot</label>
+                      <input type="text" id="mix-copilot-goal-input" class="mix-goal-input" maxlength="160" placeholder="Mix goal (e.g., Bring vocals forward, widen guitars, tighten 60 Hz bass)...">
+                      <button type="button" class="btn-mix-copilot" id="btn-ask-mix-copilot">✨ AI Mix Copilot (Gate 4)</button>
+                      <button type="button" class="btn-save-mix-bounce" id="btn-save-mix-version">💾 Save Mix as New Version</button>
+                    </div>
+                  </div>
+                  <div id="mix-copilot-status" class="mix-copilot-status hidden" role="status" aria-live="polite"></div>
+
+                  <!-- 8 Canonical Channel Strips -->
+                  <div class="stem-tracks-grid daw-mixer-grid" id="stem-tracks-grid">
+                    <!-- Channel 1: Vocals -->
+                    <div class="stem-strip daw-channel-strip" data-stem="vocals">
+                      <div class="stem-strip-header">
+                        <div class="stem-info">
+                          <span class="stem-icon">🎤</span>
+                          <div class="stem-meta">
+                            <span class="stem-name">Lead Vocals</span>
+                            <span class="stem-type">vocals.wav • Center</span>
+                          </div>
+                        </div>
+                        <div class="stem-meter-actions">
+                          <div class="stem-vu-meter" title="Live Channel Meter"><div class="stem-vu-fill" data-vu-stem="vocals"></div></div>
+                          <button type="button" class="stem-btn solo" data-stem="vocals" aria-pressed="false" title="Solo">S</button>
+                          <button type="button" class="stem-btn mute" data-stem="vocals" aria-pressed="false" title="Mute">M</button>
+                          <button type="button" class="stem-regen-btn" data-stem="vocals" title="Regenerate lead vocals">🔄 Regen</button>
                         </div>
                       </div>
-                      <div class="stem-controls">
-                        <button type="button" class="stem-btn solo" data-stem="vocals" title="Solo">S</button>
-                        <button type="button" class="stem-btn mute" data-stem="vocals" title="Mute">M</button>
-                        <input type="range" class="stem-vol" data-stem="vocals" min="0" max="1" step="0.05" value="0.85" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="vocals" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/raspy_tenor_vocals"></audio>
-                        <button type="button" class="stem-regen-btn" data-stem="vocals" title="Regenerate only this vocal stem">🔄 Regen</button>
+                      <div class="daw-controls-grid">
+                        <label class="daw-knob-field"><span>Gain <strong class="val-gain-db" data-val-stem="vocals">0.0 dB</strong></span><input type="range" class="stem-gain-db" data-stem="vocals" min="-24" max="6" step="0.5" value="0" aria-label="Lead Vocals Gain dB"></label>
+                        <label class="daw-knob-field"><span>Pan <strong class="val-pan" data-val-pan="vocals">C</strong></span><input type="range" class="stem-pan" data-stem="vocals" min="-1" max="1" step="0.05" value="0" aria-label="Lead Vocals Pan"></label>
+                        <label class="daw-knob-field"><span>Low 100Hz <strong class="val-eq-low">0.0 dB</strong></span><input type="range" class="stem-eq-low" data-stem="vocals" min="-12" max="12" step="0.5" value="0" aria-label="Lead Vocals Low EQ"></label>
+                        <label class="daw-knob-field"><span>Mid 1kHz <strong class="val-eq-mid">0.0 dB</strong></span><input type="range" class="stem-eq-mid" data-stem="vocals" min="-12" max="12" step="0.5" value="0" aria-label="Lead Vocals Mid EQ"></label>
+                        <label class="daw-knob-field"><span>High 10kHz <strong class="val-eq-high">0.0 dB</strong></span><input type="range" class="stem-eq-high" data-stem="vocals" min="-12" max="12" step="0.5" value="0" aria-label="Lead Vocals High EQ"></label>
+                        <label class="daw-knob-field"><span>Reverb <strong class="val-reverb">20%</strong></span><input type="range" class="stem-reverb" data-stem="vocals" min="0" max="1" step="0.05" value="0.2" aria-label="Lead Vocals Reverb Send"></label>
                       </div>
+                      <audio class="stem-audio-element" data-stem="vocals" crossorigin="anonymous" preload="metadata" src=""></audio>
                     </div>
 
-                    <!-- Stem 2: Drums -->
-                    <div class="stem-strip" data-stem="drums">
-                      <div class="stem-info">
-                        <span class="stem-icon">🥁</span>
-                        <div class="stem-meta">
-                          <span class="stem-name">One-Drop Drums</span>
-                          <span class="stem-type">Pure-Rust 48kHz Drum Synth</span>
+                    <!-- Channel 2: Backing Harmonies -->
+                    <div class="stem-strip daw-channel-strip" data-stem="backing_harmonies">
+                      <div class="stem-strip-header">
+                        <div class="stem-info">
+                          <span class="stem-icon">🗣️</span>
+                          <div class="stem-meta">
+                            <span class="stem-name">Backing Harmonies</span>
+                            <span class="stem-type">backing_harmonies.wav • Choir Stack</span>
+                          </div>
+                        </div>
+                        <div class="stem-meter-actions">
+                          <div class="stem-vu-meter" title="Live Channel Meter"><div class="stem-vu-fill" data-vu-stem="backing_harmonies"></div></div>
+                          <button type="button" class="stem-btn solo" data-stem="backing_harmonies" aria-pressed="false" title="Solo">S</button>
+                          <button type="button" class="stem-btn mute" data-stem="backing_harmonies" aria-pressed="false" title="Mute">M</button>
+                          <button type="button" class="stem-regen-btn" data-stem="backing_harmonies" title="Regenerate backing harmonies">🔄 Regen</button>
                         </div>
                       </div>
-                      <div class="stem-controls">
-                        <button type="button" class="stem-btn solo" data-stem="drums" title="Solo">S</button>
-                        <button type="button" class="stem-btn mute" data-stem="drums" title="Mute">M</button>
-                        <input type="range" class="stem-vol" data-stem="drums" min="0" max="1" step="0.05" value="0.9" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="drums" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/drums"></audio>
-                        <button type="button" class="stem-regen-btn" data-stem="drums" title="Regenerate drum pattern">🔄 Regen</button>
+                      <div class="daw-controls-grid">
+                        <label class="daw-knob-field"><span>Gain <strong class="val-gain-db" data-val-stem="backing_harmonies">0.0 dB</strong></span><input type="range" class="stem-gain-db" data-stem="backing_harmonies" min="-24" max="6" step="0.5" value="0" aria-label="Backing Harmonies Gain dB"></label>
+                        <label class="daw-knob-field"><span>Pan <strong class="val-pan" data-val-pan="backing_harmonies">C</strong></span><input type="range" class="stem-pan" data-stem="backing_harmonies" min="-1" max="1" step="0.05" value="0" aria-label="Backing Harmonies Pan"></label>
+                        <label class="daw-knob-field"><span>Low 100Hz <strong class="val-eq-low">0.0 dB</strong></span><input type="range" class="stem-eq-low" data-stem="backing_harmonies" min="-12" max="12" step="0.5" value="0" aria-label="Backing Harmonies Low EQ"></label>
+                        <label class="daw-knob-field"><span>Mid 1kHz <strong class="val-eq-mid">0.0 dB</strong></span><input type="range" class="stem-eq-mid" data-stem="backing_harmonies" min="-12" max="12" step="0.5" value="0" aria-label="Backing Harmonies Mid EQ"></label>
+                        <label class="daw-knob-field"><span>High 10kHz <strong class="val-eq-high">0.0 dB</strong></span><input type="range" class="stem-eq-high" data-stem="backing_harmonies" min="-12" max="12" step="0.5" value="0" aria-label="Backing Harmonies High EQ"></label>
+                        <label class="daw-knob-field"><span>Reverb <strong class="val-reverb">15%</strong></span><input type="range" class="stem-reverb" data-stem="backing_harmonies" min="0" max="1" step="0.05" value="0.15" aria-label="Backing Harmonies Reverb Send"></label>
                       </div>
+                      <audio class="stem-audio-element" data-stem="backing_harmonies" crossorigin="anonymous" preload="metadata" src=""></audio>
                     </div>
 
-                    <!-- Stem 3: Bass -->
-                    <div class="stem-strip" data-stem="bass">
-                      <div class="stem-info">
-                        <span class="stem-icon">🔊</span>
-                        <div class="stem-meta">
-                          <span class="stem-name">Deep Sub-Bass</span>
-                          <span class="stem-type">55-85Hz Warmth Saturation</span>
+                    <!-- Channel 3: Drums -->
+                    <div class="stem-strip daw-channel-strip" data-stem="drums">
+                      <div class="stem-strip-header">
+                        <div class="stem-info">
+                          <span class="stem-icon">🥁</span>
+                          <div class="stem-meta">
+                            <span class="stem-name">Drums</span>
+                            <span class="stem-type">drums.wav • Kick, Snare &amp; Overheads</span>
+                          </div>
+                        </div>
+                        <div class="stem-meter-actions">
+                          <div class="stem-vu-meter" title="Live Channel Meter"><div class="stem-vu-fill" data-vu-stem="drums"></div></div>
+                          <button type="button" class="stem-btn solo" data-stem="drums" aria-pressed="false" title="Solo">S</button>
+                          <button type="button" class="stem-btn mute" data-stem="drums" aria-pressed="false" title="Mute">M</button>
+                          <button type="button" class="stem-regen-btn" data-stem="drums" title="Regenerate drum stem">🔄 Regen</button>
                         </div>
                       </div>
-                      <div class="stem-controls">
-                        <button type="button" class="stem-btn solo" data-stem="bass" title="Solo">S</button>
-                        <button type="button" class="stem-btn mute" data-stem="bass" title="Mute">M</button>
-                        <input type="range" class="stem-vol" data-stem="bass" min="0" max="1" step="0.05" value="0.95" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="bass" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/bass"></audio>
-                        <button type="button" class="stem-regen-btn" data-stem="bass" title="Regenerate sub-bass">🔄 Regen</button>
+                      <div class="daw-controls-grid">
+                        <label class="daw-knob-field"><span>Gain <strong class="val-gain-db" data-val-stem="drums">0.0 dB</strong></span><input type="range" class="stem-gain-db" data-stem="drums" min="-24" max="6" step="0.5" value="0" aria-label="Drums Gain dB"></label>
+                        <label class="daw-knob-field"><span>Pan <strong class="val-pan" data-val-pan="drums">C</strong></span><input type="range" class="stem-pan" data-stem="drums" min="-1" max="1" step="0.05" value="0" aria-label="Drums Pan"></label>
+                        <label class="daw-knob-field"><span>Low 100Hz <strong class="val-eq-low">0.0 dB</strong></span><input type="range" class="stem-eq-low" data-stem="drums" min="-12" max="12" step="0.5" value="0" aria-label="Drums Low EQ"></label>
+                        <label class="daw-knob-field"><span>Mid 1kHz <strong class="val-eq-mid">0.0 dB</strong></span><input type="range" class="stem-eq-mid" data-stem="drums" min="-12" max="12" step="0.5" value="0" aria-label="Drums Mid EQ"></label>
+                        <label class="daw-knob-field"><span>High 10kHz <strong class="val-eq-high">0.0 dB</strong></span><input type="range" class="stem-eq-high" data-stem="drums" min="-12" max="12" step="0.5" value="0" aria-label="Drums High EQ"></label>
+                        <label class="daw-knob-field"><span>Reverb <strong class="val-reverb">10%</strong></span><input type="range" class="stem-reverb" data-stem="drums" min="0" max="1" step="0.05" value="0.1" aria-label="Drums Reverb Send"></label>
                       </div>
+                      <audio class="stem-audio-element" data-stem="drums" crossorigin="anonymous" preload="metadata" src=""></audio>
                     </div>
 
-                    <!-- Stem 4: Guitar -->
-                    <div class="stem-strip" data-stem="guitar">
-                      <div class="stem-info">
-                        <span class="stem-icon">🎸</span>
-                        <div class="stem-meta">
-                          <span class="stem-name">Rhythm Guitar Skank</span>
-                          <span class="stem-type">Karplus-Strong Wah &amp; Chop</span>
+                    <!-- Channel 4: Bass -->
+                    <div class="stem-strip daw-channel-strip" data-stem="bass">
+                      <div class="stem-strip-header">
+                        <div class="stem-info">
+                          <span class="stem-icon">🔊</span>
+                          <div class="stem-meta">
+                            <span class="stem-name">Sub Bass</span>
+                            <span class="stem-type">bass.wav • 55–90 Hz Low-End Anchor</span>
+                          </div>
+                        </div>
+                        <div class="stem-meter-actions">
+                          <div class="stem-vu-meter" title="Live Channel Meter"><div class="stem-vu-fill" data-vu-stem="bass"></div></div>
+                          <button type="button" class="stem-btn solo" data-stem="bass" aria-pressed="false" title="Solo">S</button>
+                          <button type="button" class="stem-btn mute" data-stem="bass" aria-pressed="false" title="Mute">M</button>
+                          <button type="button" class="stem-regen-btn" data-stem="bass" title="Regenerate bass stem">🔄 Regen</button>
                         </div>
                       </div>
-                      <div class="stem-controls">
-                        <button type="button" class="stem-btn solo" data-stem="guitar" title="Solo">S</button>
-                        <button type="button" class="stem-btn mute" data-stem="guitar" title="Mute">M</button>
-                        <input type="range" class="stem-vol" data-stem="guitar" min="0" max="1" step="0.05" value="0.8" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="guitar" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/guitar"></audio>
-                        <button type="button" class="stem-regen-btn" data-stem="guitar" title="Regenerate guitar skank">🔄 Regen</button>
+                      <div class="daw-controls-grid">
+                        <label class="daw-knob-field"><span>Gain <strong class="val-gain-db" data-val-stem="bass">0.0 dB</strong></span><input type="range" class="stem-gain-db" data-stem="bass" min="-24" max="6" step="0.5" value="0" aria-label="Sub Bass Gain dB"></label>
+                        <label class="daw-knob-field"><span>Pan <strong class="val-pan" data-val-pan="bass">C</strong></span><input type="range" class="stem-pan" data-stem="bass" min="-1" max="1" step="0.05" value="0" aria-label="Sub Bass Pan"></label>
+                        <label class="daw-knob-field"><span>Low 100Hz <strong class="val-eq-low">0.0 dB</strong></span><input type="range" class="stem-eq-low" data-stem="bass" min="-12" max="12" step="0.5" value="0" aria-label="Sub Bass Low EQ"></label>
+                        <label class="daw-knob-field"><span>Mid 1kHz <strong class="val-eq-mid">0.0 dB</strong></span><input type="range" class="stem-eq-mid" data-stem="bass" min="-12" max="12" step="0.5" value="0" aria-label="Sub Bass Mid EQ"></label>
+                        <label class="daw-knob-field"><span>High 10kHz <strong class="val-eq-high">0.0 dB</strong></span><input type="range" class="stem-eq-high" data-stem="bass" min="-12" max="12" step="0.5" value="0" aria-label="Sub Bass High EQ"></label>
+                        <label class="daw-knob-field"><span>Reverb <strong class="val-reverb">5%</strong></span><input type="range" class="stem-reverb" data-stem="bass" min="0" max="1" step="0.05" value="0.05" aria-label="Sub Bass Reverb Send"></label>
                       </div>
+                      <audio class="stem-audio-element" data-stem="bass" crossorigin="anonymous" preload="metadata" src=""></audio>
                     </div>
 
-                    <!-- Stem 5: Other (Keys / Organ) -->
-                    <div class="stem-strip" data-stem="other">
-                      <div class="stem-info">
-                        <span class="stem-icon">🎹</span>
-                        <div class="stem-meta">
-                          <span class="stem-name">Hammond Organ &amp; Piano</span>
-                          <span class="stem-type">Harmonic Bubble &amp; Chords</span>
+                    <!-- Channel 5: Guitar -->
+                    <div class="stem-strip daw-channel-strip" data-stem="guitar">
+                      <div class="stem-strip-header">
+                        <div class="stem-info">
+                          <span class="stem-icon">🎸</span>
+                          <div class="stem-meta">
+                            <span class="stem-name">Guitar</span>
+                            <span class="stem-type">guitar.wav • Rhythm &amp; Lead Guitar</span>
+                          </div>
+                        </div>
+                        <div class="stem-meter-actions">
+                          <div class="stem-vu-meter" title="Live Channel Meter"><div class="stem-vu-fill" data-vu-stem="guitar"></div></div>
+                          <button type="button" class="stem-btn solo" data-stem="guitar" aria-pressed="false" title="Solo">S</button>
+                          <button type="button" class="stem-btn mute" data-stem="guitar" aria-pressed="false" title="Mute">M</button>
+                          <button type="button" class="stem-regen-btn" data-stem="guitar" title="Regenerate guitar stem">🔄 Regen</button>
                         </div>
                       </div>
-                      <div class="stem-controls">
-                        <button type="button" class="stem-btn solo" data-stem="other" title="Solo">S</button>
-                        <button type="button" class="stem-btn mute" data-stem="other" title="Mute">M</button>
-                        <input type="range" class="stem-vol" data-stem="other" min="0" max="1" step="0.05" value="0.75" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="other" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/other"></audio>
-                        <button type="button" class="stem-regen-btn" data-stem="other" title="Regenerate organ/keys">🔄 Regen</button>
+                      <div class="daw-controls-grid">
+                        <label class="daw-knob-field"><span>Gain <strong class="val-gain-db" data-val-stem="guitar">0.0 dB</strong></span><input type="range" class="stem-gain-db" data-stem="guitar" min="-24" max="6" step="0.5" value="0" aria-label="Guitar Gain dB"></label>
+                        <label class="daw-knob-field"><span>Pan <strong class="val-pan" data-val-pan="guitar">C</strong></span><input type="range" class="stem-pan" data-stem="guitar" min="-1" max="1" step="0.05" value="0" aria-label="Guitar Pan"></label>
+                        <label class="daw-knob-field"><span>Low 100Hz <strong class="val-eq-low">0.0 dB</strong></span><input type="range" class="stem-eq-low" data-stem="guitar" min="-12" max="12" step="0.5" value="0" aria-label="Guitar Low EQ"></label>
+                        <label class="daw-knob-field"><span>Mid 1kHz <strong class="val-eq-mid">0.0 dB</strong></span><input type="range" class="stem-eq-mid" data-stem="guitar" min="-12" max="12" step="0.5" value="0" aria-label="Guitar Mid EQ"></label>
+                        <label class="daw-knob-field"><span>High 10kHz <strong class="val-eq-high">0.0 dB</strong></span><input type="range" class="stem-eq-high" data-stem="guitar" min="-12" max="12" step="0.5" value="0" aria-label="Guitar High EQ"></label>
+                        <label class="daw-knob-field"><span>Reverb <strong class="val-reverb">15%</strong></span><input type="range" class="stem-reverb" data-stem="guitar" min="0" max="1" step="0.05" value="0.15" aria-label="Guitar Reverb Send"></label>
                       </div>
+                      <audio class="stem-audio-element" data-stem="guitar" crossorigin="anonymous" preload="metadata" src=""></audio>
                     </div>
 
-                    <!-- Stem 6: Inpainted Guitar Solo -->
-                    <div class="stem-strip" data-stem="inpainted_guitar">
-                      <div class="stem-info">
-                        <span class="stem-icon">🔥</span>
-                        <div class="stem-meta">
-                          <span class="stem-name">Inpainted 16-Bar Guitar Solo</span>
-                          <span class="stem-type">Virtuoso Overdrive Wah Solo</span>
+                    <!-- Channel 6: Keys & Synths -->
+                    <div class="stem-strip daw-channel-strip" data-stem="keys_synths">
+                      <div class="stem-strip-header">
+                        <div class="stem-info">
+                          <span class="stem-icon">🎹</span>
+                          <div class="stem-meta">
+                            <span class="stem-name">Keys &amp; Synths</span>
+                            <span class="stem-type">keys_synths.wav • Organ, Piano &amp; Pads</span>
+                          </div>
+                        </div>
+                        <div class="stem-meter-actions">
+                          <div class="stem-vu-meter" title="Live Channel Meter"><div class="stem-vu-fill" data-vu-stem="keys_synths"></div></div>
+                          <button type="button" class="stem-btn solo" data-stem="keys_synths" aria-pressed="false" title="Solo">S</button>
+                          <button type="button" class="stem-btn mute" data-stem="keys_synths" aria-pressed="false" title="Mute">M</button>
+                          <button type="button" class="stem-regen-btn" data-stem="keys_synths" title="Regenerate keys and synths stem">🔄 Regen</button>
                         </div>
                       </div>
-                      <div class="stem-controls">
-                        <button type="button" class="stem-btn solo" data-stem="inpainted_guitar" title="Solo">S</button>
-                        <button type="button" class="stem-btn mute" data-stem="inpainted_guitar" title="Mute">M</button>
-                        <input type="range" class="stem-vol" data-stem="inpainted_guitar" min="0" max="1" step="0.05" value="0.9" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="inpainted_guitar" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/inpainted_guitar"></audio>
-                        <button type="button" class="stem-regen-btn" data-stem="inpainted_guitar" title="Re-synthesize virtuoso solo">🔄 Regen</button>
+                      <div class="daw-controls-grid">
+                        <label class="daw-knob-field"><span>Gain <strong class="val-gain-db" data-val-stem="keys_synths">0.0 dB</strong></span><input type="range" class="stem-gain-db" data-stem="keys_synths" min="-24" max="6" step="0.5" value="0" aria-label="Keys and Synths Gain dB"></label>
+                        <label class="daw-knob-field"><span>Pan <strong class="val-pan" data-val-pan="keys_synths">C</strong></span><input type="range" class="stem-pan" data-stem="keys_synths" min="-1" max="1" step="0.05" value="0" aria-label="Keys and Synths Pan"></label>
+                        <label class="daw-knob-field"><span>Low 100Hz <strong class="val-eq-low">0.0 dB</strong></span><input type="range" class="stem-eq-low" data-stem="keys_synths" min="-12" max="12" step="0.5" value="0" aria-label="Keys and Synths Low EQ"></label>
+                        <label class="daw-knob-field"><span>Mid 1kHz <strong class="val-eq-mid">0.0 dB</strong></span><input type="range" class="stem-eq-mid" data-stem="keys_synths" min="-12" max="12" step="0.5" value="0" aria-label="Keys and Synths Mid EQ"></label>
+                        <label class="daw-knob-field"><span>High 10kHz <strong class="val-eq-high">0.0 dB</strong></span><input type="range" class="stem-eq-high" data-stem="keys_synths" min="-12" max="12" step="0.5" value="0" aria-label="Keys and Synths High EQ"></label>
+                        <label class="daw-knob-field"><span>Reverb <strong class="val-reverb">15%</strong></span><input type="range" class="stem-reverb" data-stem="keys_synths" min="0" max="1" step="0.05" value="0.15" aria-label="Keys and Synths Reverb Send"></label>
                       </div>
+                      <audio class="stem-audio-element" data-stem="keys_synths" crossorigin="anonymous" preload="metadata" src=""></audio>
                     </div>
 
-                    <!-- Stem 7: Inpainted Nyabinghi Percussion -->
-                    <div class="stem-strip" data-stem="inpainted_drums">
-                      <div class="stem-info">
-                        <span class="stem-icon">🪘</span>
-                        <div class="stem-meta">
-                          <span class="stem-name">Nyabinghi Rimshot Rolls</span>
-                          <span class="stem-type">Polyrhythmic Spliced Fills</span>
+                    <!-- Channel 7: Percussion & Fills -->
+                    <div class="stem-strip daw-channel-strip" data-stem="percussion_fills">
+                      <div class="stem-strip-header">
+                        <div class="stem-info">
+                          <span class="stem-icon">🪘</span>
+                          <div class="stem-meta">
+                            <span class="stem-name">Percussion &amp; Fills</span>
+                            <span class="stem-type">percussion_fills.wav • Hand Drums &amp; Fills</span>
+                          </div>
+                        </div>
+                        <div class="stem-meter-actions">
+                          <div class="stem-vu-meter" title="Live Channel Meter"><div class="stem-vu-fill" data-vu-stem="percussion_fills"></div></div>
+                          <button type="button" class="stem-btn solo" data-stem="percussion_fills" aria-pressed="false" title="Solo">S</button>
+                          <button type="button" class="stem-btn mute" data-stem="percussion_fills" aria-pressed="false" title="Mute">M</button>
+                          <button type="button" class="stem-regen-btn" data-stem="percussion_fills" title="Regenerate percussion fills">🔄 Regen</button>
                         </div>
                       </div>
-                      <div class="stem-controls">
-                        <button type="button" class="stem-btn solo" data-stem="inpainted_drums" title="Solo">S</button>
-                        <button type="button" class="stem-btn mute" data-stem="inpainted_drums" title="Mute">M</button>
-                        <input type="range" class="stem-vol" data-stem="inpainted_drums" min="0" max="1" step="0.05" value="0.85" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="inpainted_drums" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/inpainted_drums"></audio>
-                        <button type="button" class="stem-regen-btn" data-stem="inpainted_drums" title="Re-roll drum fills">🔄 Regen</button>
+                      <div class="daw-controls-grid">
+                        <label class="daw-knob-field"><span>Gain <strong class="val-gain-db" data-val-stem="percussion_fills">0.0 dB</strong></span><input type="range" class="stem-gain-db" data-stem="percussion_fills" min="-24" max="6" step="0.5" value="0" aria-label="Percussion Fills Gain dB"></label>
+                        <label class="daw-knob-field"><span>Pan <strong class="val-pan" data-val-pan="percussion_fills">C</strong></span><input type="range" class="stem-pan" data-stem="percussion_fills" min="-1" max="1" step="0.05" value="0" aria-label="Percussion Fills Pan"></label>
+                        <label class="daw-knob-field"><span>Low 100Hz <strong class="val-eq-low">0.0 dB</strong></span><input type="range" class="stem-eq-low" data-stem="percussion_fills" min="-12" max="12" step="0.5" value="0" aria-label="Percussion Fills Low EQ"></label>
+                        <label class="daw-knob-field"><span>Mid 1kHz <strong class="val-eq-mid">0.0 dB</strong></span><input type="range" class="stem-eq-mid" data-stem="percussion_fills" min="-12" max="12" step="0.5" value="0" aria-label="Percussion Fills Mid EQ"></label>
+                        <label class="daw-knob-field"><span>High 10kHz <strong class="val-eq-high">0.0 dB</strong></span><input type="range" class="stem-eq-high" data-stem="percussion_fills" min="-12" max="12" step="0.5" value="0" aria-label="Percussion Fills High EQ"></label>
+                        <label class="daw-knob-field"><span>Reverb <strong class="val-reverb">12%</strong></span><input type="range" class="stem-reverb" data-stem="percussion_fills" min="0" max="1" step="0.05" value="0.12" aria-label="Percussion Fills Reverb Send"></label>
                       </div>
+                      <audio class="stem-audio-element" data-stem="percussion_fills" crossorigin="anonymous" preload="metadata" src=""></audio>
                     </div>
 
-                    <!-- Stem 8: Draft Groove Reference -->
-                    <div class="stem-strip" data-stem="draft_groove">
-                      <div class="stem-info">
-                        <span class="stem-icon">⏱️</span>
-                        <div class="stem-meta">
-                          <span class="stem-name">Stage 1 Draft Groove</span>
-                          <span class="stem-type">BPM Grid Foundation</span>
+                    <!-- Channel 8: Ambience & FX -->
+                    <div class="stem-strip daw-channel-strip" data-stem="ambience_fx">
+                      <div class="stem-strip-header">
+                        <div class="stem-info">
+                          <span class="stem-icon">🌊</span>
+                          <div class="stem-meta">
+                            <span class="stem-name">Ambience &amp; FX</span>
+                            <span class="stem-type">ambience_fx.wav • Stereo Width &amp; Tape Room</span>
+                          </div>
+                        </div>
+                        <div class="stem-meter-actions">
+                          <div class="stem-vu-meter" title="Live Channel Meter"><div class="stem-vu-fill" data-vu-stem="ambience_fx"></div></div>
+                          <button type="button" class="stem-btn solo" data-stem="ambience_fx" aria-pressed="false" title="Solo">S</button>
+                          <button type="button" class="stem-btn mute" data-stem="ambience_fx" aria-pressed="false" title="Mute">M</button>
+                          <button type="button" class="stem-regen-btn" data-stem="ambience_fx" title="Regenerate ambience and FX stem">🔄 Regen</button>
                         </div>
                       </div>
-                      <div class="stem-controls">
-                        <button type="button" class="stem-btn solo" data-stem="draft_groove" title="Solo">S</button>
-                        <button type="button" class="stem-btn mute" data-stem="draft_groove" title="Mute">M</button>
-                        <input type="range" class="stem-vol" data-stem="draft_groove" min="0" max="1" step="0.05" value="0.6" title="Stem Volume">
-                        <audio class="stem-audio-element" data-stem="draft_groove" preload="metadata" src="/api/songs/roots_reggae_anthem/versions/1/audio/draft_groove"></audio>
+                      <div class="daw-controls-grid">
+                        <label class="daw-knob-field"><span>Gain <strong class="val-gain-db" data-val-stem="ambience_fx">0.0 dB</strong></span><input type="range" class="stem-gain-db" data-stem="ambience_fx" min="-24" max="6" step="0.5" value="0" aria-label="Ambience and FX Gain dB"></label>
+                        <label class="daw-knob-field"><span>Pan <strong class="val-pan" data-val-pan="ambience_fx">C</strong></span><input type="range" class="stem-pan" data-stem="ambience_fx" min="-1" max="1" step="0.05" value="0" aria-label="Ambience and FX Pan"></label>
+                        <label class="daw-knob-field"><span>Low 100Hz <strong class="val-eq-low">0.0 dB</strong></span><input type="range" class="stem-eq-low" data-stem="ambience_fx" min="-12" max="12" step="0.5" value="0" aria-label="Ambience and FX Low EQ"></label>
+                        <label class="daw-knob-field"><span>Mid 1kHz <strong class="val-eq-mid">0.0 dB</strong></span><input type="range" class="stem-eq-mid" data-stem="ambience_fx" min="-12" max="12" step="0.5" value="0" aria-label="Ambience and FX Mid EQ"></label>
+                        <label class="daw-knob-field"><span>High 10kHz <strong class="val-eq-high">0.0 dB</strong></span><input type="range" class="stem-eq-high" data-stem="ambience_fx" min="-12" max="12" step="0.5" value="0" aria-label="Ambience and FX High EQ"></label>
+                        <label class="daw-knob-field"><span>Reverb <strong class="val-reverb">25%</strong></span><input type="range" class="stem-reverb" data-stem="ambience_fx" min="0" max="1" step="0.05" value="0.25" aria-label="Ambience and FX Reverb Send"></label>
                       </div>
+                      <audio class="stem-audio-element" data-stem="ambience_fx" crossorigin="anonymous" preload="metadata" src=""></audio>
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Collapsible Drawer: Nimble 5-Gate Decision Model Audit -->
+              <div class="card-collapsible-section">
+                <button type="button" class="section-toggle-btn" id="toggle-decision-audit-btn" aria-expanded="false">
+                  <span class="toggle-icon">▸</span>
+                  <span class="toggle-title">🧠 Nimble Decision Engine Audit (Gates 1–5)</span>
+                  <span class="toggle-badge" id="decision-audit-badge">Ready (Local Tier)</span>
+                </button>
+                <div class="section-collapsible-body collapsed" id="decision-audit-drawer-body">
+                  <div class="decision-audit-toolbar">
+                    <div id="nimble-engine-status-box" class="nimble-engine-status-box" role="status" aria-live="polite">
+                      Checking local Nimble Decision Engine tiers...
+                    </div>
+                    <button type="button" class="stem-global-btn" id="btn-refresh-decision-status">🔄 Refresh Engine Health</button>
+                  </div>
+                  <div id="decision-audit-list" class="decision-audit-list">
+                    <div class="sidebar-albums-empty">Generate a track or run Gate 4 AI Mix Copilot to inspect typed per-gate decision choices, confidence scores, and rationales.</div>
                   </div>
                 </div>
               </div>
@@ -1217,14 +1212,14 @@ One love... One heart... Forever.</pre>
           </select>
 
           <!-- Multi-Line Expandable Textarea -->
-          <textarea id="chat-input-textarea" name="song_prompt" rows="1" placeholder="Paste any poem, feeling, or style prompt (or attach a photo) to create a complete song with Gemini Lyria 3.5..." spellcheck="false"></textarea>
+          <textarea id="chat-input-textarea" name="song_prompt" rows="1" placeholder="Write or paste lyrics as-is, or describe an AI-written song with vocals &amp; instruments..." spellcheck="false"></textarea>
 
-          <!-- Accessible Native Photo Upload for Gemini Lyria 3.5 Photo-to-Music -->
-          <input type="file" id="lyria-photo-input" name="lyria_photo" accept="image/*" class="visually-hidden" aria-describedby="lyria-photo-status">
-          <label for="lyria-photo-input" class="capsule-btn params-btn lyria-photo-pill" title="Attach Photo / Mood Image for Gemini Lyria 3.5 Photo-to-Music">
+          <!-- Accessible Native Photo Upload for Local Ollama Visual-to-Music Mood -->
+          <input type="file" id="photo-mood-input" name="photo_mood" accept="image/*" class="visually-hidden" aria-describedby="photo-mood-status">
+          <label for="photo-mood-input" class="capsule-btn params-btn photo-mood-pill" title="Attach Visual Mood Image (Analyzed Locally via Ollama)">
             📷
           </label>
-          <span id="lyria-photo-status" class="lyria-photo-badge hidden" aria-live="polite"></span>
+          <span id="photo-mood-status" class="photo-mood-badge hidden" aria-live="polite"></span>
 
           <!-- Live Microphone Voice Input Button -->
           <button type="button" class="capsule-btn params-btn" id="btn-capsule-mic" title="Speak into Microphone (Voice Input / Test Mic)">
@@ -1348,24 +1343,51 @@ One love... One heart... Forever.</pre>
               </select>
             </div>
 
-            <!-- Selector 9: Hugging Face / Gemini Model -->
+            <!-- Selector 9: 100% Open-Weight Music & Vocal Synthesizer -->
             <div class="slider-item">
               <div class="slider-label-row">
-                <span class="slider-name">Active Song &amp; Vocal Model</span>
-                <span class="slider-value" id="val-hf-model">Lyria 3.5 (.env)</span>
+                <label for="select-hf-model" class="slider-name">Open-Weight Synthesizer</label>
+                <span class="slider-value" id="val-hf-model">ACE-Step 1.5</span>
               </div>
               <select id="select-hf-model" name="hf_model" class="param-select">
-                <option value="models/lyria-3.5" selected>models/lyria-3.5 (Gemini Lyria 3.5 - Text, Poem &amp; Photo-to-Music via .env GEMINI_API_KEY)</option>
-                <option value="models/lyria-3-pro-preview">models/lyria-3-pro-preview (Gemini Lyria 3 Pro Preview via .env GEMINI_API_KEY)</option>
-                <option value="models/lyria-3-clip-preview">models/lyria-3-clip-preview (Gemini Lyria 3 Clip Preview via .env GEMINI_API_KEY)</option>
-                <option value="MiniMaxAI/MiniMax-Music3">MiniMaxAI/MiniMax-Music3 (8B+0.6B Hybrid-LM + Flow-VAE Full-Song, 8GB VRAM Offload)</option>
-                <option value="ASLP-lab/DiffRhythm">ASLP-lab/DiffRhythm (Apache 2.0, 44.1kHz Full-Song)</option>
-                <option value="ACE-Step/ACE-Step-v1-3.5B">ACE-Step/ACE-Step-v1-3.5B (Apache 2.0 Rhythm &amp; Groove)</option>
-                <option value="m-a-p/YuE-s1-7B-anneal-en-cot">m-a-p/YuE-s1-7B-anneal-en-cot (Apache 2.0 Vocal Transformer)</option>
-                <option value="suno/bark">suno/bark (MIT Melodic Singing &amp; Choir)</option>
-                <option value="fishaudio/fish-speech-1.5">fishaudio/fish-speech-1.5 (Apache 2.0 SOTA Singing)</option>
-                <option value="Plachtaa/Seed-VC">Plachtaa/Seed-VC (MIT Singing Voice Conversion)</option>
-                <option value="facebook/musicgen-medium">facebook/musicgen-medium (Meta/Apache 2.0)</option>
+                <option value="ACE-Step/acestep-v15-turbo" selected>ACE-Step 1.5 Turbo (MIT • 2B • All-Round Anchor)</option>
+                <option value="ACE-Step/acestep-v15-xl-turbo">ACE-Step 1.5 XL (MIT • 4B • Studio Full-Song)</option>
+                <option value="tencent/SongGeneration">LeVo 2 / SongGeneration (Custom NC • Acoustic &amp; Vocal Fidelity)</option>
+                <option value="m-a-p/YuE2-3B">YuE2 3B (CC BY-NC 4.0 • Complete Multi-Minute Vocals)</option>
+                <option value="MiniMaxAI/MiniMax-Music3">MiniMax-Music3 (Community &lt;$20M • 5-Min Full-Song)</option>
+                <option value="ASLP-lab/DiffRhythm2">DiffRhythm 2 (Apache 2.0 • Fast Diffusion)</option>
+                <option value="openmusic/Muse">Muse (MIT/Apache 2.0 • Open Lyrics Alignment &amp; LoRA)</option>
+                <option value="stabilityai/stable-audio-open-1.0">Stable Audio Open (CC / Community &lt;$1M • Instrumentals)</option>
+                <option value="facebook/musicgen-large">MusicGen Large 3.3B (CC BY-NC 4.0 • Melody Conditioned)</option>
+                <option value="google/magenta-realtime-2">Google Magenta RealTime 2 (Apache 2.0 • Live Streaming)</option>
+              </select>
+            </div>
+
+            <!-- Selector 10: Nimble Typed Decision Engine Tier -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <label for="select-decision-model" class="slider-name">Nimble Decision Gate Tier</label>
+                <span class="slider-value" id="val-decision-model">Auto Local</span>
+              </div>
+              <select id="select-decision-model" name="decision_model" class="param-select">
+                <option value="auto" selected>Auto (Local Bespoke-Nimble-9B → Qwen2.5 → System-1)</option>
+                <option value="bespokelabs/Bespoke-Nimble-9B">bespokelabs/Bespoke-Nimble-9B</option>
+                <option value="bespokelabs/Bespoke-Nimble-9B-v3">bespokelabs/Bespoke-Nimble-9B-v3</option>
+                <option value="qwen2.5">qwen2.5 (Local Ollama)</option>
+                <option value="fast_deterministic">fast_deterministic (&lt;1 ms System-1)</option>
+              </select>
+            </div>
+
+            <!-- Selector 11: Nimble Decision Execution Mode -->
+            <div class="slider-item">
+              <div class="slider-label-row">
+                <label for="select-decision-mode" class="slider-name">Decision Routing Mode</label>
+                <span class="slider-value" id="val-decision-mode">Auto (2-Tier)</span>
+              </div>
+              <select id="select-decision-mode" name="decision_mode" class="param-select">
+                <option value="auto" selected>Auto (Nimble Neural + System-1 Guard)</option>
+                <option value="nimble">Nimble Neural Priority</option>
+                <option value="fast">System-1 Instant Deterministic</option>
               </select>
             </div>
           </div>
@@ -1547,19 +1569,27 @@ One love... One heart... Forever.</pre>
                 </div>
               </div>
               <div style="margin-top: 10px;">
+                <label for="select-hf-model-settings" class="visually-hidden">Open-Weight Production Model</label>
                 <select id="select-hf-model-settings" name="hf_model_settings" class="param-select" style="width: 100%;">
-                  <option value="models/lyria-3.5" selected>models/lyria-3.5 (Gemini Lyria 3.5 - Text, Poem &amp; Photo-to-Music via .env GEMINI_API_KEY)</option>
-                  <option value="models/lyria-3-pro-preview">models/lyria-3-pro-preview (Gemini Lyria 3 Pro Preview via .env GEMINI_API_KEY)</option>
-                  <option value="models/lyria-3-clip-preview">models/lyria-3-clip-preview (Gemini Lyria 3 Clip Preview via .env GEMINI_API_KEY)</option>
-                  <option value="MiniMaxAI/MiniMax-Music3">MiniMaxAI/MiniMax-Music3 (8B+0.6B Hybrid-LM + Flow-VAE Full-Song, 8GB VRAM Offload)</option>
-                  <option value="ASLP-lab/DiffRhythm">ASLP-lab/DiffRhythm (Apache 2.0, 44.1kHz Full-Song Diffusion)</option>
-                  <option value="ACE-Step/ACE-Step-v1-3.5B">ACE-Step/ACE-Step-v1-3.5B (Apache 2.0 Rhythm &amp; Groove)</option>
-                  <option value="m-a-p/YuE-s1-7B-anneal-en-cot">m-a-p/YuE-s1-7B-anneal-en-cot (Apache 2.0 Full-Song Transformer)</option>
-                  <option value="suno/bark">suno/bark (MIT Melodic Singing &amp; Choir)</option>
-                  <option value="fishaudio/fish-speech-1.5">fishaudio/fish-speech-1.5 (Apache 2.0 SOTA Vocal Synthesis)</option>
-                  <option value="Plachtaa/Seed-VC">Plachtaa/Seed-VC (MIT Zero-Shot Singing Voice Conversion)</option>
-                  <option value="facebook/musicgen-medium">facebook/musicgen-medium (Meta/Apache 2.0)</option>
+                  <option value="ACE-Step/acestep-v15-turbo" selected>ACE-Step 1.5 Turbo (MIT • 2B • &lt;4 GB VRAM • All-Round Anchor)</option>
+                  <option value="ACE-Step/acestep-v15-xl-turbo">ACE-Step 1.5 XL (MIT • 4B • &lt;8 GB VRAM • Studio Full-Song)</option>
+                  <option value="tencent/SongGeneration">LeVo 2 / SongGeneration (Custom Non-Commercial • Highest Acoustic &amp; Vocal Fidelity)</option>
+                  <option value="m-a-p/YuE2-3B">YuE2 3B (CC BY-NC 4.0 • Complete Multi-Minute Vocal Songs)</option>
+                  <option value="MiniMaxAI/MiniMax-Music3">MiniMax-Music3 (Community &lt;$20M • 5-Min Full-Song Vocal &amp; Instrumental)</option>
+                  <option value="ASLP-lab/DiffRhythm2">DiffRhythm 2 (Apache 2.0 • Fast Non-Autoregressive Diffusion)</option>
+                  <option value="openmusic/Muse">Muse (MIT/Apache 2.0 • Open Lyrics Alignment &amp; LoRA Baseline)</option>
+                  <option value="stabilityai/stable-audio-open-1.0">Stable Audio Open (CC / Community &lt;$1M • Clean Instrumental Beds &amp; Loops)</option>
+                  <option value="facebook/musicgen-large">MusicGen Large 3.3B (CC BY-NC 4.0 • Melody-Conditioned Instrumentals)</option>
+                  <option value="google/magenta-realtime-2">Google Magenta RealTime 2 (Apache 2.0 / CC-BY • Live Instrumental Streaming)</option>
                 </select>
+                <div style="margin-top:10px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                  <label class="commercial-toggle-wrap" for="checkbox-commercial-only-settings">
+                    <input type="checkbox" id="checkbox-commercial-only-settings" name="commercial_only_settings">
+                    <span class="commercial-toggle-label">Commercial-Only Weights (Hide NC Models)</span>
+                  </label>
+                  <button type="button" class="settings-action-btn" id="btn-refresh-open-weight-catalog">🔄 Refresh Open-Weight Catalog</button>
+                </div>
+                <div id="open-weight-catalog-list" class="open-weight-catalog-list"></div>
               </div>
             </div>
 
