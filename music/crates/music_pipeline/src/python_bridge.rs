@@ -1,7 +1,7 @@
 //! Secure Python / `uv` Subprocess Bridge for Open-Weight Hugging Face Music Models,
 //! CUDA `cu124` Venv Bootstrapping, Process-Scoped `HF_HOME`, Stem Separation, and Local Nimble Inference.
 //!
-//! 100% Open-Weight & Local: Zero paid Gemini/Lyria endpoints, zero audio reference WAV args,
+//! 100% Open-Weight & Local: Zero paid cloud endpoints, zero audio sampling args,
 //! and strict zero-touch system/user PATH invariants (`HF_HOME` is injected ONLY into child processes).
 
 use std::path::{Path, PathBuf};
@@ -328,10 +328,7 @@ impl UvBridge {
         timeout_secs: u64,
     ) -> Result<PathBuf> {
         let trimmed = repo_id.trim();
-        if trimmed.is_empty()
-            || trimmed.contains("..")
-            || trimmed.to_ascii_lowercase().contains("lyria")
-        {
+        if !music_fusion::HfModelDiscoveryEngine::is_valid_open_weight_model_id(trimmed) {
             return Err(PipelineError::CompilationError(format!(
                 "Invalid or forbidden checkpoint repository '{}'",
                 repo_id

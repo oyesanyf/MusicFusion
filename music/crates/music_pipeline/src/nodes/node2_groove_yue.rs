@@ -155,7 +155,8 @@ impl GrooveAndYueSynthesisNode {
                     let _ = fs::write(&lyrics_file, &state.lyrics);
                 }
 
-                let script_path = PathBuf::from("workers/generate_song.py");
+                let script_path =
+                    music_fusion::hf_model_discovery::resolve_worker_script("workers/generate_song.py");
                 let args = crate::python_bridge::GenerateSongArgs {
                     model_id: chosen_model_id.clone(),
                     genre_txt: genre_file,

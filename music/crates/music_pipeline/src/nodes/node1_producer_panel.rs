@@ -181,11 +181,13 @@ impl OllamaProducerPanelNode {
         }
 
         // 5. Dual-mode songwriting & blueprint resolution
+        // Snapshot verbatim user input BEFORE running panel/judge so auto/offline blueprints never overwrite user lyrics.
+        let original_user_lyrics = state.lyrics.clone();
         let (yue_genre_txt, yue_lyrics_txt, judge_evaluation) = if state.is_pure_rust() {
             let eval = parse_judge_json("", &genre_preset, &state.style_prompt);
             let g_txt = eval.to_yue_genre_txt();
             let l_txt = match gate2.selected_choice.as_str() {
-                "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&state.lyrics).formatted_lyrics,
+                "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&original_user_lyrics).formatted_lyrics,
                 "InstrumentalOnly" => "[Instrumental]\n(Pure instrumental arrangement — no vocals)\n".to_string(),
                 _ => {
                     let topic = if !state.lyrics_topic.trim().is_empty() {
@@ -208,7 +210,7 @@ impl OllamaProducerPanelNode {
                 }
             };
             let resolved_lyrics = match gate2.selected_choice.as_str() {
-                "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&state.lyrics).formatted_lyrics,
+                "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&original_user_lyrics).formatted_lyrics,
                 "InstrumentalOnly" => "[Instrumental]\n(Pure instrumental arrangement — no vocals)\n".to_string(),
                 _ => {
                     let ollama = OllamaClient::from_env();
@@ -227,7 +229,7 @@ impl OllamaProducerPanelNode {
 
         // 6. Enforce clean structural tags while preserving user-provided words 100% verbatim
         let structured_lyrics = match gate2.selected_choice.as_str() {
-            "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&state.lyrics).formatted_lyrics,
+            "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&original_user_lyrics).formatted_lyrics,
             "InstrumentalOnly" => yue_lyrics_txt.clone(),
             _ => Self::enforce_structural_bracket_tags(
                 &yue_lyrics_txt,

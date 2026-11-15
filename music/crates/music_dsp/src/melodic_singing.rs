@@ -14,6 +14,9 @@
 //!    singers on Chorus hooks with warm harmonic formant reinforcement and Schroeder studio reverb.
 
 use std::f32::consts::PI;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static PSOLA_TMP_SEQ: AtomicU64 = AtomicU64::new(1);
 use crate::vocal_formant::{BiquadFilter, VocalRaspProcessor};
 use crate::wav::AudioBuffer;
 
@@ -402,8 +405,9 @@ impl MelodicSingingSynthesizer {
             .take(460)
             .collect();
 
+        let seq = PSOLA_TMP_SEQ.fetch_add(1, Ordering::Relaxed);
         let temp_wav = std::env::temp_dir().join(format!(
-            "music_psola_v5_{}_{}.wav",
+            "music_psola_v5_{}_{}_{seq}.wav",
             std::process::id(),
             target_frames
         ));

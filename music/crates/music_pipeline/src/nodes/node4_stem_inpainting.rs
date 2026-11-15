@@ -239,7 +239,9 @@ impl VirtuosoStemInpaintingNode {
                         .or_else(crate::python_bridge::UvBridge::detect_host_python);
                     let mut demucs_loaded = None;
                     if let (Some(py_bin), Some(ref src_path)) = (py, state.get_stem(STEM_YUE_INSTRUMENTALS)) {
-                        let sep_script = PathBuf::from("workers/separate_and_inpaint.py");
+                        let sep_script = music_fusion::hf_model_discovery::resolve_worker_script(
+                            "workers/separate_and_inpaint.py",
+                        );
                         if sep_script.is_file() {
                             if let Ok(stems) = uv_bridge
                                 .run_separate_and_inpaint(&py_bin, &sep_script, src_path, &stems_dir, 240)

@@ -20,9 +20,8 @@
 //! 4. Adversarial prompt injection & path traversal resilience:
 //!    - SQL injection, command injection, path traversal, null bytes, and oversized inputs.
 
-use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,6 +29,7 @@ use futures::future::join_all;
 use reqwest::StatusCode;
 use serde_json::Value;
 
+use music_cli::presets::flagship_reggae_anthem_state;
 use music_cli::rest_server::start_rest_server;
 use music_core::state::{
     MusicProductionState, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_FINAL_MASTER,
@@ -146,15 +146,18 @@ fn test_sha256_known_test_vectors() {
 // SECTION 1: Disk Song Artifacts Empirical Inspection
 // =========================================================================
 
-#[test]
-fn test_disk_song_artifacts_roots_reggae_and_one_love() {
-    let base_dir = if Path::new("storage/songs").exists() {
-        PathBuf::from("storage/songs")
-    } else if Path::new("../../storage/songs").exists() {
-        PathBuf::from("../../storage/songs")
-    } else {
-        PathBuf::from("d:/harfile/music/storage/songs")
-    };
+#[tokio::test]
+async fn test_disk_song_artifacts_roots_reggae_and_one_love() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let config = PipelineConfig::new()
+        .with_storage_dir(temp_dir.path())
+        .with_pure_rust_mode(true)
+        .with_max_duration(8.2);
+    let runner = PipelineRunner::new(config).expect("Runner init");
+    let seed_state = flagship_reggae_anthem_state(None, None, true);
+    runner.execute_song(seed_state).await.expect("execute_song failed");
+
+    let base_dir: PathBuf = temp_dir.path().join("songs");
     assert!(base_dir.exists(), "storage/songs directory must exist at {}", base_dir.display());
 
     let mut song_dirs: Vec<String> = fs::read_dir(&base_dir)

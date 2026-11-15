@@ -260,17 +260,38 @@ pub fn parse_judge_json(raw: &str, genre: &GenrePreset, _prompt: &str) -> Evalua
         })
         .collect();
 
+    let yue_lyrics_text = composed
+        .sections
+        .iter()
+        .map(|sec| {
+            if sec.lines.is_empty() {
+                sec.tag.clone()
+            } else {
+                format!("{}\n{}", sec.tag, sec.lines.join("\n"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let fallback_title = if composed.title.trim().is_empty() {
+        format!("{} Session", genre.name)
+    } else if composed
+        .title
+        .to_ascii_lowercase()
+        .contains(&genre.name.to_ascii_lowercase())
+    {
+        composed.title
+    } else {
+        format!("{} ({})", composed.title, genre.name)
+    };
+
     EvaluatedSongBlueprint {
-        title: if composed.title.is_empty() {
-            format!("{} Session", genre.name)
-        } else {
-            composed.title
-        },
+        title: fallback_title,
         genre_tags,
         bpm: genre.default_bpm as f64,
         key_signature: genre.default_key.clone(),
         time_signature: genre.default_time_signature.clone(),
-        lyrics_text: composed.formatted_lyrics,
+        lyrics_text: yue_lyrics_text,
         arrangement_map,
         judge_score: 8.5,
         critique: "Synthesized via genre-adaptive open-weight pipeline.".to_string(),

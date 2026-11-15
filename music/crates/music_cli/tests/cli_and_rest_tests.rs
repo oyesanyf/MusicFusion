@@ -99,13 +99,16 @@ async fn test_mcp_server_tools_list_and_call() {
     // 1. Test tools/list
     let tools_val = mcp_server::list_tools();
     let tools = tools_val["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 8);
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert!(names.contains(&"music_create_hit"));
     assert!(names.contains(&"music_iterate_song"));
     assert!(names.contains(&"music_regenerate_stem"));
     assert!(names.contains(&"music_master_track"));
     assert!(names.contains(&"music_assist_iteration"));
+    assert!(names.contains(&"music_write_lyrics"));
+    assert!(names.contains(&"music_mix_stems"));
+    assert!(names.contains(&"music_decide_production"));
 
     // 2. Test initialize
     let init_req = JsonRpcRequest {

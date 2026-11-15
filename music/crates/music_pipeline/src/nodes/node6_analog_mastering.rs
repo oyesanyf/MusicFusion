@@ -236,15 +236,15 @@ impl AnalogMasteringNode {
 
         let base_scale_for = |chan_id: &str| -> f32 {
             match chan_id {
-                "vocals" => 0.420,
-                "backing_harmonies" => 0.145,
-                "drums" => 0.165,
-                "bass" => 0.155,
-                "guitar" => 0.150,
-                "keys_synths" => 0.145,
-                "percussion_fills" => 0.105,
-                "ambience_fx" => 0.105,
-                _ => 0.150,
+                "vocals" => 0.234,
+                "backing_harmonies" => 0.090,
+                "drums" => 0.126,
+                "bass" => 0.117,
+                "guitar" => 0.108,
+                "keys_synths" => 0.099,
+                "percussion_fills" => 0.063,
+                "ambience_fx" => 0.063,
+                _ => 0.100,
             }
         };
 

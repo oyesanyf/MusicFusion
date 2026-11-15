@@ -237,13 +237,13 @@ impl HfModelDiscoveryEngine {
         if self.storage_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&self.storage_path) {
                 if let Ok(reg) = serde_json::from_str::<HfModelRegistry>(&content) {
-                    // Reject stale cached registries containing deprecated paid cloud endpoints
-                    let has_paid = reg
+                    // Reject stale cached registries containing invalid or proprietary endpoints
+                    let has_invalid = reg
                         .candidates_by_stage
                         .values()
                         .flatten()
-                        .any(|m| m.id.to_ascii_lowercase().contains("lyria"));
-                    if !has_paid {
+                        .any(|m| !Self::is_valid_open_weight_model_id(&m.id));
+                    if !has_invalid {
                         return reg;
                     }
                 }
@@ -296,7 +296,7 @@ impl HfModelDiscoveryEngine {
         let items: Vec<HfApiItem> = resp.json().await.unwrap_or_default();
         Ok(items
             .into_iter()
-            .filter(|i| !i.id.to_ascii_lowercase().contains("lyria"))
+            .filter(|i| Self::is_valid_open_weight_model_id(&i.id))
             .map(|i| Self::api_item_to_entry(&i, stage, tag))
             .collect())
     }
@@ -313,7 +313,7 @@ impl HfModelDiscoveryEngine {
         let items: Vec<HfApiItem> = resp.json().await.unwrap_or_default();
         Ok(items
             .into_iter()
-            .filter(|i| !i.id.to_ascii_lowercase().contains("lyria"))
+            .filter(|i| Self::is_valid_open_weight_model_id(&i.id))
             .map(|i| Self::api_item_to_entry(&i, stage, "audio-to-audio"))
             .collect())
     }
@@ -386,36 +386,84 @@ impl HfModelDiscoveryEngine {
     }
 
     /// Resolves any canonical HF repo ID or short alias (e.g. `ace-step`, `levo2`, `nimble`).
+    fn resolve_alias(lower: &str) -> Option<&'static str> {
+        match lower {
+            "ace-step" | "acestep" | "ace-step-1.5" | "acestep-v15-turbo" => Some("ACE-Step/acestep-v15-turbo"),
+            "ace-step-base" | "acestep-v15-base" => Some("ACE-Step/acestep-v15-base"),
+            "ace-step-xl" | "acestep-v15-xl-turbo" | "4b-xl" => Some("ACE-Step/acestep-v15-xl-turbo"),
+            "levo2" | "levo-2" | "songgeneration" => Some("tencent/SongGeneration"),
+            "levo2-large" | "songgeneration-v2-large" => Some("lglg666/SongGeneration-v2-large"),
+            "yue2" | "yue2-3b" => Some("m-a-p/YuE2-3B"),
+            "yue" | "yue-7b" => Some("m-a-p/YuE-s1-7B-anneal-en-cot"),
+            "minimax" | "minimax-music3" | "music3" => Some("MiniMaxAI/MiniMax-Music3"),
+            "diffrhythm" | "diffrhythm2" | "diffrhythm-2" => Some("ASLP-lab/DiffRhythm2"),
+            "muse" | "openmusic-muse" => Some("openmusic/Muse"),
+            "stable-audio" | "stable-audio-small" => Some("stabilityai/stable-audio-open-small"),
+            "stable-audio-1.0" | "stable-audio-open" => Some("stabilityai/stable-audio-open-1.0"),
+            "stable-audio-3" | "stable-audio-3.0" => Some("stabilityai/stable-audio-3-medium"),
+            "musicgen" | "musicgen-large" => Some("facebook/musicgen-large"),
+            "magenta" | "magenta-realtime-2" => Some("google/magenta-realtime-2"),
+            "nimble" | "nimble-9b" | "bespoke-nimble-9b" => Some("bespokelabs/Bespoke-Nimble-9B"),
+            "nimble-v3" | "nimble-9b-v3" => Some("bespokelabs/Bespoke-Nimble-9B-v3"),
+            "nimble-v3-gguf" | "nimble-gguf" => Some("ggml-org/Bespoke-Nimble-9B-v3-GGUF"),
+            "nimble-27b-v3" | "nimble-27b" => Some("bespokelabs/Bespoke-Nimble-27B-v3"),
+            "nimble-v4-max" | "nimble-v4" => Some("bespokelabs/Nimble-v4-max"),
+            _ => None,
+        }
+    }
+
+    /// Fail-closed check ensuring identifiers are valid open-weight HF `owner/repo`
+    /// slugs or recognized curated open-weight aliases (never `models/...` cloud endpoints).
+    pub fn is_valid_open_weight_model_id(id: &str) -> bool {
+        let trimmed = id.trim();
+        if trimmed.is_empty()
+            || trimmed.contains("..")
+            || trimmed.contains('\\')
+            || trimmed.contains(':')
+            || trimmed.starts_with('/')
+            || trimmed.ends_with('/')
+            || trimmed.chars().any(char::is_whitespace)
+        {
+            return false;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        const FORBIDDEN_PREFIXES: &[&str] = &[
+            "models/",
+            "publishers/",
+            "projects/",
+            "http://",
+            "https://",
+            "gs://",
+            "s3://",
+        ];
+        if FORBIDDEN_PREFIXES.iter().any(|p| lower.starts_with(p)) {
+            return false;
+        }
+        if let Some((owner, repo)) = trimmed.split_once('/') {
+            if repo.contains('/') || owner.is_empty() || repo.is_empty() {
+                return false;
+            }
+            let valid_seg = |seg: &str| {
+                !matches!(seg, "." | "..")
+                    && seg
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            };
+            return valid_seg(owner) && valid_seg(repo);
+        }
+        Self::resolve_alias(&lower).is_some()
+            || Self::curated_builtins()
+                .iter()
+                .any(|e| e.id.eq_ignore_ascii_case(trimmed))
+    }
+
     pub fn resolve_model_entry(query: &str) -> Option<HfModelEntry> {
         let q = query.trim().to_ascii_lowercase();
         let all = Self::curated_builtins();
         if let Some(exact) = all.iter().find(|e| e.id.to_ascii_lowercase() == q) {
             return Some(exact.clone());
         }
-        let alias = match q.as_str() {
-            "ace-step" | "acestep" | "ace-step-1.5" | "acestep-v15-turbo" => "ACE-Step/acestep-v15-turbo",
-            "ace-step-base" | "acestep-v15-base" => "ACE-Step/acestep-v15-base",
-            "ace-step-xl" | "acestep-v15-xl-turbo" | "4b-xl" => "ACE-Step/acestep-v15-xl-turbo",
-            "levo2" | "levo-2" | "songgeneration" => "tencent/SongGeneration",
-            "levo2-large" | "songgeneration-v2-large" => "lglg666/SongGeneration-v2-large",
-            "yue2" | "yue2-3b" => "m-a-p/YuE2-3B",
-            "yue" | "yue-7b" => "m-a-p/YuE-s1-7B-anneal-en-cot",
-            "minimax" | "minimax-music3" | "music3" => "MiniMaxAI/MiniMax-Music3",
-            "diffrhythm" | "diffrhythm2" | "diffrhythm-2" => "ASLP-lab/DiffRhythm2",
-            "muse" | "openmusic-muse" => "openmusic/Muse",
-            "stable-audio" | "stable-audio-small" => "stabilityai/stable-audio-open-small",
-            "stable-audio-1.0" | "stable-audio-open" => "stabilityai/stable-audio-open-1.0",
-            "stable-audio-3" | "stable-audio-3.0" => "stabilityai/stable-audio-3-medium",
-            "musicgen" | "musicgen-large" => "facebook/musicgen-large",
-            "magenta" | "magenta-realtime-2" => "google/magenta-realtime-2",
-            "nimble" | "nimble-9b" | "bespoke-nimble-9b" => "bespokelabs/Bespoke-Nimble-9B",
-            "nimble-v3" | "nimble-9b-v3" => "bespokelabs/Bespoke-Nimble-9B-v3",
-            "nimble-v3-gguf" | "nimble-gguf" => "ggml-org/Bespoke-Nimble-9B-v3-GGUF",
-            "nimble-27b-v3" | "nimble-27b" => "bespokelabs/Bespoke-Nimble-27B-v3",
-            "nimble-v4-max" | "nimble-v4" => "bespokelabs/Nimble-v4-max",
-            _ => "",
-        };
-        if !alias.is_empty() {
+        if let Some(alias) = Self::resolve_alias(&q) {
             if let Some(m) = all.iter().find(|e| e.id == alias) {
                 return Some(m.clone());
             }
@@ -1016,4 +1064,34 @@ impl HfModelDiscoveryEngine {
     fn default_registry(&self, mem: &SystemMemory) -> HfModelRegistry {
         self.build_registry_from_entries(Self::curated_builtins(), mem)
     }
+}
+
+/// Resolves a workspace worker script path reliably regardless of process working directory
+/// (repo root, parent workspace directory, or crate test directory under `cargo test`).
+pub fn resolve_worker_script(relative_worker: &str) -> std::path::PathBuf {
+    let normalized = relative_worker.trim_start_matches(['/', '\\']);
+    let direct = std::path::PathBuf::from(normalized);
+    if direct.is_file() {
+        return direct;
+    }
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.extend(cwd.ancestors().take(5).map(std::path::PathBuf::from));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.extend(parent.ancestors().take(6).map(std::path::PathBuf::from));
+        }
+    }
+    for root in roots {
+        let candidate = root.join(normalized);
+        if candidate.is_file() {
+            return candidate;
+        }
+        let sub_candidate = root.join("music").join(normalized);
+        if sub_candidate.is_file() {
+            return sub_candidate;
+        }
+    }
+    direct
 }

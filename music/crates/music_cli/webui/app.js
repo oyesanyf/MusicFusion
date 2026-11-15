@@ -2172,7 +2172,7 @@ Log-drum sub-bass rolling, singing our triumphant song!`;
       const meta = document.createElement('div');
       meta.className = 'decision-trace-meta';
       const lat = typeof t.latency_ms === 'number' ? `${t.latency_ms}ms` : '0ms';
-      meta.textContent = `Choice: ${t.selected_choice || t.choice || '—'} | Model: ${t.model_used || 'local'} | ${lat}`;
+      meta.textContent = `Choice: ${t.selected_choice || t.choice || '—'} | Model: ${t.backend_used || t.model_used || 'local'} | ${lat}`;
 
       const rat = document.createElement('div');
       rat.className = 'decision-trace-rationale';

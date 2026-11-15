@@ -5,14 +5,15 @@
 //! 2. Download endpoints (/api/songs/:id/versions/:v/download and /api/songs/:id/download)
 //! 3. Disk sample song artifacts and multi-section lyrics verification
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::header::{CONTENT_DISPOSITION, CONTENT_RANGE, CONTENT_TYPE};
 use reqwest::StatusCode;
 
+use music_cli::presets::flagship_reggae_anthem_state_with_id;
 use music_cli::rest_server::{bind_server_dynamic_on_host, start_rest_server};
+use music_core::StemMixConfig;
 use music_pipeline::runner::{PipelineConfig, PipelineRunner};
 
 // =========================================================================
@@ -67,31 +68,30 @@ async fn test_dynamic_port_fallback_to_ephemeral_when_range_fully_occupied() {
 
 #[tokio::test]
 async fn test_download_endpoints_empirical_verification() {
-    let base_dir = if Path::new("storage/songs").exists() {
-        PathBuf::from("storage/songs")
-    } else if Path::new("../../storage/songs").exists() {
-        PathBuf::from("../../storage/songs")
-    } else {
-        PathBuf::from("d:/harfile/music/storage/songs")
-    };
-    assert!(base_dir.exists(), "storage/songs directory must exist at {}", base_dir.display());
-
-    // Storage root is the parent of storage/songs (i.e. storage)
-    let storage_root = base_dir.parent().unwrap().to_path_buf();
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let storage_root = temp_dir.path().to_path_buf();
 
     let runner_config = PipelineConfig::default()
         .with_storage_dir(&storage_root)
         .with_pure_rust_mode(true)
-        .with_max_duration(0.1);
+        .with_max_duration(0.2);
     let runner = Arc::new(PipelineRunner::new(runner_config).unwrap());
+
+    // Build hermetic v1 and v2 versions of `roots_reggae_anthem` inside tempdir
+    let v1_state = flagship_reggae_anthem_state_with_id(Some("roots_reggae_anthem"), None, None, true);
+    runner.execute_song(v1_state).await.expect("execute v1 failed");
+    runner
+        .mix_and_master_song("roots_reggae_anthem", 1, StemMixConfig::default())
+        .await
+        .expect("bounce v2 failed");
 
     // Start REST server with dynamic port
     let bound_port = start_rest_server(
         runner.clone(),
-        storage_root.clone(),
+        storage_root,
         16050,
         16070,
-        "http://127.0.0.1:11434".to_string(),
+        "http://127.0.0.1:1".to_string(),
     ).await.expect("start_rest_server failed");
 
     let client = reqwest::Client::new();

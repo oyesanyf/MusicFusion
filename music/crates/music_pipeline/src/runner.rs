@@ -128,16 +128,19 @@ pub struct PipelineRunner {
     compiled: CompiledGraph,
     checkpointer: CheckpointManager,
     storage_dir: PathBuf,
+    pure_rust_mode: bool,
 }
 
 impl PipelineRunner {
     pub fn new(config: PipelineConfig) -> Result<Self> {
         let storage_dir = config.storage_dir.clone();
+        let pure_rust_mode = config.pure_rust_mode;
         let (compiled, checkpointer) = build_production_pipeline(&config)?;
         Ok(Self {
             compiled,
             checkpointer,
             storage_dir,
+            pure_rust_mode,
         })
     }
 
@@ -146,7 +149,12 @@ impl PipelineRunner {
             compiled,
             checkpointer,
             storage_dir: PathBuf::from("storage"),
+            pure_rust_mode: false,
         }
+    }
+
+    pub fn is_pure_rust_mode(&self) -> bool {
+        self.pure_rust_mode
     }
 
     pub fn compiled_graph(&self) -> &CompiledGraph {
@@ -158,16 +166,22 @@ impl PipelineRunner {
     }
 
     /// Executes the full 6-node music production pipeline from scratch.
-    pub async fn execute_song(&self, initial_state: MusicProductionState) -> Result<MusicProductionState> {
+    pub async fn execute_song(&self, mut initial_state: MusicProductionState) -> Result<MusicProductionState> {
+        if self.pure_rust_mode && !initial_state.is_hf_hybrid() {
+            initial_state.set_engine_mode("pure_rust");
+        }
         self.compiled.execute_with_checkpointer(initial_state, &self.checkpointer).await
     }
 
     /// Executes full pipeline with real-time observer events (e.g. for SSE streaming in Tokio REST).
     pub async fn execute_song_with_observer(
         &self,
-        initial_state: MusicProductionState,
+        mut initial_state: MusicProductionState,
         observer: &Arc<dyn GraphObserver>,
     ) -> Result<MusicProductionState> {
+        if self.pure_rust_mode && !initial_state.is_hf_hybrid() {
+            initial_state.set_engine_mode("pure_rust");
+        }
         self.compiled.execute_with_observer(initial_state, Some(&self.checkpointer), Some(observer)).await
     }
 

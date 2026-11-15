@@ -183,6 +183,9 @@ impl OllamaProducerPanel {
 
         let genre = GenreTaxonomy::find_or_create(genre_query);
         let is_online = self.client.probe_health().await;
+        let preserved_user_lyrics = (state.lyrics_mode == music_core::state::LyricsMode::UserProvided
+            && !state.lyrics.trim().is_empty())
+        .then(|| state.lyrics.clone());
 
         let (lyricist_out, arranger_out, engineer_out, blueprint) = if is_online {
             let specialists = self.run_specialists(prompt, Some(&genre.name)).await?;
@@ -207,6 +210,10 @@ impl OllamaProducerPanel {
                 bp,
             )
         };
+
+        if let Some(ref orig_lyrics) = preserved_user_lyrics {
+            state.lyrics = orig_lyrics.clone();
+        }
 
         let yue_genre_txt = blueprint.to_yue_genre_txt();
         let yue_lyrics_txt = blueprint.to_yue_lyrics_txt();

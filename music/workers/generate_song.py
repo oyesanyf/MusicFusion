@@ -253,9 +253,19 @@ def main() -> int:
     parser.add_argument("--check-env", action="store_true", help="Print runtime capability report and exit")
     args = parser.parse_args()
 
-    model_lower = args.model.lower()
-    if "lyria" in model_lower or "gemini" in model_lower:
-        sys.stderr.write("Paid proprietary models (Lyria/Gemini) are strictly disabled.\n")
+    model_lower = args.model.strip().lower()
+    allowed_aliases = frozenset(SUPPORTED_OPEN_WEIGHT_FAMILIES.keys()) | {"auto", "acestep", "yue"}
+    if (
+        not model_lower
+        or ".." in model_lower
+        or "\\" in model_lower
+        or model_lower.startswith(("models/", "publishers/", "projects/", "http://", "https://"))
+        or ("/" not in args.model and model_lower not in allowed_aliases)
+    ):
+        sys.stderr.write(
+            "Closed proprietary endpoints and unverified identifiers are strictly disabled; "
+            "specify an open-weight Hugging Face repository slug (e.g. ACE-Step/acestep-v15-turbo).\n"
+        )
         return 2
 
     if args.commercial_only and any(tok in model_lower for tok in NON_COMMERCIAL_TOKENS):

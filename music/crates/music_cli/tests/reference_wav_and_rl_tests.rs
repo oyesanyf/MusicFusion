@@ -1,32 +1,15 @@
-//! Integration Tests for Milestone 8:
-//! 1. 1..=20 Reference WAV upload and strict 20-file capacity cap.
-//! 2. Mathematical SSRF validation and URL conversion rejection.
-//! 3. Reference WAV audition streaming and deletion.
-//! 4. RL generation with Bridgeport and ELVIS Act legal compliance verification.
-//! 5. Interactive DPO preference learning on Keep / Revert pairs.
+//! Integration Tests for Zero-Sampling & SSRF Safeguards:
+//! 1. Mathematical SSRF IP blocking (`is_ssrf_forbidden_ip`) and URL validation (`validate_url_against_ssrf`).
+//! 2. Verification that removed audio sampling (`/api/reference-wavs*`) and proprietary cloud (`/api/gemini-env`) routes return HTTP 404.
+//! 3. Open-weight creation + online DPO Keep/Revert preference feedback without any sampling inputs.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
-use reqwest::multipart::{Form, Part};
 use serde_json::json;
 
-use music_cli::rest_server::{is_ssrf_forbidden_ip, start_rest_server};
-use music_dsp::wav::AudioBuffer;
+use music_cli::rest_server::{is_ssrf_forbidden_ip, start_rest_server, validate_url_against_ssrf};
 use music_pipeline::runner::{PipelineConfig, PipelineRunner};
-
-/// Generates a valid test PCM WAV in bytes with synthetic tone at specified frequency.
-fn make_test_wav_bytes(frequency_hz: f32, duration_secs: f32) -> Vec<u8> {
-    let mut buffer = AudioBuffer::new_stereo(duration_secs);
-    let sample_rate = buffer.sample_rate as f32;
-    for f in 0..buffer.frame_count() {
-        let t = f as f32 / sample_rate;
-        let s = (2.0 * std::f32::consts::PI * frequency_hz * t).sin() * 0.5;
-        buffer.samples[f * 2] = s;
-        buffer.samples[f * 2 + 1] = s;
-    }
-    buffer.to_wav_bytes()
-}
 
 #[test]
 fn test_pure_mathematical_ssrf_blocking_exhaustive() {
@@ -81,7 +64,7 @@ fn test_pure_mathematical_ssrf_blocking_exhaustive() {
 }
 
 #[tokio::test]
-async fn test_reference_wav_upload_listing_cap_and_audition() {
+async fn test_removed_sampling_and_legacy_cloud_routes_return_404() {
     let temp_dir = tempfile::tempdir().unwrap();
     let runner_config = PipelineConfig::default()
         .with_storage_dir(temp_dir.path())
@@ -90,11 +73,11 @@ async fn test_reference_wav_upload_listing_cap_and_audition() {
     let runner = Arc::new(PipelineRunner::new(runner_config).unwrap());
 
     let bound_port = start_rest_server(
-        runner.clone(),
+        runner,
         temp_dir.path().to_path_buf(),
         5201,
         5300,
-        "http://127.0.0.1:11434".to_string(),
+        "http://127.0.0.1:1".to_string(),
     )
     .await
     .expect("start_rest_server failed");
@@ -103,157 +86,47 @@ async fn test_reference_wav_upload_listing_cap_and_audition() {
     let base_url = format!("http://127.0.0.1:{}", bound_port);
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // 1. Initial listing: 0 files
-    let list_res = client.get(format!("{}/api/reference-wavs", base_url))
-        .send().await.expect("GET /api/reference-wavs failed");
-    assert_eq!(list_res.status(), 200);
-    let list_json: serde_json::Value = list_res.json().await.unwrap();
-    assert_eq!(list_json["count"], 0);
-    assert_eq!(list_json["max_allowed"], 20);
-
-    // 2. Upload 3 valid WAV files
-    let wav1 = make_test_wav_bytes(440.0, 1.0);
-    let wav2 = make_test_wav_bytes(554.37, 1.0);
-    let wav3 = make_test_wav_bytes(659.25, 1.0);
-
-    let form = Form::new()
-        .part("file1", Part::bytes(wav1).file_name("track_a.wav").mime_str("audio/wav").unwrap())
-        .part("file2", Part::bytes(wav2).file_name("track_b.wav").mime_str("audio/wav").unwrap())
-        .part("file3", Part::bytes(wav3).file_name("track_c.wav").mime_str("audio/wav").unwrap());
-
-    let upload_res = client.post(format!("{}/api/reference-wavs/upload", base_url))
-        .multipart(form)
-        .send().await.expect("POST /api/reference-wavs/upload failed");
-    assert_eq!(upload_res.status(), 200);
-    let upload_json: serde_json::Value = upload_res.json().await.unwrap();
-    assert_eq!(upload_json["status"], "ok");
-    assert_eq!(upload_json["uploaded_count"], 3);
-    assert_eq!(upload_json["total_count"], 3);
-
-    let uploaded = upload_json["reference_wavs"].as_array().unwrap();
-    assert_eq!(uploaded.len(), 3);
-    let first_id = uploaded[0]["id"].as_str().unwrap().to_string();
-
-    // 3. Audition the first reference WAV
-    let stream_res = client.get(format!("{}/api/reference-wavs/{}/audio", base_url, first_id))
-        .send().await.expect("GET /api/reference-wavs/:id/audio failed");
-    assert_eq!(stream_res.status(), 200);
-    assert_eq!(stream_res.headers().get("content-type").unwrap(), "audio/wav");
-    let audio_bytes = stream_res.bytes().await.unwrap();
-    assert!(!audio_bytes.is_empty());
-    let parsed_buffer = AudioBuffer::from_wav_bytes(&audio_bytes).expect("Audition WAV must be valid");
-    assert_eq!(parsed_buffer.channels, 2);
-    assert_eq!(parsed_buffer.sample_rate, 48000);
-
-    // 4. Test Rejecting Corrupt Upload
-    let corrupt_form = Form::new()
-        .part("bad_file", Part::bytes(vec![0xDE, 0xAD, 0xBE, 0xEF]).file_name("bad.wav").mime_str("audio/wav").unwrap());
-    let corrupt_res = client.post(format!("{}/api/reference-wavs/upload", base_url))
-        .multipart(corrupt_form)
-        .send().await.expect("POST corrupt file failed");
-    assert_eq!(corrupt_res.status(), 400);
-
-    // 5. Test Enforcing Strict 20-file Cap
-    // Currently at 3 files. Uploading 18 more would reach 21 (> 20), must be rejected with 400.
-    let mut overflow_form = Form::new();
-    let sample_wav = make_test_wav_bytes(440.0, 0.05);
-    for i in 0..18 {
-        overflow_form = overflow_form.part(
-            format!("file_{}", i),
-            Part::bytes(sample_wav.clone()).file_name(format!("over_{}.wav", i)).mime_str("audio/wav").unwrap(),
-        );
-    }
-    let overflow_res = client.post(format!("{}/api/reference-wavs/upload", base_url))
-        .multipart(overflow_form)
-        .send().await.expect("POST overflow files failed");
-    assert_eq!(overflow_res.status(), 400);
-    let overflow_json: serde_json::Value = overflow_res.json().await.unwrap();
-    assert!(overflow_json["error"].as_str().unwrap().contains("exceeds maximum of 20 files"));
-
-    // 6. Delete single track
-    let del_res = client.delete(format!("{}/api/reference-wavs/{}", base_url, first_id))
-        .send().await.expect("DELETE /api/reference-wavs/:id failed");
-    assert_eq!(del_res.status(), 200);
-    let del_json: serde_json::Value = del_res.json().await.unwrap();
-    assert_eq!(del_json["remaining_count"], 2);
-
-    // 7. Clear all reference WAVs
-    let clear_res = client.delete(format!("{}/api/reference-wavs", base_url))
-        .send().await.expect("DELETE /api/reference-wavs failed");
-    assert_eq!(clear_res.status(), 200);
-    let clear_json: serde_json::Value = clear_res.json().await.unwrap();
-    assert_eq!(clear_json["remaining_count"], 0);
+    assert_eq!(client.get(format!("{}/api/reference-wavs", base_url)).send().await.unwrap().status(), 404);
+    assert_eq!(client.post(format!("{}/api/reference-wavs/upload", base_url)).send().await.unwrap().status(), 404);
+    assert_eq!(client.get(format!("{}/api/reference-wavs/sample_1/audio", base_url)).send().await.unwrap().status(), 404);
+    assert_eq!(client.delete(format!("{}/api/reference-wavs/sample_1", base_url)).send().await.unwrap().status(), 404);
+    assert_eq!(client.delete(format!("{}/api/reference-wavs", base_url)).send().await.unwrap().status(), 404);
+    assert_eq!(client.post(format!("{}/api/reference-wavs/from-url", base_url)).json(&json!({ "url": "https://example.com/a.wav" })).send().await.unwrap().status(), 404);
+    assert_eq!(client.post(format!("{}/api/reference-wavs/generate-rl", base_url)).json(&json!({ "prompt": "test" })).send().await.unwrap().status(), 404);
+    assert_eq!(client.get(format!("{}/api/gemini-env", base_url)).send().await.unwrap().status(), 404);
+    assert_eq!(client.post(format!("{}/api/gemini-env", base_url)).json(&json!({ "api_key": "none" })).send().await.unwrap().status(), 404);
 }
 
 #[tokio::test]
-async fn test_url_ssrf_rejection_at_rest_endpoint() {
+async fn test_validate_url_against_ssrf_blocks_loopback_metadata_and_bad_schemes() {
+    let err_loopback = validate_url_against_ssrf("http://127.0.0.1:8080/audio.wav").await.unwrap_err();
+    assert!(err_loopback.contains("SSRF Violation"), "got: {}", err_loopback);
+
+    let err_meta = validate_url_against_ssrf("http://169.254.169.254/latest/meta-data").await.unwrap_err();
+    assert!(err_meta.contains("SSRF Violation"), "got: {}", err_meta);
+
+    let err_rfc1918 = validate_url_against_ssrf("http://10.0.1.5/sample.wav").await.unwrap_err();
+    assert!(err_rfc1918.contains("SSRF Violation"), "got: {}", err_rfc1918);
+
+    let err_ftp = validate_url_against_ssrf("ftp://example.com/audio.wav").await.unwrap_err();
+    assert!(err_ftp.contains("Forbidden scheme"), "got: {}", err_ftp);
+}
+
+#[tokio::test]
+async fn test_open_weight_creation_records_dpo_preference_without_sampling() {
     let temp_dir = tempfile::tempdir().unwrap();
     let runner_config = PipelineConfig::default()
         .with_storage_dir(temp_dir.path())
         .with_pure_rust_mode(true)
-        .with_max_duration(0.1);
+        .with_max_duration(0.2);
     let runner = Arc::new(PipelineRunner::new(runner_config).unwrap());
 
     let bound_port = start_rest_server(
-        runner.clone(),
-        temp_dir.path().to_path_buf(),
-        5301,
-        5400,
-        "http://127.0.0.1:11434".to_string(),
-    )
-    .await
-    .expect("start_rest_server failed");
-
-    let client = reqwest::Client::new();
-    let base_url = format!("http://127.0.0.1:{}", bound_port);
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Test loopback IP URL rejection
-    let loopback_res = client.post(format!("{}/api/reference-wavs/from-url", base_url))
-        .json(&json!({ "url": "http://127.0.0.1:8080/audio.wav" }))
-        .send().await.expect("POST /from-url loopback failed");
-    assert_eq!(loopback_res.status(), 400);
-    let json_loopback: serde_json::Value = loopback_res.json().await.unwrap();
-    assert!(json_loopback["error"].as_str().unwrap().contains("SSRF Violation"));
-
-    // Test cloud metadata IP rejection
-    let metadata_res = client.post(format!("{}/api/reference-wavs/from-url", base_url))
-        .json(&json!({ "url": "http://169.254.169.254/latest/meta-data" }))
-        .send().await.expect("POST /from-url metadata failed");
-    assert_eq!(metadata_res.status(), 400);
-    let json_meta: serde_json::Value = metadata_res.json().await.unwrap();
-    assert!(json_meta["error"].as_str().unwrap().contains("SSRF Violation"));
-
-    // Test private RFC1918 IP rejection
-    let rfc1918_res = client.post(format!("{}/api/reference-wavs/from-url", base_url))
-        .json(&json!({ "url": "http://10.0.1.5/sample.wav" }))
-        .send().await.expect("POST /from-url rfc1918 failed");
-    assert_eq!(rfc1918_res.status(), 400);
-
-    // Test non-http scheme rejection
-    let ftp_res = client.post(format!("{}/api/reference-wavs/from-url", base_url))
-        .json(&json!({ "url": "ftp://example.com/audio.wav" }))
-        .send().await.expect("POST /from-url ftp failed");
-    assert_eq!(ftp_res.status(), 400);
-    let json_ftp: serde_json::Value = ftp_res.json().await.unwrap();
-    assert!(json_ftp["error"].as_str().unwrap().contains("Forbidden scheme"));
-}
-
-#[tokio::test]
-async fn test_rl_generation_legal_safeguards_and_dpo_learning() {
-    let temp_dir = tempfile::tempdir().unwrap();
-    let runner_config = PipelineConfig::default()
-        .with_storage_dir(temp_dir.path())
-        .with_pure_rust_mode(true)
-        .with_max_duration(0.1);
-    let runner = Arc::new(PipelineRunner::new(runner_config).unwrap());
-
-    let bound_port = start_rest_server(
-        runner.clone(),
+        runner,
         temp_dir.path().to_path_buf(),
         5401,
         5500,
-        "http://127.0.0.1:11434".to_string(),
+        "http://127.0.0.1:1".to_string(),
     )
     .await
     .expect("start_rest_server failed");
@@ -262,58 +135,19 @@ async fn test_rl_generation_legal_safeguards_and_dpo_learning() {
     let base_url = format!("http://127.0.0.1:{}", bound_port);
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // 1. Attempt RL generation without reference WAVs -> HTTP 400 Bad Request
-    let no_refs_res = client.post(format!("{}/api/reference-wavs/generate-rl", base_url))
-        .json(&json!({ "prompt": "Blended groove" }))
-        .send().await.expect("POST /generate-rl without refs failed");
-    assert_eq!(no_refs_res.status(), 400);
-
-    // 2. Upload 3 reference WAVs with distinct chords
-    let wav1 = make_test_wav_bytes(261.63, 1.0); // C4
-    let wav2 = make_test_wav_bytes(329.63, 1.0); // E4
-    let wav3 = make_test_wav_bytes(392.00, 1.0); // G4
-
-    let form = Form::new()
-        .part("f1", Part::bytes(wav1).file_name("ref_c.wav").mime_str("audio/wav").unwrap())
-        .part("f2", Part::bytes(wav2).file_name("ref_e.wav").mime_str("audio/wav").unwrap())
-        .part("f3", Part::bytes(wav3).file_name("ref_g.wav").mime_str("audio/wav").unwrap());
-
-    let up_res = client.post(format!("{}/api/reference-wavs/upload", base_url))
-        .multipart(form)
-        .send().await.expect("POST /api/reference-wavs/upload failed");
-    assert_eq!(up_res.status(), 200);
-
-    // 3. Generate track with RL and verify Legal Safeguards
-    let gen_res = client.post(format!("{}/api/reference-wavs/generate-rl", base_url))
+    let create_res = client.post(format!("{}/api/songs/create", base_url))
         .json(&json!({
-            "prompt": "Roots reggae anthem with modern brass",
+            "prompt": "Roots reggae anthem with warm horn chords",
             "genre": "Roots Reggae",
-            "lyrics": "One love shining through the night"
+            "lyrics_mode": "user_provided",
+            "lyrics": "[Verse 1]\nOne love shining through the night\n[Chorus]\nRise up in the golden light",
+            "hf_model": "ACE-Step/acestep-v15-turbo",
+            "pure_rust": true,
+            "max_duration_secs": 0.2
         }))
-        .send().await.expect("POST /api/reference-wavs/generate-rl failed");
-    assert_eq!(gen_res.status(), 200);
-    let gen_json: serde_json::Value = gen_res.json().await.unwrap();
-    assert_eq!(gen_json["status"], "ok");
+        .send().await.expect("POST /api/songs/create failed");
+    assert_eq!(create_res.status(), 200);
 
-    // Verify Legal Compliance Object
-    let legal = &gen_json["legal_compliance"];
-    assert_eq!(legal["zero_waveform_sampling"], true, "Must verify zero waveform sampling (Bridgeport Music)");
-    assert_eq!(legal["no_master_sampling_verified"], true, "Must verify no master sampling");
-    assert_eq!(legal["synthetic_voice_only_elvis_compliant"], true, "Must verify synthetic voice only (ELVIS Act)");
-    assert_eq!(legal["synthetic_vocal_timbre_only"], true, "Must verify synthetic vocal timbre only");
-    assert_eq!(legal["legal_safeguard_verified"], true, "Affirmative legal safeguards must pass");
-    let orig_score = legal["originality_score_pct"].as_f64().unwrap();
-    assert!(orig_score >= 50.0, "Originality score must be >= 50.0% for style blend, got {}", orig_score);
-    let overlap_pct = legal["max_single_file_melody_overlap_pct"].as_f64().unwrap();
-    assert!(overlap_pct < 15.0, "Melody overlap must be < 15.0%, got {}", overlap_pct);
-
-    // Verify Composite Reward breakdown
-    let reward = &gen_json["composite_reward"];
-    assert!(reward["r_total"].as_f64().is_some());
-    assert!(reward["r_style"].as_f64().is_some());
-    assert!(reward["r_originality_guard"].as_f64().is_some());
-
-    // 4. Test DPO Preference Learning: Keep feedback (+Reward)
     let keep_res = client.post(format!("{}/api/feedback/preference", base_url))
         .json(&json!({ "preference": "keep" }))
         .send().await.expect("POST /api/feedback/preference keep failed");
@@ -322,7 +156,6 @@ async fn test_rl_generation_legal_safeguards_and_dpo_learning() {
     assert_eq!(keep_json["status"], "ok");
     assert_eq!(keep_json["preference"], "keep");
 
-    // 5. Test DPO Preference Learning: Revert feedback (-Penalty)
     let revert_res = client.post(format!("{}/api/feedback/preference", base_url))
         .json(&json!({ "preference": "revert" }))
         .send().await.expect("POST /api/feedback/preference revert failed");
@@ -331,7 +164,6 @@ async fn test_rl_generation_legal_safeguards_and_dpo_learning() {
     assert_eq!(revert_json["status"], "ok");
     assert_eq!(revert_json["preference"], "revert");
 
-    // 6. Test DPO Preference Learning: Invalid choice rejection
     let bad_pref_res = client.post(format!("{}/api/feedback/preference", base_url))
         .json(&json!({ "preference": "invalid_choice" }))
         .send().await.expect("POST /api/feedback/preference invalid failed");

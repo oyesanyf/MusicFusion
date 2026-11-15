@@ -118,6 +118,8 @@ pub struct CreateSongRequest {
     pub lyrics_topic: Option<String>,
     #[serde(default)]
     pub engine_mode: Option<String>,
+    #[serde(default)]
+    pub pure_rust: Option<bool>,
     #[serde(alias = "model", alias = "model_id", default)]
     pub hf_model: Option<String>,
     #[serde(default)]
@@ -433,7 +435,22 @@ pub async fn handle_create_song(
         .filter(|k| !k.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| genre.default_key.clone());
-    let engine_mode = req.engine_mode.as_deref().unwrap_or("auto");
+    let engine_mode = if req.pure_rust == Some(true) {
+        "pure_rust"
+    } else if let Some(explicit) = req
+        .engine_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        explicit
+    } else if req.pure_rust == Some(false) {
+        "hf_hybrid"
+    } else if state.runner.is_pure_rust_mode() {
+        "pure_rust"
+    } else {
+        "auto"
+    };
 
     let mut init_state = MusicProductionState::new(&song_id, &genre.name, bpm, &key);
     init_state.style_prompt = style_prompt;
@@ -472,6 +489,7 @@ pub async fn handle_create_song(
 
     match state.runner.execute_song(init_state).await {
         Ok(final_state) => {
+            *state.last_synthesis_action.write().await = Some(SynthesisAction::default());
             let mut user_meta = load_song_user_meta(&state.storage_dir, &final_state.song_id);
             if let Some(ref target_aid) = req.target_album_id {
                 if !target_aid.trim().is_empty() {
@@ -2150,6 +2168,7 @@ pub async fn handle_mix_song(
         .await
     {
         Ok(final_state) => {
+            *state.last_synthesis_action.write().await = Some(SynthesisAction::default());
             let audio_urls = build_audio_urls(&final_state.song_id, final_state.version);
             let stem_mix = final_state
                 .blueprint
@@ -2200,13 +2219,8 @@ pub struct RecommendMixRequest {
 }
 
 fn build_nimble_engine(state: &AppState) -> NimbleDecisionEngine {
-    let worker_script = [
-        PathBuf::from("workers/nimble_decide.py"),
-        PathBuf::from("music/workers/nimble_decide.py"),
-    ]
-    .into_iter()
-    .find(|p| p.is_file())
-    .unwrap_or_else(|| PathBuf::from("workers/nimble_decide.py"));
+    let worker_script =
+        music_fusion::hf_model_discovery::resolve_worker_script("workers/nimble_decide.py");
     NimbleDecisionEngine::new(
         OllamaClient::new(&state.ollama_host),
         default_models_cache_dir(),
@@ -2422,7 +2436,7 @@ pub async fn handle_pull_open_weight_model(
     Json(req): Json<PullOpenWeightModelRequest>,
 ) -> Response {
     let query = req.model.trim();
-    if query.is_empty() || query.contains("..") || query.to_ascii_lowercase().contains("lyria") {
+    if !HfModelDiscoveryEngine::is_valid_open_weight_model_id(query) {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({

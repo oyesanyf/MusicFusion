@@ -287,7 +287,7 @@ impl Default for NimbleDecisionEngine {
         Self::new(
             OllamaClient::from_env(),
             default_models_cache_dir(),
-            PathBuf::from("workers/nimble_decide.py"),
+            crate::hf_model_discovery::resolve_worker_script("workers/nimble_decide.py"),
             SystemMemory::detect_live(),
         )
     }
