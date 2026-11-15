@@ -12,6 +12,7 @@ use music_core::state::{
 };
 use music_dsp::telemetry_calc::calculate_telemetry;
 use music_dsp::wav::AudioBuffer;
+use music_fusion::decision_model::NimbleDecisionEngine;
 use music_fusion::ollama_client::{ChatMessage, OllamaClient};
 
 use crate::error::PipelineError;
@@ -192,8 +193,46 @@ impl DspAndJudgeGateNode {
             && telemetry.tempo_drift_score <= 0.30
             && score >= 7.5;
 
-        state.set_telemetry(telemetry);
+        state.set_telemetry(telemetry.clone());
         state.set_judge_result(score, quality_passed);
+
+        // Gate 3: Calibrated Nimble Telemetry Adjudication Trace
+        let peak_amp = 10.0f32.powf(telemetry.peak_dbfs / 20.0);
+        let rms_amp = 10.0f32.powf(telemetry.rms_dbfs / 20.0);
+        let mut zero_crossings = 0u64;
+        for w in mix_buf.samples.windows(2) {
+            if (w[0] >= 0.0 && w[1] < 0.0) || (w[0] < 0.0 && w[1] >= 0.0) {
+                zero_crossings += 1;
+            }
+        }
+        let dur = mix_buf.duration_secs().max(0.05);
+        let ch = mix_buf.channels.max(1) as f32;
+        let spectral_centroid_hz = ((zero_crossings as f32 / (2.0 * dur * ch))).clamp(180.0, 9500.0);
+        let pref_dec = state
+            .decision_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let effective_dec_mode = if state.is_pure_rust()
+            && state.decision_mode == music_core::state::DecisionMode::Auto
+        {
+            music_core::state::DecisionMode::FastDeterministic
+        } else {
+            state.decision_mode
+        };
+        let gate3 = NimbleDecisionEngine::default()
+            .gate3_adjudicate_telemetry_quality(
+                state,
+                peak_amp,
+                rms_amp,
+                telemetry.dynamic_range_db,
+                spectral_centroid_hz,
+                2,
+                effective_dec_mode,
+                pref_dec,
+            )
+            .await;
+        state.record_decision_trace(gate3.trace.clone());
 
         // If quality failed and retries not exhausted, increment retry count
         if !quality_passed && state.retry_count <= 2 {

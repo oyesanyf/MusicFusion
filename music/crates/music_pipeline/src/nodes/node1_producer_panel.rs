@@ -17,8 +17,14 @@ use async_trait::async_trait;
 use music_core::genre::GenreTaxonomy;
 use music_core::schema::{PipelineModelStack, SongBlueprint, SongSection, StemMixConfig};
 use music_core::state::MusicProductionState;
+use music_fusion::decision_model::NimbleDecisionEngine;
 use music_fusion::judge::{parse_judge_json, EvaluatedSongBlueprint};
+use music_fusion::lyricist_studio::{
+    compose_offline_structured_lyrics, format_sections, parse_lyrics_sections,
+    structure_user_lyrics_verbatim, write_lyrics_from_prompt,
+};
 use music_fusion::memory::SystemMemory;
+use music_fusion::ollama_client::OllamaClient;
 use music_fusion::panel::OllamaProducerPanel;
 
 use crate::error::PipelineError;
@@ -87,34 +93,148 @@ impl OllamaProducerPanelNode {
 
         let genre_preset = GenreTaxonomy::find_or_create(&state.genre);
 
-        // 3. Fallback sync if lyrics or prompt are completely empty
+        // 3. Fallback style prompt derived from state genre when empty (never force Reggae on other genres)
         if state.style_prompt.is_empty() {
-            state.style_prompt = format!(
-                "1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, spiritual and uplifting, {} BPM",
-                state.bpm
-            );
+            if state.genre.to_ascii_lowercase().contains("reggae") {
+                state.style_prompt = format!(
+                    "1977 roots reggae anthem, soulful raspy Jamaican male tenor vocals, spiritual and uplifting, {} BPM",
+                    state.bpm
+                );
+            } else {
+                state.style_prompt = format!(
+                    "Studio {} production, expressive dynamic performance, {} BPM in {}",
+                    state.genre, state.bpm, state.key_signature
+                );
+            }
         }
 
-        // 4. In pure-Rust mode, bypass Ollama network queries completely and use deterministic blueprint
+        // 4. Local Nimble Decision Gates 1 (Synthesis Model), 2 (Lyrics Routing), and 5 (License Compliance)
+        let nimble = NimbleDecisionEngine::default();
+        let effective_dec_mode = if state.is_pure_rust()
+            && state.decision_mode == music_core::state::DecisionMode::Auto
+        {
+            music_core::state::DecisionMode::FastDeterministic
+        } else {
+            state.decision_mode
+        };
+        let req_model: Option<String> = state
+            .selected_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("auto"))
+            .map(str::to_string);
+        let pref_dec: Option<String> = state
+            .decision_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+
+        let gate1 = nimble
+            .gate1_select_generation_model(
+                &state.style_prompt,
+                state.lyrics_mode,
+                !state.lyrics.trim().is_empty(),
+                req_model.as_deref(),
+                state.commercial_only,
+                state.lora_adapter_path.as_deref(),
+                effective_dec_mode,
+                pref_dec.as_deref(),
+            )
+            .await;
+        state.record_decision_trace(gate1.trace.clone());
+        if req_model.is_none() || !gate1.blocked_candidates.is_empty() {
+            state.selected_model = Some(gate1.selected_choice.clone());
+        }
+
+        let gate2 = nimble
+            .gate2_resolve_lyrics_and_structure(
+                &state.style_prompt,
+                &state.lyrics,
+                &state.lyrics_topic,
+                state.lyrics_mode,
+                effective_dec_mode,
+                pref_dec.as_deref(),
+            )
+            .await;
+        state.record_decision_trace(gate2.trace.clone());
+
+        let active_synth_model = state
+            .selected_model
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "ACE-Step/acestep-v15-turbo".to_string());
+        let gate5 = nimble
+            .gate5_license_and_export_gate(
+                &active_synth_model,
+                pref_dec.as_deref(),
+                state.commercial_only,
+                effective_dec_mode,
+            )
+            .await;
+        state.record_decision_trace(gate5.trace.clone());
+        if gate5.selected_choice == "BlockedLicenseConflict" {
+            return Err(PipelineError::CompilationError(format!(
+                "License compliance blocked export under commercial_only=true: {}",
+                gate5.rationale
+            )));
+        }
+
+        // 5. Dual-mode songwriting & blueprint resolution
         let (yue_genre_txt, yue_lyrics_txt, judge_evaluation) = if state.is_pure_rust() {
             let eval = parse_judge_json("", &genre_preset, &state.style_prompt);
             let g_txt = eval.to_yue_genre_txt();
-            let l_txt = eval.to_yue_lyrics_txt();
+            let l_txt = match gate2.selected_choice.as_str() {
+                "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&state.lyrics).formatted_lyrics,
+                "InstrumentalOnly" => "[Instrumental]\n(Pure instrumental arrangement — no vocals)\n".to_string(),
+                _ => {
+                    let topic = if !state.lyrics_topic.trim().is_empty() {
+                        state.lyrics_topic.as_str()
+                    } else {
+                        state.genre.as_str()
+                    };
+                    compose_offline_structured_lyrics(topic, &state.style_prompt).formatted_lyrics
+                }
+            };
             (g_txt, l_txt, eval)
         } else {
             let panel = OllamaProducerPanel::new_auto_configured(&memory).await;
-            let panel_output = panel.run_panel(state).await.map_err(|e| {
-                PipelineError::FusionError(format!("Producer panel execution failed: {}", e))
-            })?;
-            (panel_output.yue_genre_txt, panel_output.yue_lyrics_txt, panel_output.judge_evaluation)
+            let eval = match panel.run_panel(state).await {
+                Ok(out) => (out.yue_genre_txt, out.yue_lyrics_txt, out.judge_evaluation),
+                Err(_) => {
+                    let fallback_eval = parse_judge_json("", &genre_preset, &state.style_prompt);
+                    let g_txt = fallback_eval.to_yue_genre_txt();
+                    (g_txt, String::new(), fallback_eval)
+                }
+            };
+            let resolved_lyrics = match gate2.selected_choice.as_str() {
+                "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&state.lyrics).formatted_lyrics,
+                "InstrumentalOnly" => "[Instrumental]\n(Pure instrumental arrangement — no vocals)\n".to_string(),
+                _ => {
+                    let ollama = OllamaClient::from_env();
+                    let topic = if !state.lyrics_topic.trim().is_empty() {
+                        state.lyrics_topic.as_str()
+                    } else {
+                        state.style_prompt.as_str()
+                    };
+                    write_lyrics_from_prompt(&ollama, &memory, topic, &state.style_prompt, None)
+                        .await
+                        .formatted_lyrics
+                }
+            };
+            (eval.0, resolved_lyrics, eval.2)
         };
 
-        // 5. Enforce strict bracketed lyric tags
-        let structured_lyrics = Self::enforce_structural_bracket_tags(
-            &yue_lyrics_txt,
-            &state.lyrics,
-            &genre_preset.name,
-        );
+        // 6. Enforce clean structural tags while preserving user-provided words 100% verbatim
+        let structured_lyrics = match gate2.selected_choice.as_str() {
+            "UseUserLyricsVerbatim" => structure_user_lyrics_verbatim(&state.lyrics).formatted_lyrics,
+            "InstrumentalOnly" => yue_lyrics_txt.clone(),
+            _ => Self::enforce_structural_bracket_tags(
+                &yue_lyrics_txt,
+                "",
+                &genre_preset.name,
+            ),
+        };
         state.lyrics = structured_lyrics.clone();
 
         // 6. Synchronize SongBlueprint into state
@@ -180,93 +300,42 @@ impl OllamaProducerPanelNode {
         Ok(())
     }
 
-    /// Enforces structural bracket tags in lyrics: [Intro], [Verse 1], [Chorus], etc.
-    /// Strips `<think>` tags, verifies section tags, and auto-synthesizes mandatory sections if missing.
+    /// Enforces structural bracket tags cleanly while preserving user-provided lyrics 100% verbatim.
+    /// Strips `<think>` reasoning traces, preserves explicit `[Section]` tags, and falls back to
+    /// genre-matched songwriting only when input text is completely empty.
     pub fn enforce_structural_bracket_tags(
         yue_lyrics: &str,
         existing_lyrics: &str,
         genre_name: &str,
     ) -> String {
-        // Source selection: prioritize user-supplied existing_lyrics when present
-        let mut raw = if !existing_lyrics.trim().is_empty() {
-            existing_lyrics.trim().to_string()
-        } else if !yue_lyrics.trim().is_empty() {
-            yue_lyrics.trim().to_string()
-        } else {
-            String::new()
-        };
+        fn strip_think_blocks(input: &str) -> String {
+            let mut s = input.to_string();
+            while let Some(start) = s.find("<think>") {
+                if let Some(end_offset) = s[start..].find("</think>") {
+                    let end = start + end_offset;
+                    s = format!("{}{}", &s[..start], &s[end + 8..]);
+                } else {
+                    s = s[..start].to_string();
+                    break;
+                }
+            }
+            s.trim().to_string()
+        }
 
-        // 1. Strip reasoning blocks: <think>...</think>
-        while let Some(start) = raw.find("<think>") {
-            if let Some(end_offset) = raw[start..].find("</think>") {
-                let end = start + end_offset;
-                raw = format!("{}{}", &raw[..start], &raw[end + 8..]);
-            } else {
-                raw = raw[..start].to_string();
-                break;
+        let cleaned_existing = strip_think_blocks(existing_lyrics);
+        if !cleaned_existing.is_empty() {
+            return structure_user_lyrics_verbatim(&cleaned_existing).formatted_lyrics;
+        }
+
+        let cleaned_yue = strip_think_blocks(yue_lyrics);
+        if !cleaned_yue.is_empty() {
+            let sections = parse_lyrics_sections(&cleaned_yue);
+            if !sections.is_empty() {
+                return format_sections(&sections);
             }
         }
 
-        raw = raw.trim().to_string();
-
-        // 2. If raw lyrics have no bracket tags, preserve user's custom lyrics if provided, or use canonical defaults
-        if !raw.contains('[') || !raw.contains(']') {
-            if !raw.is_empty() {
-                return format!(
-                    "[Intro]\n{}\n\n[Verse 1]\n{}\n\n[Chorus]\n{}\n\n[Verse 2]\n{}\n\n[Guitar Solo]\n(Instrumental lead guitar solo)\n\n[Bridge]\n{}\n\n[Outro]\n{}",
-                    raw, raw, raw, raw, raw, raw
-                );
-            } else if genre_name.to_ascii_lowercase().contains("afrobeats") {
-                return "[Intro]\nLagos to the world, feel the groove, we move to the sunrise beat!\n\n[Verse 1]\nEarly morning sunshine rising over Lagos bay,\nFeel the energy awaken as we start the brand new day.\n\n[Chorus]\nLog-drum is vibrating, shake the body, let it go!\nAfrican connection got the whole world in a glow.\n\n[Verse 2]\nHighlife sweet guitar is plucking melodies so clean,\nFlipping through the rhythm like a cinematic scene.\n\n[Guitar Solo]\n(Highlife guitar solo interlocks with syncopated log-drum bassline)\n\n[Bridge]\nCelebrate the journey from the island to the street,\nNothing can compare to this syncopated beat.\n\n[Outro]\nRaise up your hands if you are ready for the sound,\nFeel the joy spreading all across the town!".to_string();
-            } else {
-                return "[Intro]\nYeah man, roots rock reggae from the heart of Kingston town, feel the rhythm in the morning sun.\n\n[Verse 1]\nWalking down the trenchtown avenue early morning light,\nGuiding all the children through the struggles of the night.\n\n[Chorus]\nOne love, one heart, let us get together and feel alright.\nGive thanks and praises to the highest light.\n\n[Verse 2]\nRasta man vibration spreading joy across the land,\nHealing every brother with a helping open hand.\n\n[Guitar Solo]\n(Soaring psychedelic wah-wah guitar echoes through the hills of Zion)\n\n[Bridge]\nLove is the answer, love is the righteous way,\nLighting up tomorrow from the dawn of yesterday.\n\n[Outro]\nOne love, one heart, let the music play on and on,\nJah guide and protect us till the morning dawn, yeah!".to_string();
-            }
-        }
-
-        // 3. Normalize case of standard bracket tags
-        let canonical_replacements = [
-            ("[intro]", "[Intro]"),
-            ("[verse 1]", "[Verse 1]"),
-            ("[verse 2]", "[Verse 2]"),
-            ("[verse]", "[Verse 1]"),
-            ("[chorus]", "[Chorus]"),
-            ("[instrumental interlude]", "[Instrumental Interlude]"),
-            ("[instrumental]", "[Instrumental Interlude]"),
-            ("[bridge]", "[Bridge]"),
-            ("[guitar solo]", "[Guitar Solo]"),
-            ("[solo]", "[Guitar Solo]"),
-            ("[outro]", "[Outro]"),
-        ];
-
-        let mut normalized = raw;
-        for (lower, canonical) in &canonical_replacements {
-            normalized = normalized.replace(lower, canonical);
-        }
-
-        // 4. Ensure all 7 canonical sections exist
-        if !normalized.contains("[Intro]") {
-            normalized = format!("[Intro]\n\n{}", normalized);
-        }
-        if !normalized.contains("[Verse 1]") {
-            normalized = format!("[Verse 1]\nWalking down the road in the morning light,\nGuiding all the children through the night.\n\n{}", normalized);
-        }
-        if !normalized.contains("[Chorus]") {
-            normalized = format!("{}\n\n[Chorus]\nOne love, one heart, let us get together and feel alright.", normalized);
-        }
-        if !normalized.contains("[Verse 2]") {
-            normalized = format!("{}\n\n[Verse 2]\nRasta man vibration spreading joy across the land,\nHealing every brother with an open hand.", normalized);
-        }
-        if !normalized.contains("[Guitar Solo]") {
-            normalized = format!("{}\n\n[Guitar Solo]\n(Soaring psychedelic wah-wah guitar echoes through the hills of Zion)", normalized);
-        }
-        if !normalized.contains("[Bridge]") {
-            normalized = format!("{}\n\n[Bridge]\nLove is the answer, love is the righteous way,\nLighting up tomorrow from the dawn of yesterday.", normalized);
-        }
-        if !normalized.contains("[Outro]") {
-            normalized = format!("{}\n\n[Outro]\nOne love, one heart, let the music play on and on!", normalized.trim());
-        }
-
-        normalized
+        compose_offline_structured_lyrics(genre_name, genre_name).formatted_lyrics
     }
 
     /// Converts EvaluatedSongBlueprint into full domain SongBlueprint.
@@ -274,27 +343,77 @@ impl OllamaProducerPanelNode {
         evaluated: &EvaluatedSongBlueprint,
         state: &MusicProductionState,
         genre_txt: &str,
-        _lyrics_txt: &str,
+        lyrics_txt: &str,
     ) -> SongBlueprint {
         let now = chrono::Utc::now().to_rfc3339();
-        let sections = evaluated.arrangement_map.iter().map(|sa| {
-            SongSection {
-                section_id: sa.section_id.clone(),
-                yue_clean_tag: sa.yue_clean_tag.clone(),
-                display_label: sa.display_label.clone(),
-                production_cue: sa.production_cue.clone(),
-                lyrics: sa.lyrics.clone(),
-                bars: sa.bars,
-                chords: sa.chords.clone(),
-                guitar_solo_intensity: sa.lead_instrument_intensity,
-                wah_pedal_depth: sa.lead_instrument_intensity * 0.75,
-                drum_fill_complexity: sa.drum_fill_complexity,
-                nyabinghi_polyrhythm: sa.drum_fill_complexity * 0.65,
-                gospel_choir_level: if sa.display_label.contains("Chorus") { 0.95 } else { 0.20 },
-                brass_swell_level: if sa.display_label.contains("Chorus") { 0.85 } else { 0.15 },
-                dub_sub_bass_weight: sa.bass_weight,
-            }
-        }).collect();
+        let parsed_sections = parse_lyrics_sections(lyrics_txt);
+        let sections: Vec<SongSection> = if !parsed_sections.is_empty() && !state.lyrics.trim().is_empty() {
+            parsed_sections
+                .iter()
+                .enumerate()
+                .map(|(idx, ps)| {
+                    let fallback = evaluated.arrangement_map.get(idx);
+                    SongSection {
+                        section_id: format!("sec_{}", idx + 1),
+                        yue_clean_tag: ps.tag.clone(),
+                        display_label: ps.display_label.clone(),
+                        production_cue: fallback
+                            .map(|f| f.production_cue.clone())
+                            .unwrap_or_else(|| format!("Dynamic {} section", state.genre)),
+                        lyrics: ps.lines.clone(),
+                        bars: fallback.map(|f| f.bars).unwrap_or(8),
+                        chords: fallback
+                            .map(|f| f.chords.clone())
+                            .unwrap_or_else(|| vec![state.key_signature.clone()]),
+                        guitar_solo_intensity: fallback.map(|f| f.lead_instrument_intensity).unwrap_or(0.35),
+                        wah_pedal_depth: fallback.map(|f| f.lead_instrument_intensity * 0.75).unwrap_or(0.25),
+                        drum_fill_complexity: fallback.map(|f| f.drum_fill_complexity).unwrap_or(0.45),
+                        nyabinghi_polyrhythm: 0.25,
+                        gospel_choir_level: if ps.tag.contains("chorus") { 0.85 } else { 0.20 },
+                        brass_swell_level: if ps.tag.contains("chorus") { 0.65 } else { 0.15 },
+                        dub_sub_bass_weight: fallback.map(|f| f.bass_weight).unwrap_or(0.75),
+                    }
+                })
+                .collect()
+        } else {
+            evaluated.arrangement_map.iter().map(|sa| {
+                SongSection {
+                    section_id: sa.section_id.clone(),
+                    yue_clean_tag: sa.yue_clean_tag.clone(),
+                    display_label: sa.display_label.clone(),
+                    production_cue: sa.production_cue.clone(),
+                    lyrics: sa.lyrics.clone(),
+                    bars: sa.bars,
+                    chords: sa.chords.clone(),
+                    guitar_solo_intensity: sa.lead_instrument_intensity,
+                    wah_pedal_depth: sa.lead_instrument_intensity * 0.75,
+                    drum_fill_complexity: sa.drum_fill_complexity,
+                    nyabinghi_polyrhythm: sa.drum_fill_complexity * 0.65,
+                    gospel_choir_level: if sa.display_label.contains("Chorus") { 0.95 } else { 0.20 },
+                    brass_swell_level: if sa.display_label.contains("Chorus") { 0.85 } else { 0.15 },
+                    dub_sub_bass_weight: sa.bass_weight,
+                }
+            }).collect()
+        };
+
+        let mut pipeline_models = PipelineModelStack::default();
+        if let Some(m) = state
+            .selected_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("auto"))
+        {
+            pipeline_models.stage2_yue_semantic = m.to_string();
+            pipeline_models.stage1_groove_foundation = m.to_string();
+        }
+        if let Some(d) = state
+            .decision_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            pipeline_models.decision_engine = d.to_string();
+        }
 
         SongBlueprint {
             song_id: state.song_id.clone(),
@@ -302,14 +421,14 @@ impl OllamaProducerPanelNode {
             version: state.version,
             parent_version: if state.version > 1 { Some(state.version - 1) } else { None },
             title: evaluated.title.clone(),
-            subtitle: format!("Universal AI Music Production in {}", state.genre),
+            subtitle: format!("Open-Weight Studio Production in {}", state.genre),
             style_of_music: genre_txt.trim().trim_end_matches('.').to_string(),
             bpm: if state.bpm > 0 { state.bpm as f64 } else { evaluated.bpm },
             key_signature: if !state.key_signature.is_empty() { state.key_signature.clone() } else { evaluated.key_signature.clone() },
             time_signature: if !state.time_signature.is_empty() { state.time_signature.clone() } else { evaluated.time_signature.clone() },
             sections,
             stem_mix: StemMixConfig::default(),
-            pipeline_models: PipelineModelStack::default(),
+            pipeline_models,
             iteration_notes: format!("Synthesized by Node 1 for genre {}", state.genre),
             created_at: now,
         }

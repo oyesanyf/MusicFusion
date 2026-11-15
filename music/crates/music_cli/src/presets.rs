@@ -1,6 +1,7 @@
 use anyhow::Result;
 use music_core::genre::GenreTaxonomy;
-use music_core::state::MusicProductionState;
+use music_core::state::{DecisionMode, LyricsMode, MusicProductionState};
+use music_fusion::hf_model_discovery::HfModelDiscoveryEngine;
 use crate::cli_args::CliArgs;
 
 /// Flagship 1977 Roots Reggae "One Love" Anthem state builder (default ID).
@@ -69,6 +70,43 @@ pub fn create_hit_state(args: &CliArgs) -> Result<MusicProductionState> {
     if let Some(lyrics) = &args.lyrics {
         state.lyrics = lyrics.clone();
     }
+
+    state.lyrics_mode = if args.write_lyrics {
+        LyricsMode::AiGenerated
+    } else if state.lyrics.trim().is_empty() {
+        LyricsMode::Auto
+    } else {
+        LyricsMode::UserProvided
+    };
+
+    if let Some(topic) = &args.lyrics_topic {
+        state.lyrics_topic = topic.clone();
+    }
+
+    if let Some(model) = &args.model {
+        let trimmed = model.trim();
+        if !trimmed.is_empty() {
+            let resolved = HfModelDiscoveryEngine::resolve_model_entry(trimmed)
+                .map(|e| e.id)
+                .unwrap_or_else(|| trimmed.to_string());
+            state.selected_model = Some(resolved);
+        }
+    }
+
+    state.commercial_only = args.commercial_only;
+    state.lora_adapter_path = args.lora.clone();
+
+    if let Some(dec) = &args.decision {
+        let trimmed = dec.trim();
+        if !trimmed.is_empty() {
+            let resolved = HfModelDiscoveryEngine::resolve_model_entry(trimmed)
+                .map(|e| e.id)
+                .unwrap_or_else(|| trimmed.to_string());
+            state.decision_model = Some(resolved);
+        }
+    }
+
+    state.decision_mode = DecisionMode::from_str_loose(&args.decision_mode);
 
     Ok(state)
 }

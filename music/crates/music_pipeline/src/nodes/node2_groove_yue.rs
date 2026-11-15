@@ -109,71 +109,104 @@ impl GrooveAndYueSynthesisNode {
         state.set_stem(STEM_DRAFT_GROOVE, groove_path.clone());
         log::info!("Node 2: Generated draft groove ({:.1}s) at {:?}", duration_secs, groove_path);
 
-        // 3. Stage 2: YuE multi-track vocal and accompaniment synthesis
+        // 3. Stage 2: Open-weight multi-track vocal and accompaniment synthesis (ACE-Step 1.5 / LeVo 2 / YuE2 / MiniMax3 / DiffRhythm2 / Muse / Stable Audio / MusicGen / MagentaRT2)
         let memory = SystemMemory::detect_live();
         let neural_model = memory.select_neural_model(&state.engine_mode);
+        let chosen_model_id = state
+            .selected_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("auto"))
+            .map(|m| {
+                music_fusion::hf_model_discovery::HfModelDiscoveryEngine::resolve_model_entry(m)
+                    .map(|e| e.id)
+                    .unwrap_or_else(|| m.to_string())
+            })
+            .unwrap_or_else(|| neural_model.model_id().to_string());
         log::info!(
-            "Node 2: Neural model selection -> {:?} (engine_mode: {})",
-            neural_model, state.engine_mode
+            "Node 2: Neural model selection -> '{}' (hw_choice={:?}, engine_mode={})",
+            chosen_model_id, neural_model, state.engine_mode
         );
 
         let mut synthesized_via_hf = false;
+        let allow_neural = !state.is_pure_rust()
+            && neural_model != music_fusion::memory::NeuralModelChoice::PureRustFallback;
 
-        if neural_model != music_fusion::memory::NeuralModelChoice::PureRustFallback {
+        if allow_neural {
             let uv_bridge = crate::python_bridge::UvBridge::new();
-            if uv_bridge.is_available() {
-                let venv_dir = PathBuf::from(".venv");
-                match uv_bridge.bootstrap_environment(&venv_dir) {
-                    Ok(python_bin) => {
-                        let script_path = PathBuf::from("workers/generate_song.py");
-                        let lyrics_file = stems_dir.parent().unwrap_or(&stems_dir).join("lyrics.txt");
-                        let args = crate::python_bridge::GenerateSongArgs {
-                            model: neural_model.model_id().to_string(),
-                            prompt: format!("{} track at {} BPM in {}", state.genre, state.bpm, state.key_signature),
-                            lyrics_file,
-                            bpm: state.bpm,
-                            key: state.key_signature.clone(),
-                            duration_secs,
-                            output_dir: stems_dir.clone(),
-                            device: if memory.has_usable_gpu() { "cuda".to_string() } else { "cpu".to_string() },
-                        };
-                        match uv_bridge.run_generate_song(&python_bin, &script_path, &args, self.subprocess_timeout_secs).await {
-                            Ok(output) => {
-                                state.set_stem(STEM_YUE_VOCALS, output.vocals_path);
-                                state.set_stem(STEM_YUE_INSTRUMENTALS, output.instrumentals_path);
-                                synthesized_via_hf = true;
-                                println!(
-                                    "🎛️  [SYNTHESIS ENGINE] Track rendered by Hugging Face GPU weights (Model: {}, Device: CUDA, VRAM: {:.2} GB free)",
-                                    neural_model.display_name(),
-                                    memory.gpu_vram_free_gb
-                                );
-                            }
-                            Err(e) => {
-                                println!(
-                                    "⚠️  [SYNTHESIS ENGINE FALLBACK] GPU VRAM insufficient or neural weights/dependencies unavailable: {}. Automatically falling back to pure-Rust physical modeling synthesizer.",
-                                    e
-                                );
-                            }
+            let maybe_python = uv_bridge
+                .bootstrap_environment(&PathBuf::from(".venv"))
+                .ok()
+                .or_else(crate::python_bridge::UvBridge::detect_host_python);
+
+            if let Some(python_bin) = maybe_python {
+                let version_dir = stems_dir.parent().unwrap_or(&stems_dir);
+                let genre_file = version_dir.join("genre.txt");
+                let lyrics_file = version_dir.join("lyrics.txt");
+                if !genre_file.exists() {
+                    let prompt = if !state.style_prompt.trim().is_empty() {
+                        state.style_prompt.clone()
+                    } else {
+                        format!("{} track at {} BPM in {}", state.genre, state.bpm, state.key_signature)
+                    };
+                    let _ = fs::write(&genre_file, prompt);
+                }
+                if !lyrics_file.exists() {
+                    let _ = fs::write(&lyrics_file, &state.lyrics);
+                }
+
+                let script_path = PathBuf::from("workers/generate_song.py");
+                let args = crate::python_bridge::GenerateSongArgs {
+                    model_id: chosen_model_id.clone(),
+                    genre_txt: genre_file,
+                    lyrics_txt: lyrics_file,
+                    output_dir: stems_dir.clone(),
+                    max_duration_secs: self.max_duration_secs.or(Some(duration_secs)),
+                    bpm: state.bpm,
+                    key_signature: state.key_signature.clone(),
+                    lora_adapter_path: state.lora_adapter_path.clone(),
+                    commercial_only: state.commercial_only,
+                    device: if memory.has_usable_gpu() { "cuda".to_string() } else { "cpu".to_string() },
+                };
+                match uv_bridge
+                    .run_generate_song(&python_bin, &script_path, &args, self.subprocess_timeout_secs)
+                    .await
+                {
+                    Ok(output) => {
+                        state.set_stem(STEM_YUE_VOCALS, output.vocals_path);
+                        state.set_stem(STEM_YUE_INSTRUMENTALS, output.instrumentals_path);
+                        for (stem_key, stem_path) in output.extra_stems {
+                            state.set_stem(&stem_key, stem_path);
                         }
+                        synthesized_via_hf = true;
+                        state.rendered_by_neural = true;
+                        println!(
+                            "🎛️  [SYNTHESIS ENGINE] Track rendered by Open-Weight Model '{}' ({} / VRAM: {:.2} GB free)",
+                            chosen_model_id,
+                            args.device,
+                            memory.gpu_vram_free_gb
+                        );
                     }
                     Err(e) => {
                         println!(
-                            "⚠️  [SYNTHESIS ENGINE FALLBACK] GPU VRAM insufficient or neural weights/dependencies unavailable: {}. Automatically falling back to pure-Rust physical modeling synthesizer.",
+                            "⚠️  [SYNTHESIS ENGINE FALLBACK] Open-weight weights/dependencies unavailable ({}); falling back to pure-Rust physical modeling synthesizer.",
                             e
                         );
                     }
                 }
             } else {
                 println!(
-                    "⚠️  [SYNTHESIS ENGINE FALLBACK] GPU VRAM insufficient or neural weights/dependencies unavailable: uv executable not found. Automatically falling back to pure-Rust physical modeling synthesizer."
+                    "⚠️  [SYNTHESIS ENGINE FALLBACK] Python/uv runtime unavailable; falling back to pure-Rust physical modeling synthesizer."
                 );
             }
         }
 
         // 4. Pure-Rust DSP fallback multi-stem harmonic renderer
         if !synthesized_via_hf {
+            state.rendered_by_neural = false;
             println!(
-                "🎹  [SYNTHESIS ENGINE] Track rendered by pure-Rust physical modeling synthesizer (Karplus-Strong string algorithm, Reggae one-drop drums & dub bass)"
+                "🎹  [SYNTHESIS ENGINE] Track rendered by pure-Rust physical modeling synthesizer (genre: {}, {} BPM in {})",
+                state.genre, state.bpm, state.key_signature
             );
             let (vocals_path, inst_path) = self.render_pure_rust_dual_stems(state, &stems_dir, &groove_buf)?;
             state.set_stem(STEM_YUE_VOCALS, vocals_path);

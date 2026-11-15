@@ -29,6 +29,46 @@ pub struct CliArgs {
     #[arg(long, short = 'l')]
     pub lyrics: Option<String>,
 
+    /// Have the local AI lyricist write original structured lyrics instead of supplying your own
+    #[arg(long)]
+    pub write_lyrics: bool,
+
+    /// Topic, theme, or narrative seed for AI lyric writing (`--write-lyrics`)
+    #[arg(long)]
+    pub lyrics_topic: Option<String>,
+
+    /// Open-weight synthesis model ID or alias (default: 'ACE-Step/acestep-v15-turbo')
+    #[arg(long)]
+    pub model: Option<String>,
+
+    /// Enforce commercially permissive open-weight models only (blocks CC-BY-NC / NonCommercial)
+    #[arg(long)]
+    pub commercial_only: bool,
+
+    /// Optional local LoRA adapter directory/weights for ACE-Step 1.5 / Muse
+    #[arg(long)]
+    pub lora: Option<PathBuf>,
+
+    /// Download/cache an open-weight synthesis Hugging Face repo snapshot into HF_HOME
+    #[arg(long)]
+    pub pull_model: Option<String>,
+
+    /// Preferred Bespoke-Nimble decision model checkpoint or Ollama tag
+    #[arg(long)]
+    pub decision: Option<String>,
+
+    /// Decision model engine mode: 'auto', 'nimble', 'ollama_single_pass', 'fast'
+    #[arg(long, default_value = "auto")]
+    pub decision_mode: String,
+
+    /// Download/cache a Bespoke-Nimble decision checkpoint snapshot into HF_HOME
+    #[arg(long)]
+    pub pull_decision_model: Option<String>,
+
+    /// Auto-confirm low-confidence HITL decision prompts in non-interactive CLI runs
+    #[arg(long, short = 'y')]
+    pub yes: bool,
+
     /// Target tempo in Beats Per Minute (40-220)
     #[arg(long)]
     pub bpm: Option<u32>,

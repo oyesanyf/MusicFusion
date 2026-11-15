@@ -22,10 +22,11 @@ use music_pipeline::nodes::node6_analog_mastering::AnalogMasteringNode;
 async fn test_node1_enforce_structural_bracket_tags_auto_insert() {
     let raw = "Walking through the valley of hope\nLove is the answer to every question";
     let formatted = OllamaProducerPanelNode::enforce_structural_bracket_tags("", raw, "Roots Reggae");
-    assert!(formatted.contains("[Intro]"));
     assert!(formatted.contains("[Verse 1]"));
-    assert!(formatted.contains("[Chorus]"));
-    assert!(formatted.contains("[Outro]"));
+    assert!(formatted.contains("Walking through the valley of hope"));
+    assert!(formatted.contains("Love is the answer to every question"));
+    // Verbatim preservation law: user lines must NEVER be repeated 6x across fake sections
+    assert_eq!(formatted.matches("Walking through the valley of hope").count(), 1);
 }
 
 #[tokio::test]

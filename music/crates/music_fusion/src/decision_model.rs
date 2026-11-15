@@ -635,12 +635,15 @@ impl NimbleDecisionEngine {
                 }
             }
         } else {
-            // Blend slight structural feature prior with model logprobs when some options had no top-k mass
+            // Respect hard NEG_INFINITY constraints from feature_logits (e.g., commercial license bans)
             for (i, c) in combined.iter_mut().enumerate() {
-                if *c <= -5.9 {
-                    *c = -4.5 + 0.1 * base_prior.get(i).copied().unwrap_or(0.0);
+                let prior = base_prior.get(i).copied().unwrap_or(0.0);
+                if prior.is_infinite() && prior.is_sign_negative() {
+                    *c = f64::NEG_INFINITY;
+                } else if *c <= -5.9 {
+                    *c = -4.5 + 0.35 * prior;
                 } else {
-                    *c += 0.15 * base_prior.get(i).copied().unwrap_or(0.0);
+                    *c += 0.35 * prior;
                 }
             }
         }
@@ -1137,13 +1140,17 @@ impl NimbleDecisionEngine {
                     dec_entry.id
                 ));
             }
-            vec![-3.5, -2.5, 4.2]
+            vec![f64::NEG_INFINITY, f64::NEG_INFINITY, 4.2]
         } else if both_comm {
-            vec![3.8, -1.2, -3.5]
+            vec![3.8, -1.2, f64::NEG_INFINITY]
         } else {
-            vec![-2.5, 3.6, -2.5]
+            vec![f64::NEG_INFINITY, 3.6, f64::NEG_INFINITY]
         };
 
+        let synth_lic_str = synth_entry
+            .as_ref()
+            .map(|e| e.license_tier.as_str().to_string())
+            .unwrap_or_else(|| "MIT".to_string());
         let mut req = DecisionRequest::new(
             "gate5_license_export",
             DecisionSchema::Categorical { options },
@@ -1153,6 +1160,16 @@ impl NimbleDecisionEngine {
         req.mode = mode;
         req.preferred_model = Some(dec_entry.id.clone());
         req.feature_logits = Some(logits);
+        req.context = serde_json::json!({
+            "commercial_only_requested": commercial_only,
+            "synthesis_model": selected_model_id,
+            "synthesis_license": synth_lic_str,
+            "synthesis_commercial_allowed": synth_comm,
+            "decision_model": dec_entry.id,
+            "decision_license": dec_entry.license_tier.as_str(),
+            "decision_commercial_allowed": dec_comm,
+            "both_commercial_allowed": both_comm,
+        });
 
         let mut res = self.decide(&req).await;
         if !blocked_candidates.is_empty() {

@@ -42,6 +42,35 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // 1c. Pull open-weight Hugging Face synthesis or Nimble decision checkpoint into HF_HOME
+    if let Some(repo) = args.pull_model.as_ref().or(args.pull_decision_model.as_ref()) {
+        let entry = music_fusion::hf_model_discovery::HfModelDiscoveryEngine::resolve_model_entry(repo);
+        let resolved_id = entry
+            .as_ref()
+            .map(|e| e.id.clone())
+            .unwrap_or_else(|| repo.trim().to_string());
+        if args.commercial_only {
+            if let Some(ref e) = entry {
+                if !e.commercial_allowed {
+                    anyhow::bail!(
+                        "Checkpoint '{}' ({}) is non-commercial and blocked by --commercial-only.",
+                        e.id,
+                        e.license_tier.as_str()
+                    );
+                }
+            }
+        }
+        println!("📥 Downloading open-weight HF snapshot '{}' into HF_HOME...", resolved_id);
+        let bridge = music_pipeline::python_bridge::UvBridge::new();
+        let snap_dir = bridge
+            .pull_hf_checkpoint(&std::path::PathBuf::from(".venv"), &resolved_id, 1800)
+            .await?;
+        println!("✅ Cached '{}' at {}", resolved_id, snap_dir.display());
+        if !args.create_hit && !args.create_reggae_anthem && !args.serve {
+            return Ok(());
+        }
+    }
+
     // 2. Flagship Roots Reggae Anthem CLI command
     if args.create_reggae_anthem {
         println!("🇯🇲 Generating 1977 Roots Reggae 'One Love' Anthem...");
@@ -69,7 +98,23 @@ async fn main() -> anyhow::Result<()> {
         println!("🎵 Generating Universal Multi-Genre Hit...");
         let state = presets::create_hit_state(&args)?;
         let result = runner.execute_song(state).await?;
-        println!("✨ Completed Hit generation: genre={}, song_id={}, version={}", result.genre, result.song_id, result.version);
+        println!(
+            "✨ Completed Hit generation: genre={}, song_id={}, version={}, model={:?}",
+            result.genre, result.song_id, result.version, result.selected_model
+        );
+        if !result.decision_traces.is_empty() {
+            println!("🧠 Decision Audit ({} gates recorded):", result.decision_traces.len());
+            for tr in &result.decision_traces {
+                println!(
+                    "   • [{}] -> {} ({:.1}% conf, {}, hitl={})",
+                    tr.gate_name,
+                    tr.selected_choice,
+                    tr.confidence * 100.0,
+                    tr.backend_used,
+                    tr.hitl_gate_triggered
+                );
+            }
+        }
         if let Some(master) = result.stem_paths.get("final_master") {
             println!("🔊 Final Master: {}", master.display());
         }

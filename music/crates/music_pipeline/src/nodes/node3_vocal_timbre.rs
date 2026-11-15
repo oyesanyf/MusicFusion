@@ -16,13 +16,12 @@
 //!    - Rap Cadence (Hip-Hop/Trap, F1=550, F2=1450, F3=2550 Hz, rasp=0.40)
 //! 5. Pitch-Lock Vocoder:
 //!    - Invokes `PitchLockVocoder::align_and_pitch_lock` to snap fundamental pitch to key signature
-//!      and preserve vocal phrasing alignment within <= 5 ms (<= 240 samples at 48 kHz).
-//! 6. Optional Audio Conditioning:
-//!    - Imprints `vocal_ref_wav` audio conditioning when provided.
-//! 7. Headroom & Zero Digital Clipping:
+//!      and preserve vocal phrasing alignment within <= 5 ms (<= 240 samples at 48 kHz) in pure-Rust mode.
+//!    - When `state.rendered_by_neural == true`, preserves studio neural vocals untouched with safe headroom normalization.
+//! 6. Headroom & Zero Digital Clipping:
 //!    - Enforces soft ceiling clamp [-0.98, 0.98].
-//! 8. Saves `raspy_tenor_vocals.wav` to `./storage/songs/<song_id>/v<version>/stems/raspy_tenor_vocals.wav`.
-//! 9. Registers stem in `state.stem_paths` (`STEM_RASPY_TENOR_VOCALS`) and updates history.
+//! 7. Saves `raspy_tenor_vocals.wav` to `./storage/songs/<song_id>/v<version>/stems/raspy_tenor_vocals.wav`.
+//! 8. Registers stem in `state.stem_paths` (`STEM_RASPY_TENOR_VOCALS`) and updates history.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -111,7 +110,24 @@ impl VocalTimbreFusionNode {
             fallback_path
         };
 
-        // 2. Hardware sizing decision for Stage 3 Voice Conversion
+        // 2. If neural model already synthesized vocals cleanly, preserve them untouched
+        if state.rendered_by_neural && state.get_stem(STEM_YUE_VOCALS).is_some() {
+            let mut neural_buf = AudioBuffer::from_wav_file(&source_vocal_path).map_err(|e| {
+                PipelineError::DspError(format!("Failed to load neural vocal stem {:?}: {}", source_vocal_path, e))
+            })?;
+            neural_buf.clamp(-0.96, 0.96);
+            neural_buf.to_wav_file_with_format(&output_vocal_path, WavBitDepth::Pcm16).map_err(|e| {
+                PipelineError::DspError(format!("Failed to write preserved neural vocal stem: {}", e))
+            })?;
+            state.set_stem(STEM_RASPY_TENOR_VOCALS, output_vocal_path.clone());
+            state.history.push(format!(
+                "Node 3 (Vocal Timbre Fusion) completed: preserved high-fidelity neural vocals -> '{}'",
+                STEM_RASPY_TENOR_VOCALS
+            ));
+            return Ok(());
+        }
+
+        // 3. Hardware sizing decision for Stage 3 Voice Conversion (DSP path only; zero WAV sampling)
         let memory = SystemMemory::detect_live();
         let route = memory.route_stage(PipelineStageKind::Stage3VoiceConversion, &state.engine_mode);
         log::info!(
@@ -121,23 +137,25 @@ impl VocalTimbreFusionNode {
 
         let mut synthesized_via_hf = false;
 
-        // 3. Attempt external Seed-VC subprocess execution if GPU/HF mode
-        if route == ExecutionRoute::HuggingFaceGpu || route == ExecutionRoute::HuggingFaceCpu {
+        // 4. Optional external timbre subprocess (only when explicitly configured, without reference WAV sampling)
+        if (route == ExecutionRoute::HuggingFaceGpu || route == ExecutionRoute::HuggingFaceCpu)
+            && std::env::var_os("SEED_VC_SCRIPT").is_some()
+        {
             match self.execute_seed_vc_subprocess(state, &source_vocal_path, &output_vocal_path).await {
                 Ok(_) => {
                     synthesized_via_hf = true;
-                    log::info!("Node 3: Successfully generated vocal timbre via Seed-VC subprocess");
+                    log::info!("Node 3: Successfully generated vocal timbre via subprocess");
                 }
                 Err(e) => {
                     log::warn!(
-                        "Node 3: Seed-VC subprocess skipped/failed ({}); falling back to pure-Rust DSP vocal modeling",
+                        "Node 3: Vocal subprocess skipped/failed ({}); falling back to pure-Rust DSP vocal modeling",
                         e
                     );
                 }
             }
         }
 
-        // 4. Pure-Rust DSP Vocal Formant, Rasp & Pitch-Lock Processor
+        // 5. Pure-Rust DSP Vocal Formant, Rasp & Pitch-Lock Processor
         if !synthesized_via_hf {
             self.render_pure_rust_vocal_timbre(state, &source_vocal_path, &output_vocal_path)?;
             log::info!("Node 3: Successfully generated vocal timbre via pure-Rust DSP engine");
@@ -153,10 +171,10 @@ impl VocalTimbreFusionNode {
         Ok(())
     }
 
-    /// External Seed-VC subprocess execution with deterministic VRAM reclamation.
+    /// External vocal timbre subprocess execution (zero reference WAV sampling args).
     async fn execute_seed_vc_subprocess(
         &self,
-        state: &MusicProductionState,
+        _state: &MusicProductionState,
         source_vocal_path: &Path,
         output_vocal_path: &Path,
     ) -> Result<(), PipelineError> {
@@ -172,13 +190,7 @@ impl VocalTimbreFusionNode {
             .arg("--output").arg(output_vocal_path)
             .arg("--f0_condition").arg("true");
 
-        if let Some(ref ref_wav) = state.vocal_ref_wav {
-            if ref_wav.exists() {
-                cmd.arg("--ref").arg(ref_wav);
-            }
-        }
-
-        log::info!("Node 3: Spawning Seed-VC subprocess: {:?}", cmd);
+        log::info!("Node 3: Spawning vocal timbre subprocess: {:?}", cmd);
 
         let child = cmd.spawn().map_err(|e| PipelineError::SubprocessError {
             stage: "Stage3VoiceConversion".to_string(),
@@ -296,26 +308,7 @@ impl VocalTimbreFusionNode {
             }
         }
 
-        // 6. Optional vocal_ref_wav audio conditioning
-        if let Some(ref ref_path) = state.vocal_ref_wav {
-            if ref_path.exists() {
-                if let Ok(ref_buf) = AudioBuffer::from_wav_file(ref_path) {
-                    log::info!("Node 3: Applying audio conditioning from reference WAV: {:?}", ref_path);
-                    // Blend 10% subtle harmonic spectral reference coloring
-                    let mix_frames = final_buf.frame_count().min(ref_buf.frame_count());
-                    for f in 0..mix_frames {
-                        for c in 0..final_buf.channels as usize {
-                            let idx_f = f * final_buf.channels as usize + c;
-                            let idx_r = f * ref_buf.channels as usize + (c % ref_buf.channels as usize);
-                            let blended = final_buf.samples[idx_f] * 0.90 + ref_buf.samples[idx_r] * 0.10;
-                            final_buf.samples[idx_f] = blended.clamp(-0.98, 0.98);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 7. Verify zero clipping and enforce safe broadcast headroom [-0.98, 0.98]
+        // 6. Verify zero clipping and enforce safe broadcast headroom [-0.98, 0.98]
         final_buf.clamp(-0.98, 0.98);
 
         // 8. Write to disk

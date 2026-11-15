@@ -10,8 +10,10 @@ use async_trait::async_trait;
 use log::info;
 
 use music_core::state::{
-    MusicProductionState, STEM_BASS, STEM_DRAFT_GROOVE, STEM_DRUMS, STEM_GUITAR, STEM_INPAINTED_DRUMS,
-    STEM_INPAINTED_GUITAR, STEM_OTHER, STEM_YUE_INSTRUMENTALS,
+    MusicProductionState, STEM_AMBIENCE_FX, STEM_BACKING_HARMONIES, STEM_BASS, STEM_DRAFT_GROOVE,
+    STEM_DRUMS, STEM_GUITAR, STEM_INPAINTED_DRUMS, STEM_INPAINTED_GUITAR, STEM_KEYS_SYNTHS,
+    STEM_OTHER, STEM_PERCUSSION_FILLS, STEM_RASPY_TENOR_VOCALS, STEM_YUE_INSTRUMENTALS,
+    STEM_YUE_VOCALS,
 };
 use music_dsp::crossfader::splice_stem;
 use music_dsp::guitar_wah::synthesize_lead_solo;
@@ -210,108 +212,214 @@ impl VirtuosoStemInpaintingNode {
             AudioBuffer::new_stereo(30.0)
         };
 
-        // 2. Hardware routing check
+        // 2. Neural vs Pure-Rust 4-stem separation (preserving neural stems intact)
         let memory = SystemMemory::detect_live();
         let use_dsp = memory.should_use_dsp(PipelineStageKind::Stage4Inpainting, &state.engine_mode);
 
-        let (mut drums_buf, mut bass_buf, mut guitar_buf, mut other_buf) = if !use_dsp && state.is_hf_hybrid() {
-            // HF Demucs subprocess path (with fallback to pure-Rust DSP)
-            info!("Attempting external Demucs subprocess separation...");
-            self.separate_stems_pure_rust(&base_inst)
-        } else {
-            self.separate_stems_pure_rust(&base_inst)
+        let load_existing_stem = |key: &str| -> Option<AudioBuffer> {
+            state
+                .get_stem(key)
+                .and_then(|p| AudioBuffer::from_wav_file(p).ok())
         };
+
+        let (mut drums_buf, mut bass_buf, mut guitar_buf, mut other_buf) =
+            if state.rendered_by_neural {
+                if let (Some(d), Some(b), Some(g), Some(o)) = (
+                    load_existing_stem(STEM_DRUMS),
+                    load_existing_stem(STEM_BASS),
+                    load_existing_stem(STEM_GUITAR),
+                    load_existing_stem(STEM_OTHER),
+                ) {
+                    (d, b, g, o)
+                } else if !use_dsp && !state.is_pure_rust() {
+                    let uv_bridge = crate::python_bridge::UvBridge::new();
+                    let py = uv_bridge
+                        .bootstrap_environment(&PathBuf::from(".venv"))
+                        .ok()
+                        .or_else(crate::python_bridge::UvBridge::detect_host_python);
+                    let mut demucs_loaded = None;
+                    if let (Some(py_bin), Some(ref src_path)) = (py, state.get_stem(STEM_YUE_INSTRUMENTALS)) {
+                        let sep_script = PathBuf::from("workers/separate_and_inpaint.py");
+                        if sep_script.is_file() {
+                            if let Ok(stems) = uv_bridge
+                                .run_separate_and_inpaint(&py_bin, &sep_script, src_path, &stems_dir, 240)
+                                .await
+                            {
+                                let find_stem = |k: &str| {
+                                    stems
+                                        .iter()
+                                        .find(|(name, _)| name == k)
+                                        .and_then(|(_, p)| AudioBuffer::from_wav_file(p).ok())
+                                };
+                                if let (Some(d), Some(b), Some(g), Some(o)) = (
+                                    find_stem("drums"),
+                                    find_stem("bass"),
+                                    find_stem("guitar"),
+                                    find_stem("other"),
+                                ) {
+                                    demucs_loaded = Some((d, b, g, o));
+                                }
+                            }
+                        }
+                    }
+                    demucs_loaded.unwrap_or_else(|| self.separate_stems_pure_rust(&base_inst))
+                } else {
+                    self.separate_stems_pure_rust(&base_inst)
+                }
+            } else {
+                self.separate_stems_pure_rust(&base_inst)
+            };
 
         let dur_secs = base_inst.duration_secs();
         let sr = base_inst.sample_rate;
         let root_hz = crate::nodes::node2_groove_yue::GrooveAndYueSynthesisNode::parse_key_signature_root_hz(&state.key_signature);
+        let genre_low = state.genre.to_ascii_lowercase();
+        let prompt_low = state.style_prompt.to_ascii_lowercase();
+        let is_reggae_style = genre_low.contains("reggae")
+            || genre_low.contains("dub")
+            || genre_low.contains("roots")
+            || genre_low.contains("ska")
+            || genre_low.contains("rocksteady");
 
-        // Reinforce discrete physical-model stems (DubSubBass, Skank Guitar, Hammond Organ + Brass)
-        // so every stem has full studio presence from 0:00 to the end of the track
-        let discrete_bass = music_dsp::groove_synth::DubSubBass::new(sr).synthesize(dur_secs, state.bpm);
-        let discrete_guitar = music_dsp::guitar_wah::synthesize_reggae_skank_track(dur_secs, sr, state.bpm);
-        let discrete_organ = music_dsp::groove_synth::HammondOrganBubble::new(sr).synthesize(dur_secs, state.bpm, root_hz);
+        let (inpainted_guitar, inpainted_drums) = if state.rendered_by_neural {
+            // Preserve high-fidelity neural stems without injecting Reggae DSP synths/wah solos
+            (guitar_buf.clone(), drums_buf.clone())
+        } else {
+            if is_reggae_style {
+                let discrete_bass = music_dsp::groove_synth::DubSubBass::new(sr).synthesize(dur_secs, state.bpm);
+                let discrete_guitar = music_dsp::guitar_wah::synthesize_reggae_skank_track(dur_secs, sr, state.bpm);
+                let discrete_organ = music_dsp::groove_synth::HammondOrganBubble::new(sr).synthesize(dur_secs, state.bpm, root_hz);
 
-        for i in 0..bass_buf.samples.len().min(discrete_bass.samples.len()) {
-            bass_buf.samples[i] = (bass_buf.samples[i] * 0.30 + discrete_bass.samples[i] * 0.80).clamp(-0.95, 0.95);
-        }
-        for i in 0..guitar_buf.samples.len().min(discrete_guitar.samples.len()) {
-            guitar_buf.samples[i] = (guitar_buf.samples[i] * 0.30 + discrete_guitar.samples[i] * 0.80).clamp(-0.95, 0.95);
-        }
-        for i in 0..other_buf.samples.len().min(discrete_organ.samples.len()) {
-            other_buf.samples[i] = (other_buf.samples[i] * 0.30 + discrete_organ.samples[i] * 0.80).clamp(-0.95, 0.95);
-        }
+                for i in 0..bass_buf.samples.len().min(discrete_bass.samples.len()) {
+                    bass_buf.samples[i] = (bass_buf.samples[i] * 0.30 + discrete_bass.samples[i] * 0.80).clamp(-0.95, 0.95);
+                }
+                for i in 0..guitar_buf.samples.len().min(discrete_guitar.samples.len()) {
+                    guitar_buf.samples[i] = (guitar_buf.samples[i] * 0.30 + discrete_guitar.samples[i] * 0.80).clamp(-0.95, 0.95);
+                }
+                for i in 0..other_buf.samples.len().min(discrete_organ.samples.len()) {
+                    other_buf.samples[i] = (other_buf.samples[i] * 0.30 + discrete_organ.samples[i] * 0.80).clamp(-0.95, 0.95);
+                }
+            }
 
-        // Blend active groove buffer draft_groove (e.g. 0.85 * draft_groove)
-        // to preserve authentic percussion transients (Amapiano log drum, clave, shakers, one-drop kick)
-        if let Some(groove_path) = state.get_stem(STEM_DRAFT_GROOVE)
-            .or_else(|| state.get_stem("draft_groove"))
-            .cloned()
-        {
-            if let Ok(groove_buf) = AudioBuffer::from_wav_file(&groove_path) {
-                let g_frames = groove_buf.frame_count();
-                let g_chans = groove_buf.channels as usize;
-                let d_frames = drums_buf.frame_count();
-                let d_chans = drums_buf.channels as usize;
-                let blend_frames = d_frames.min(g_frames);
-                for f in 0..blend_frames {
-                    for c in 0..d_chans {
-                        let gc = c.min(g_chans - 1);
-                        let s_d = drums_buf.samples[f * d_chans + c];
-                        let s_g = groove_buf.samples[f * g_chans + gc];
-                        drums_buf.samples[f * d_chans + c] = (s_d * 0.35 + s_g * 0.85).clamp(-1.0, 1.0);
+            if let Some(groove_path) = state.get_stem(STEM_DRAFT_GROOVE)
+                .or_else(|| state.get_stem("draft_groove"))
+                .cloned()
+            {
+                if let Ok(groove_buf) = AudioBuffer::from_wav_file(&groove_path) {
+                    let g_frames = groove_buf.frame_count();
+                    let g_chans = groove_buf.channels as usize;
+                    let d_frames = drums_buf.frame_count();
+                    let d_chans = drums_buf.channels as usize;
+                    let blend_frames = d_frames.min(g_frames);
+                    for f in 0..blend_frames {
+                        for c in 0..d_chans {
+                            let gc = c.min(g_chans - 1);
+                            let s_d = drums_buf.samples[f * d_chans + c];
+                            let s_g = groove_buf.samples[f * g_chans + gc];
+                            drums_buf.samples[f * d_chans + c] = (s_d * 0.35 + s_g * 0.85).clamp(-1.0, 1.0);
+                        }
                     }
                 }
             }
-        }
 
-        let total_bars = ((base_inst.duration_secs() * state.bpm as f32) / (4.0 * 60.0)).floor() as u32;
-        let mut start_bar = self.resolve_solo_start_bar(state);
-        if total_bars > 1 && start_bar >= total_bars {
-            start_bar = total_bars / 2;
-        }
-        let solo_bars = if total_bars > start_bar {
-            (total_bars - start_bar).clamp(2, 16)
-        } else {
-            4
+            let total_bars = ((base_inst.duration_secs() * state.bpm as f32) / (4.0 * 60.0)).floor() as u32;
+            let mut start_bar = self.resolve_solo_start_bar(state);
+            if total_bars > 1 && start_bar >= total_bars {
+                start_bar = total_bars / 2;
+            }
+            let solo_bars = if total_bars > start_bar {
+                (total_bars - start_bar).clamp(2, 16)
+            } else {
+                4
+            };
+
+            let wants_guitar_solo = is_reggae_style
+                || prompt_low.contains("guitar solo")
+                || prompt_low.contains("rock")
+                || prompt_low.contains("blues");
+
+            let inpainted_g = if wants_guitar_solo {
+                let mut solo_lead = synthesize_lead_solo(solo_bars, state.bpm, &state.key_signature);
+                let samples_per_bar = ((60.0 / state.bpm.max(40) as f32) * 4.0 * sr as f32).round() as usize;
+                let solo_start_frame = (start_bar as usize) * samples_per_bar;
+                let g_chans = guitar_buf.channels as usize;
+                for f in 0..solo_lead.frame_count() {
+                    let base_f = solo_start_frame + f;
+                    if base_f < guitar_buf.frame_count() {
+                        for c in 0..solo_lead.channels as usize {
+                            let gc = c.min(g_chans - 1);
+                            let rhythm_val = guitar_buf.samples[base_f * g_chans + gc];
+                            let lead_val = solo_lead.samples[f * solo_lead.channels as usize + c];
+                            solo_lead.samples[f * solo_lead.channels as usize + c] =
+                                (lead_val * 0.78 + rhythm_val * 0.65).clamp(-0.95, 0.95);
+                        }
+                    }
+                }
+                splice_stem(&guitar_buf, &solo_lead, start_bar, state.bpm, 4)
+            } else {
+                guitar_buf.clone()
+            };
+
+            let solo_duration = (solo_bars as f32 * 4.0 * 60.0) / state.bpm.max(40) as f32;
+            let drum_fills = UniversalDrumSynthesizer::generate_groove(&state.genre, state.bpm, solo_duration);
+            let inpainted_d = splice_stem(&drums_buf, &drum_fills, start_bar, state.bpm, 4);
+            (inpainted_g, inpainted_d)
         };
 
-        // 3. Synthesize soaring wah guitar solo layered over the rhythm guitar skank
-        info!("Synthesizing {}-bar virtuoso guitar solo in {} at {} BPM", solo_bars, state.key_signature, state.bpm);
-        let mut solo_lead = synthesize_lead_solo(solo_bars, state.bpm, &state.key_signature);
-        let samples_per_bar = ((60.0 / state.bpm.max(40) as f32) * 4.0 * sr as f32).round() as usize;
-        let solo_start_frame = (start_bar as usize) * samples_per_bar;
-        let g_chans = guitar_buf.channels as usize;
-        for f in 0..solo_lead.frame_count() {
-            let base_f = solo_start_frame + f;
-            if base_f < guitar_buf.frame_count() {
-                for c in 0..solo_lead.channels as usize {
-                    let gc = c.min(g_chans - 1);
-                    let rhythm_val = guitar_buf.samples[base_f * g_chans + gc];
-                    let lead_val = solo_lead.samples[f * solo_lead.channels as usize + c];
-                    solo_lead.samples[f * solo_lead.channels as usize + c] = (lead_val * 0.78 + rhythm_val * 0.65).clamp(-0.95, 0.95);
-                }
+        // Derive complementary 8-channel DAW stems for full WebAudio console control
+        let keys_synths_buf = other_buf.clone();
+        let mut percussion_fills_buf = AudioBuffer::new(sr, inpainted_drums.channels, dur_secs);
+        let mut perc_hp = StemFilter::highpass(3200.0, 0.707, inpainted_drums.channels as usize, sr as f32);
+        let d_ch = inpainted_drums.channels.max(1) as usize;
+        for f in 0..inpainted_drums.frame_count().min(percussion_fills_buf.frame_count()) {
+            for c in 0..d_ch {
+                let x = inpainted_drums.samples[f * d_ch + c];
+                percussion_fills_buf.samples[f * d_ch + c] = (perc_hp.process_sample(c, x) * 0.65).clamp(-0.95, 0.95);
             }
         }
 
-        // 4. Synthesize Nyabinghi polyrhythmic drum fills
-        info!("Synthesizing Nyabinghi drum fills at {} BPM", state.bpm);
-        let solo_duration = (solo_bars as f32 * 4.0 * 60.0) / state.bpm as f32;
-        let drum_fills = UniversalDrumSynthesizer::generate_groove(&state.genre, state.bpm, solo_duration);
+        let mut ambience_fx_buf = AudioBuffer::new(sr, other_buf.channels, dur_secs);
+        let o_ch = other_buf.channels.max(1) as usize;
+        for f in 0..other_buf.frame_count().min(ambience_fx_buf.frame_count()) {
+            if o_ch >= 2 {
+                let l = other_buf.samples[f * o_ch];
+                let r = other_buf.samples[f * o_ch + 1];
+                let side = (l - r) * 0.65;
+                ambience_fx_buf.samples[f * o_ch] = side.clamp(-0.95, 0.95);
+                ambience_fx_buf.samples[f * o_ch + 1] = (-side).clamp(-0.95, 0.95);
+            } else {
+                ambience_fx_buf.samples[f] = (other_buf.samples[f] * 0.30).clamp(-0.95, 0.95);
+            }
+        }
 
-        // 5. Sample-accurate crossfade splicing
-        info!("Splicing guitar solo and drum fills starting at bar {}", start_bar);
+        let vocal_ref = state
+            .get_stem(STEM_RASPY_TENOR_VOCALS)
+            .or_else(|| state.get_stem(STEM_YUE_VOCALS))
+            .and_then(|p| AudioBuffer::from_wav_file(p).ok());
+        let mut backing_harmonies_buf = AudioBuffer::new(sr, 2, dur_secs);
+        if let Some(vbuf) = vocal_ref {
+            let v_ch = vbuf.channels.max(1) as usize;
+            let delay_frames = ((0.018 * sr as f32) as usize).max(1);
+            for f in 0..vbuf.frame_count().min(backing_harmonies_buf.frame_count()) {
+                let df = f.saturating_sub(delay_frames);
+                let vl = vbuf.samples[f * v_ch];
+                let vr = vbuf.samples[df * v_ch + (1 % v_ch)];
+                backing_harmonies_buf.samples[f * 2] = (vr * 0.30).clamp(-0.95, 0.95);
+                backing_harmonies_buf.samples[f * 2 + 1] = (-vl * 0.25 + vr * 0.15).clamp(-0.95, 0.95);
+            }
+        }
 
-        let inpainted_guitar = splice_stem(&guitar_buf, &solo_lead, start_bar, state.bpm, 4);
-        let inpainted_drums = splice_stem(&drums_buf, &drum_fills, start_bar, state.bpm, 4);
-
-        // 6. Write stems to disk and update state
+        // Write all stems to disk and register in state
         let p_drums = stems_dir.join("drums.wav");
         let p_bass = stems_dir.join("bass.wav");
         let p_guitar = stems_dir.join("guitar.wav");
         let p_other = stems_dir.join("other.wav");
         let p_in_guitar = stems_dir.join("inpainted_guitar.wav");
         let p_in_drums = stems_dir.join("inpainted_drums.wav");
+        let p_backing = stems_dir.join("backing_harmonies.wav");
+        let p_keys = stems_dir.join("keys_synths.wav");
+        let p_perc = stems_dir.join("percussion_fills.wav");
+        let p_ambience = stems_dir.join("ambience_fx.wav");
 
         drums_buf.to_wav_file_with_format(&p_drums, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
@@ -325,6 +433,14 @@ impl VirtuosoStemInpaintingNode {
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
         inpainted_drums.to_wav_file_with_format(&p_in_drums, WavBitDepth::Pcm16)
             .map_err(|e| PipelineError::DspError(e.to_string()))?;
+        backing_harmonies_buf.to_wav_file_with_format(&p_backing, WavBitDepth::Pcm16)
+            .map_err(|e| PipelineError::DspError(e.to_string()))?;
+        keys_synths_buf.to_wav_file_with_format(&p_keys, WavBitDepth::Pcm16)
+            .map_err(|e| PipelineError::DspError(e.to_string()))?;
+        percussion_fills_buf.to_wav_file_with_format(&p_perc, WavBitDepth::Pcm16)
+            .map_err(|e| PipelineError::DspError(e.to_string()))?;
+        ambience_fx_buf.to_wav_file_with_format(&p_ambience, WavBitDepth::Pcm16)
+            .map_err(|e| PipelineError::DspError(e.to_string()))?;
 
         state.set_stem(STEM_DRUMS, p_drums);
         state.set_stem(STEM_BASS, p_bass);
@@ -332,6 +448,10 @@ impl VirtuosoStemInpaintingNode {
         state.set_stem(STEM_OTHER, p_other);
         state.set_stem(STEM_INPAINTED_GUITAR, p_in_guitar);
         state.set_stem(STEM_INPAINTED_DRUMS, p_in_drums);
+        state.set_stem(STEM_BACKING_HARMONIES, p_backing);
+        state.set_stem(STEM_KEYS_SYNTHS, p_keys);
+        state.set_stem(STEM_PERCUSSION_FILLS, p_perc);
+        state.set_stem(STEM_AMBIENCE_FX, p_ambience);
 
         state.record_node_transition("virtuoso_stem_inpainting_node");
         info!("VirtuosoStemInpaintingNode completed successfully.");

@@ -127,14 +127,17 @@ pub fn build_production_pipeline(config: &PipelineConfig) -> Result<(CompiledGra
 pub struct PipelineRunner {
     compiled: CompiledGraph,
     checkpointer: CheckpointManager,
+    storage_dir: PathBuf,
 }
 
 impl PipelineRunner {
     pub fn new(config: PipelineConfig) -> Result<Self> {
+        let storage_dir = config.storage_dir.clone();
         let (compiled, checkpointer) = build_production_pipeline(&config)?;
         Ok(Self {
             compiled,
             checkpointer,
+            storage_dir,
         })
     }
 
@@ -142,6 +145,7 @@ impl PipelineRunner {
         Self {
             compiled,
             checkpointer,
+            storage_dir: PathBuf::from("storage"),
         }
     }
 
@@ -199,6 +203,87 @@ impl PipelineRunner {
             state,
             Some(&self.checkpointer),
         ).await
+    }
+
+    /// Non-destructive DAW bounce (`v{N} -> v{N+1}`): applies updated 8-channel `StemMixConfig`
+    /// across existing stems on disk and runs Node 6 mastering WITHOUT re-synthesizing Stage 2.
+    pub async fn mix_and_master_song(
+        &self,
+        song_id: &str,
+        version: u32,
+        mut stem_mix: music_core::schema::StemMixConfig,
+    ) -> Result<MusicProductionState> {
+        stem_mix.sync_legacy_from_channels();
+        let prev = self.checkpointer.load_checkpoint(song_id, version).await?;
+        let mut next_state = prev.clone();
+        next_state.advance_version();
+
+        let new_stems_dir = self
+            .storage_dir
+            .join("songs")
+            .join(song_id)
+            .join(format!("v{}", next_state.version))
+            .join("stems");
+        let existing_stems: Vec<(String, PathBuf)> = prev
+            .stem_paths
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        let mapped_stems = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<(String, PathBuf)>> {
+            std::fs::create_dir_all(&new_stems_dir)?;
+            let mut out = Vec::with_capacity(existing_stems.len());
+            for (k, src) in existing_stems {
+                if !src.is_file() {
+                    continue;
+                }
+                let fname = src
+                    .file_name()
+                    .map(|n| n.to_os_string())
+                    .unwrap_or_else(|| std::ffi::OsString::from(format!("{}.wav", k)));
+                let dst = new_stems_dir.join(fname);
+                if dst != src {
+                    if std::fs::hard_link(&src, &dst).is_err() {
+                        std::fs::copy(&src, &dst)?;
+                    }
+                }
+                out.push((k, dst));
+            }
+            Ok(out)
+        })
+        .await
+        .map_err(|e| crate::error::PipelineError::DspError(format!("Stem bounce setup task panicked: {}", e)))?
+        .map_err(crate::error::PipelineError::IoError)?;
+
+        next_state.stem_paths.clear();
+        for (k, p) in mapped_stems {
+            next_state.set_stem(&k, p);
+        }
+
+        let mut blueprint = prev.blueprint.clone().unwrap_or_else(|| {
+            music_core::schema::SongBlueprint::default_one_love_shining_anthem()
+        });
+        blueprint.version = next_state.version;
+        blueprint.parent_version = Some(version);
+        blueprint.stem_mix = stem_mix;
+        blueprint.iteration_notes = format!(
+            "Non-destructive 48 kHz DAW mixer bounce from v{} -> v{}",
+            version, next_state.version
+        );
+        next_state.blueprint = Some(blueprint);
+        next_state.history.push(format!(
+            "DAW mixer bounce v{} -> v{} (Node 6 mastering without Stage 2 re-synthesis)",
+            version, next_state.version
+        ));
+
+        self.compiled
+            .execute_from_node(
+                "analog_mastering_node",
+                Some("analog_mastering_node"),
+                next_state,
+                Some(&self.checkpointer),
+            )
+            .await
     }
 
     /// Song iteration: creates a new version branch with updated parameters and executed pipeline.
