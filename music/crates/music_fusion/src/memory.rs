@@ -286,13 +286,21 @@ impl SystemMemory {
         let budget_vram = self.gpu_budget_gb();
         if budget_vram >= 10.0 || self.gpu_vram_free_gb >= 12.0 {
             NeuralModelChoice::YueS1_7B
-        } else if budget_vram >= 5.0 || self.gpu_vram_free_gb >= 6.0 {
+        } else if budget_vram >= 3.2 || self.gpu_vram_free_gb >= 3.8 {
+            // ACE-Step 1.5 Turbo 2B runs comfortably under 4 GB VRAM (6 GB GTX 1060 & 8 GB RTX 4000)
             NeuralModelChoice::AceStepV1_5
-        } else if budget_vram >= 3.0 || self.gpu_vram_free_gb >= 3.5 {
+        } else if budget_vram >= 2.5 || self.gpu_vram_free_gb >= 2.8 {
             NeuralModelChoice::MusicGenMedium
         } else {
             NeuralModelChoice::PureRustFallback
         }
+    }
+
+    /// Returns true when local GPU VRAM is <= 12 GB and system RAM >= 12 GB, so heavy Nimble 9B/27B
+    /// decision weights should execute via CPU/RAM GGUF or immediately unload (`keep_alive: "0"`)
+    /// rather than competing with Stage 2 diffusion weights in VRAM.
+    pub fn should_offload_nimble_to_cpu(&self) -> bool {
+        (self.gpu_vram_total_gb <= 12.0 || self.gpu_vram_free_gb <= 8.0) && self.free_ram_gb >= 12.0
     }
 
     /// Print hardware telemetry to stderr.
@@ -325,18 +333,18 @@ pub enum NeuralModelChoice {
 impl NeuralModelChoice {
     pub fn model_id(&self) -> &'static str {
         match self {
-            Self::YueS1_7B => "m-a-p/YuE-s1-7B-anneal-en-cot",
-            Self::AceStepV1_5 => "ACE-Studio/ACE-Step-v1.5",
-            Self::MusicGenMedium => "facebook/musicgen-medium",
+            Self::YueS1_7B => "m-a-p/YuE2-3B",
+            Self::AceStepV1_5 => "ACE-Step/acestep-v15-turbo",
+            Self::MusicGenMedium => "facebook/musicgen-large",
             Self::PureRustFallback => "InternalPureRust/PhysicalModeler",
         }
     }
 
     pub fn display_name(&self) -> &'static str {
         match self {
-            Self::YueS1_7B => "YuE-s1-7B",
-            Self::AceStepV1_5 => "ACE-Step-v1.5",
-            Self::MusicGenMedium => "musicgen-medium",
+            Self::YueS1_7B => "YuE2-3B",
+            Self::AceStepV1_5 => "ACE-Step 1.5 Turbo 2B",
+            Self::MusicGenMedium => "MusicGen Large 3.3B",
             Self::PureRustFallback => "Pure-Rust Physical Modeler",
         }
     }
